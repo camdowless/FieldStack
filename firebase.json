@@ -1,0 +1,25 @@
+{
+  "functions": {
+    "source": "functions",
+    "predeploy": ["cd functions && ./node_modules/.bin/tsc"]
+  },
+  "hosting": {
+    "public": "frontend/dist",
+    "predeploy": ["cd frontend && ./node_modules/.bin/tsc -b && ./node_modules/.bin/vite build"],
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      {
+        "source": "/searchPlaces",
+        "function": "searchPlaces"
+      },
+      {
+        "source": "/analyzeLeads",
+        "function": "analyzeLeads"
+      },
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}

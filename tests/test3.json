@@ -1,0 +1,912 @@
+{
+    "results": [
+        {
+            "name": "Diamond Hand Custom Handyman",
+            "address": "2528 Guilford Ave, Indianapolis, IN 46205",
+            "phone": "+1317-373-6062",
+            "website": null,
+            "rating": 3.9,
+            "reviewCount": 9,
+            "category": "Handyman/Handywoman/Handyperson",
+            "score": 100,
+            "label": "no website",
+            "scoring": {
+                "total": 100,
+                "reasons": [
+                    "No website found (+100)"
+                ],
+                "lighthousePerformance": null,
+                "lighthouseSeo": null,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": null,
+                "wordCount": null,
+                "hasMetaDescription": null,
+                "hasFavicon": null,
+                "fetchFailed": null,
+                "statusCode": null
+            }
+        },
+        {
+            "name": "Gocho Contractor Landscaping",
+            "address": null,
+            "phone": "+1317-344-8077",
+            "website": null,
+            "rating": 3,
+            "reviewCount": 2,
+            "category": "Landscaper",
+            "score": 100,
+            "label": "no website",
+            "scoring": {
+                "total": 100,
+                "reasons": [
+                    "No website found (+100)"
+                ],
+                "lighthousePerformance": null,
+                "lighthouseSeo": null,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": null,
+                "wordCount": null,
+                "hasMetaDescription": null,
+                "hasFavicon": null,
+                "fetchFailed": null,
+                "statusCode": null
+            }
+        },
+        {
+            "name": "Nowskie's Hauling, Landscaping, Painting & More; LLC",
+            "address": "2740 Columbia Ave, Indianapolis, IN 46205",
+            "phone": "+1317-946-0794",
+            "website": null,
+            "rating": null,
+            "reviewCount": null,
+            "category": "Contractor",
+            "score": 100,
+            "label": "no website",
+            "scoring": {
+                "total": 100,
+                "reasons": [
+                    "No website found (+100)"
+                ],
+                "lighthousePerformance": null,
+                "lighthouseSeo": null,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": null,
+                "wordCount": null,
+                "hasMetaDescription": null,
+                "hasFavicon": null,
+                "fetchFailed": null,
+                "statusCode": null
+            }
+        },
+        {
+            "name": "Indy Area Snow Removal and Landscaping",
+            "address": null,
+            "phone": "+1317-828-3916",
+            "website": null,
+            "rating": 5,
+            "reviewCount": 1,
+            "category": "Landscaper",
+            "score": 100,
+            "label": "no website",
+            "scoring": {
+                "total": 100,
+                "reasons": [
+                    "No website found (+100)"
+                ],
+                "lighthousePerformance": null,
+                "lighthouseSeo": null,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": null,
+                "wordCount": null,
+                "hasMetaDescription": null,
+                "hasFavicon": null,
+                "fetchFailed": null,
+                "statusCode": null
+            }
+        },
+        {
+            "name": "Walt's Affordable Tree Care",
+            "address": null,
+            "phone": "+1317-752-0608",
+            "website": null,
+            "rating": 5,
+            "reviewCount": 1,
+            "category": "Tree service",
+            "score": 100,
+            "label": "no website",
+            "scoring": {
+                "total": 100,
+                "reasons": [
+                    "No website found (+100)"
+                ],
+                "lighthousePerformance": null,
+                "lighthouseSeo": null,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": null,
+                "wordCount": null,
+                "hasMetaDescription": null,
+                "hasFavicon": null,
+                "fetchFailed": null,
+                "statusCode": null
+            }
+        },
+        {
+            "name": "Peniel Landscaping LLC",
+            "address": null,
+            "phone": "+1317-599-6027",
+            "website": null,
+            "rating": 5,
+            "reviewCount": 1,
+            "category": "Landscaper",
+            "score": 100,
+            "label": "no website",
+            "scoring": {
+                "total": 100,
+                "reasons": [
+                    "No website found (+100)"
+                ],
+                "lighthousePerformance": null,
+                "lighthouseSeo": null,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": null,
+                "wordCount": null,
+                "hasMetaDescription": null,
+                "hasFavicon": null,
+                "fetchFailed": null,
+                "statusCode": null
+            }
+        },
+        {
+            "name": "Floyd Landscaping & Contracting",
+            "address": null,
+            "phone": "+1765-993-7900",
+            "website": null,
+            "rating": 5,
+            "reviewCount": 10,
+            "category": "Landscaper",
+            "score": 100,
+            "label": "no website",
+            "scoring": {
+                "total": 100,
+                "reasons": [
+                    "No website found (+100)"
+                ],
+                "lighthousePerformance": null,
+                "lighthouseSeo": null,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": null,
+                "wordCount": null,
+                "hasMetaDescription": null,
+                "hasFavicon": null,
+                "fetchFailed": null,
+                "statusCode": null
+            }
+        },
+        {
+            "name": "Hall Services",
+            "address": "2510 Southeastern Ave, Indianapolis, IN 46201",
+            "phone": "+1317-341-0916",
+            "website": null,
+            "rating": 1,
+            "reviewCount": 1,
+            "category": "Handyman/Handywoman/Handyperson",
+            "score": 100,
+            "label": "no website",
+            "scoring": {
+                "total": 100,
+                "reasons": [
+                    "No website found (+100)"
+                ],
+                "lighthousePerformance": null,
+                "lighthouseSeo": null,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": null,
+                "wordCount": null,
+                "hasMetaDescription": null,
+                "hasFavicon": null,
+                "fetchFailed": null,
+                "statusCode": null
+            }
+        },
+        {
+            "name": "BUSINESSMEN LLC",
+            "address": null,
+            "phone": "+1317-956-2935",
+            "website": null,
+            "rating": 4.4,
+            "reviewCount": 7,
+            "category": "Landscaper",
+            "score": 100,
+            "label": "no website",
+            "scoring": {
+                "total": 100,
+                "reasons": [
+                    "No website found (+100)"
+                ],
+                "lighthousePerformance": null,
+                "lighthouseSeo": null,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": null,
+                "wordCount": null,
+                "hasMetaDescription": null,
+                "hasFavicon": null,
+                "fetchFailed": null,
+                "statusCode": null
+            }
+        },
+        {
+            "name": "Ollie's lawn and snow care",
+            "address": "515 S West St, Indianapolis, IN 46225",
+            "phone": "+1317-617-3186",
+            "website": null,
+            "rating": 5,
+            "reviewCount": 3,
+            "category": "Landscaper",
+            "score": 100,
+            "label": "no website",
+            "scoring": {
+                "total": 100,
+                "reasons": [
+                    "No website found (+100)"
+                ],
+                "lighthousePerformance": null,
+                "lighthouseSeo": null,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": null,
+                "wordCount": null,
+                "hasMetaDescription": null,
+                "hasFavicon": null,
+                "fetchFailed": null,
+                "statusCode": null
+            }
+        },
+        {
+            "name": "Liberty landscaping",
+            "address": null,
+            "phone": "+1317-498-2900",
+            "website": null,
+            "rating": 5,
+            "reviewCount": 5,
+            "category": "Landscaper",
+            "score": 100,
+            "label": "no website",
+            "scoring": {
+                "total": 100,
+                "reasons": [
+                    "No website found (+100)"
+                ],
+                "lighthousePerformance": null,
+                "lighthouseSeo": null,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": null,
+                "wordCount": null,
+                "hasMetaDescription": null,
+                "hasFavicon": null,
+                "fetchFailed": null,
+                "statusCode": null
+            }
+        },
+        {
+            "name": "Roland Outdoor Services, LLP",
+            "address": "1626 Lexington Ave, Indianapolis, IN 46203",
+            "phone": "+1317-833-8293",
+            "website": null,
+            "rating": null,
+            "reviewCount": null,
+            "category": "Lawn care service",
+            "score": 100,
+            "label": "no website",
+            "scoring": {
+                "total": 100,
+                "reasons": [
+                    "No website found (+100)"
+                ],
+                "lighthousePerformance": null,
+                "lighthouseSeo": null,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": null,
+                "wordCount": null,
+                "hasMetaDescription": null,
+                "hasFavicon": null,
+                "fetchFailed": null,
+                "statusCode": null
+            }
+        },
+        {
+            "name": "Mowing services",
+            "address": null,
+            "phone": "+1317-909-7217",
+            "website": null,
+            "rating": 5,
+            "reviewCount": 16,
+            "category": "Lawn care service",
+            "score": 100,
+            "label": "no website",
+            "scoring": {
+                "total": 100,
+                "reasons": [
+                    "No website found (+100)"
+                ],
+                "lighthousePerformance": null,
+                "lighthouseSeo": null,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": null,
+                "wordCount": null,
+                "hasMetaDescription": null,
+                "hasFavicon": null,
+                "fetchFailed": null,
+                "statusCode": null
+            }
+        },
+        {
+            "name": "Ron's Construction, Demolition, and Hauling",
+            "address": "1230 Udell St, Indianapolis, IN 46208",
+            "phone": "+1463-206-5222",
+            "website": null,
+            "rating": null,
+            "reviewCount": null,
+            "category": "Construction company",
+            "score": 100,
+            "label": "no website",
+            "scoring": {
+                "total": 100,
+                "reasons": [
+                    "No website found (+100)"
+                ],
+                "lighthousePerformance": null,
+                "lighthouseSeo": null,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": null,
+                "wordCount": null,
+                "hasMetaDescription": null,
+                "hasFavicon": null,
+                "fetchFailed": null,
+                "statusCode": null
+            }
+        },
+        {
+            "name": "Casimiro Landscaping Services LLC",
+            "address": null,
+            "phone": "+1317-488-7616",
+            "website": null,
+            "rating": 5,
+            "reviewCount": 1,
+            "category": "Landscaper",
+            "score": 100,
+            "label": "no website",
+            "scoring": {
+                "total": 100,
+                "reasons": [
+                    "No website found (+100)"
+                ],
+                "lighthousePerformance": null,
+                "lighthouseSeo": null,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": null,
+                "wordCount": null,
+                "hasMetaDescription": null,
+                "hasFavicon": null,
+                "fetchFailed": null,
+                "statusCode": null
+            }
+        },
+        {
+            "name": "Chop Chop Tree",
+            "address": "217 S Belmont Ave, Indianapolis, IN 46222",
+            "phone": "+1317-723-5626",
+            "website": "https://www.treeserviceindianapolisin.com/",
+            "rating": null,
+            "reviewCount": null,
+            "category": "Tree service",
+            "score": 90,
+            "label": "dead site",
+            "scoring": {
+                "total": 90,
+                "reasons": [
+                    "Site returned HTTP 403 (+90)"
+                ],
+                "lighthousePerformance": null,
+                "lighthouseSeo": null,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": true,
+                "wordCount": null,
+                "hasMetaDescription": null,
+                "hasFavicon": null,
+                "fetchFailed": true,
+                "statusCode": 403
+            }
+        },
+        {
+            "name": "Perkins Home Solutions",
+            "address": "735 Cottage Ave, Indianapolis, IN 46203",
+            "phone": "+1317-400-3785",
+            "website": "http://www.sandkhandyman.com/",
+            "rating": 5,
+            "reviewCount": 6,
+            "category": "Handyman/Handywoman/Handyperson",
+            "score": 90,
+            "label": "dead site",
+            "scoring": {
+                "total": 90,
+                "reasons": [
+                    "Site unreachable — DNS failure, timeout, or SSL error (+90)"
+                ],
+                "lighthousePerformance": null,
+                "lighthouseSeo": null,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": false,
+                "wordCount": null,
+                "hasMetaDescription": null,
+                "hasFavicon": null,
+                "fetchFailed": true,
+                "statusCode": null
+            }
+        },
+        {
+            "name": "A.C.E Project Indianapolis indiana",
+            "address": null,
+            "phone": "+1317-332-1135",
+            "website": "https://www.aceprojectindy.com/",
+            "rating": 5,
+            "reviewCount": 56,
+            "category": "Landscaper",
+            "score": 90,
+            "label": "dead site",
+            "scoring": {
+                "total": 90,
+                "reasons": [
+                    "Site returned HTTP 404 (+90)"
+                ],
+                "lighthousePerformance": null,
+                "lighthouseSeo": null,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": true,
+                "wordCount": null,
+                "hasMetaDescription": null,
+                "hasFavicon": null,
+                "fetchFailed": true,
+                "statusCode": 404
+            }
+        },
+        {
+            "name": "Season To Season Landscaping & Curbing",
+            "address": null,
+            "phone": "+1317-723-0334",
+            "website": "https://landscaper-indianapolisin.com/",
+            "rating": 3.7,
+            "reviewCount": 6,
+            "category": "Landscaper",
+            "score": 90,
+            "label": "dead site",
+            "scoring": {
+                "total": 90,
+                "reasons": [
+                    "Site unreachable — DNS failure, timeout, or SSL error (+90)"
+                ],
+                "lighthousePerformance": null,
+                "lighthouseSeo": null,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": true,
+                "wordCount": null,
+                "hasMetaDescription": null,
+                "hasFavicon": null,
+                "fetchFailed": true,
+                "statusCode": null
+            }
+        },
+        {
+            "name": "GREEN MOUND LANDSCAPING",
+            "address": "2162 E Raymond St, Indianapolis, IN 46203",
+            "phone": "+1317-969-9865",
+            "website": "http://greenmoundlandscaping.com/",
+            "rating": null,
+            "reviewCount": null,
+            "category": "Landscaper",
+            "score": 69,
+            "label": "opportunity",
+            "scoring": {
+                "total": 69,
+                "reasons": [
+                    "Not using HTTPS (+30)",
+                    "No meta description (+20)",
+                    "No favicon (+10)",
+                    "Lighthouse performance 52% (+9)"
+                ],
+                "lighthousePerformance": 0.52,
+                "lighthouseSeo": 1,
+                "domainAgeYears": 8,
+                "isExpiredDomain": false,
+                "isHttps": false,
+                "wordCount": 0,
+                "hasMetaDescription": false,
+                "hasFavicon": false,
+                "fetchFailed": false,
+                "statusCode": 200
+            }
+        },
+        {
+            "name": "True North Landscaping LLC",
+            "address": "1302 Columbia Ave, Indianapolis, IN 46202",
+            "phone": "+1317-420-4636",
+            "website": "http://www.truenorthlandscaping.com/",
+            "rating": 4.7,
+            "reviewCount": 48,
+            "category": "Landscaper",
+            "score": 38,
+            "label": "low opportunity",
+            "scoring": {
+                "total": 38,
+                "reasons": [
+                    "No meta description (+20)",
+                    "No favicon (+10)",
+                    "Lighthouse performance 64% (+7)",
+                    "Lighthouse SEO 92% (+1)"
+                ],
+                "lighthousePerformance": 0.64,
+                "lighthouseSeo": 0.92,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": true,
+                "wordCount": 0,
+                "hasMetaDescription": false,
+                "hasFavicon": false,
+                "fetchFailed": false,
+                "statusCode": 200
+            }
+        },
+        {
+            "name": "Plowz & Mowz of Indianapolis - Lawn Care & Snow Removal Service ️",
+            "address": "49 W Maryland St, Indianapolis, IN 46204",
+            "phone": "+1877-756-9963",
+            "website": "http://www.plowzandmowz.com/",
+            "rating": 2,
+            "reviewCount": 8,
+            "category": "Landscaper",
+            "score": 36,
+            "label": "low opportunity",
+            "scoring": {
+                "total": 36,
+                "reasons": [
+                    "No meta description (+20)",
+                    "Lighthouse performance 34% (+13)",
+                    "Lighthouse SEO 77% (+3)"
+                ],
+                "lighthousePerformance": 0.34,
+                "lighthouseSeo": 0.77,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": true,
+                "wordCount": 0,
+                "hasMetaDescription": false,
+                "hasFavicon": true,
+                "fetchFailed": false,
+                "statusCode": 200
+            }
+        },
+        {
+            "name": "Hardscapes Indianapolis",
+            "address": null,
+            "phone": "+1317-344-8024",
+            "website": "http://www.hardscapesindianapolis.com/",
+            "rating": 5,
+            "reviewCount": 3,
+            "category": "Landscaper",
+            "score": 18,
+            "label": "low opportunity",
+            "scoring": {
+                "total": 18,
+                "reasons": [
+                    "No favicon (+10)",
+                    "Lighthouse performance 57% (+8)"
+                ],
+                "lighthousePerformance": 0.57,
+                "lighthouseSeo": 1,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": true,
+                "wordCount": 0,
+                "hasMetaDescription": true,
+                "hasFavicon": false,
+                "fetchFailed": false,
+                "statusCode": 200
+            }
+        },
+        {
+            "name": "ForeverLawn Indy",
+            "address": "350 Massachusetts Ave STE 300 (ForeverLawn, Indianapolis, IN 46204",
+            "phone": "+1317-266-9794",
+            "website": "https://foreverlawnindy.com/?utm_source=google&utm_medium=organic&utm_campaign=gbp",
+            "rating": 5,
+            "reviewCount": 5,
+            "category": "Turf supplier",
+            "score": 16,
+            "label": "low opportunity",
+            "scoring": {
+                "total": 16,
+                "reasons": [
+                    "Lighthouse performance 70% (+6)",
+                    "Domain age 1yr — relatively new (+10)"
+                ],
+                "lighthousePerformance": 0.7,
+                "lighthouseSeo": 1,
+                "domainAgeYears": 1,
+                "isExpiredDomain": false,
+                "isHttps": true,
+                "wordCount": 0,
+                "hasMetaDescription": true,
+                "hasFavicon": true,
+                "fetchFailed": false,
+                "statusCode": 200
+            }
+        },
+        {
+            "name": "Rackcollections",
+            "address": null,
+            "phone": "+1317-779-4302",
+            "website": "http://rackcollections.square.site/",
+            "rating": 4.8,
+            "reviewCount": 38,
+            "category": "General contractor",
+            "score": 14,
+            "label": "low opportunity",
+            "scoring": {
+                "total": 14,
+                "reasons": [
+                    "Copyright year 2020 is stale (+10)",
+                    "Has agency footer credit (-15)",
+                    "Lighthouse performance 9% (+18)",
+                    "Lighthouse SEO 92% (+1)"
+                ],
+                "lighthousePerformance": 0.09,
+                "lighthouseSeo": 0.92,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": true,
+                "wordCount": 0,
+                "hasMetaDescription": true,
+                "hasFavicon": true,
+                "fetchFailed": false,
+                "statusCode": 200
+            }
+        },
+        {
+            "name": "Spotts Garden Service",
+            "address": "1117 Michigan Pl, Indianapolis, IN 46202",
+            "phone": "+1317-356-8808",
+            "website": "http://www.spottsgardens.com/",
+            "rating": 4.6,
+            "reviewCount": 20,
+            "category": "Gardener",
+            "score": 13,
+            "label": "low opportunity",
+            "scoring": {
+                "total": 13,
+                "reasons": [
+                    "Lighthouse performance 45% (+11)",
+                    "Lighthouse SEO 85% (+2)"
+                ],
+                "lighthousePerformance": 0.45,
+                "lighthouseSeo": 0.85,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": true,
+                "wordCount": 0,
+                "hasMetaDescription": true,
+                "hasFavicon": true,
+                "fetchFailed": false,
+                "statusCode": 200
+            }
+        },
+        {
+            "name": "Landscape Management by Design",
+            "address": "937 Woodruff Pl W Dr, Indianapolis, IN 46201",
+            "phone": "+1317-430-2196",
+            "website": "https://landscapemanagementbydesign.com/contact-us",
+            "rating": null,
+            "reviewCount": null,
+            "category": "Landscaper",
+            "score": 11,
+            "label": "low opportunity",
+            "scoring": {
+                "total": 11,
+                "reasons": [
+                    "Lighthouse performance 48% (+10)",
+                    "Lighthouse SEO 92% (+1)"
+                ],
+                "lighthousePerformance": 0.48,
+                "lighthouseSeo": 0.92,
+                "domainAgeYears": 6,
+                "isExpiredDomain": false,
+                "isHttps": true,
+                "wordCount": 0,
+                "hasMetaDescription": true,
+                "hasFavicon": true,
+                "fetchFailed": false,
+                "statusCode": 200
+            }
+        },
+        {
+            "name": "Border Magic by J & A",
+            "address": null,
+            "phone": "+1317-850-1326",
+            "website": "https://southindi.bordermagic.com/",
+            "rating": 5,
+            "reviewCount": 5,
+            "category": "Landscaper",
+            "score": 10,
+            "label": "low opportunity",
+            "scoring": {
+                "total": 10,
+                "reasons": [
+                    "Lighthouse performance 53% (+9)",
+                    "Lighthouse SEO 92% (+1)"
+                ],
+                "lighthousePerformance": 0.53,
+                "lighthouseSeo": 0.92,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": true,
+                "wordCount": 0,
+                "hasMetaDescription": true,
+                "hasFavicon": true,
+                "fetchFailed": false,
+                "statusCode": 200
+            }
+        },
+        {
+            "name": "Heath Outdoor LLC",
+            "address": "1302 Columbia Ave, Indianapolis, IN 46202",
+            "phone": "+1317-420-4636",
+            "website": "http://www.heathoutdoor.net/",
+            "rating": 4.6,
+            "reviewCount": 118,
+            "category": "Landscaper",
+            "score": 9,
+            "label": "low opportunity",
+            "scoring": {
+                "total": 9,
+                "reasons": [
+                    "Lighthouse performance 53% (+9)"
+                ],
+                "lighthousePerformance": 0.53,
+                "lighthouseSeo": 1,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": true,
+                "wordCount": 0,
+                "hasMetaDescription": true,
+                "hasFavicon": true,
+                "fetchFailed": false,
+                "statusCode": 200
+            }
+        },
+        {
+            "name": "Crossroads Lawn & Landscape",
+            "address": null,
+            "phone": "+1317-519-3393",
+            "website": "https://crossroadslawnlandscape.jobbersites.com/",
+            "rating": 4.6,
+            "reviewCount": 9,
+            "category": "Lawn care service",
+            "score": 8,
+            "label": "low opportunity",
+            "scoring": {
+                "total": 8,
+                "reasons": [
+                    "Lighthouse performance 58% (+8)"
+                ],
+                "lighthousePerformance": 0.58,
+                "lighthouseSeo": 1,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": true,
+                "wordCount": 0,
+                "hasMetaDescription": true,
+                "hasFavicon": true,
+                "fetchFailed": false,
+                "statusCode": 200
+            }
+        },
+        {
+            "name": "Lawn Love Lawn Care of Indianapolis",
+            "address": null,
+            "phone": "+1765-637-7749",
+            "website": "https://lawnlove.com/indiana/indianapolis-lawn-care?utm_source=Google&utm_medium=Places&utm_campaign=Indianapolis",
+            "rating": 4.2,
+            "reviewCount": 255,
+            "category": "Lawn care service",
+            "score": 8,
+            "label": "low opportunity",
+            "scoring": {
+                "total": 8,
+                "reasons": [
+                    "Lighthouse performance 58% (+8)"
+                ],
+                "lighthousePerformance": 0.58,
+                "lighthouseSeo": 1,
+                "domainAgeYears": 16,
+                "isExpiredDomain": false,
+                "isHttps": true,
+                "wordCount": 0,
+                "hasMetaDescription": true,
+                "hasFavicon": true,
+                "fetchFailed": false,
+                "statusCode": 200
+            }
+        },
+        {
+            "name": "His Workmanship - Indianapolis",
+            "address": null,
+            "phone": "+1317-854-4573",
+            "website": "https://hisworkmanshiplabor.com/cities/indianapolis-indiana/?utm_source=Google%20My%20Business-%20Indianapolis&utm_medium=Organic",
+            "rating": 4.7,
+            "reviewCount": 131,
+            "category": "Landscaper",
+            "score": 5,
+            "label": "low opportunity",
+            "scoring": {
+                "total": 5,
+                "reasons": [
+                    "Lighthouse performance 75% (+5)"
+                ],
+                "lighthousePerformance": 0.75,
+                "lighthouseSeo": 1,
+                "domainAgeYears": 8,
+                "isExpiredDomain": false,
+                "isHttps": true,
+                "wordCount": 0,
+                "hasMetaDescription": true,
+                "hasFavicon": true,
+                "fetchFailed": false,
+                "statusCode": 200
+            }
+        },
+        {
+            "name": "Spectrum Landscape Services, LLC.",
+            "address": null,
+            "phone": "+1317-777-3599",
+            "website": "http://www.thespectrumonline.com/",
+            "rating": 5,
+            "reviewCount": 24,
+            "category": "Landscaper",
+            "score": 0,
+            "label": "low opportunity",
+            "scoring": {
+                "total": 0,
+                "reasons": [
+                    "Has agency footer credit (-15)",
+                    "Lighthouse performance 65% (+7)"
+                ],
+                "lighthousePerformance": 0.65,
+                "lighthouseSeo": 1,
+                "domainAgeYears": null,
+                "isExpiredDomain": false,
+                "isHttps": true,
+                "wordCount": 0,
+                "hasMetaDescription": true,
+                "hasFavicon": true,
+                "fetchFailed": false,
+                "statusCode": 200
+            }
+        }
+    ]
+}
