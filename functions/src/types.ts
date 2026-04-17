@@ -191,6 +191,7 @@ export interface ScorerInput {
   phone: string | null;
   isClaimed: boolean;
   currentStatus: string | null;
+  permanentlyClosed: boolean;
   reviewCount: number | null;
   rating: number | null;
   ratingDistribution: Record<string, number> | null;
@@ -203,7 +204,14 @@ export interface ScorerInput {
   hasMainImage: boolean;
   hasAttributes: boolean;
   hasDescription: boolean;
+  hasBusinessHours: boolean;
   address: string | null;
+  // Legitimacy signals — nullable (future: reviews API)
+  daysSinceLastReview: number | null;
+  hasOwnerResponses: boolean;
+  // Bonus legitimacy signals from DFS
+  hasPeopleAlsoSearch: boolean;
+  hasPlaceTopics: boolean;
 }
 
 export type BusinessLabel =
@@ -237,6 +245,7 @@ export interface ScoreBreakdown {
 export interface BusinessData {
   description: string | null;
   isClaimed: boolean;
+  permanentlyClosed: boolean;
   additionalCategories: string[] | null;
   city: string | null;
   zip: string | null;

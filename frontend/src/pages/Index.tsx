@@ -2,11 +2,13 @@ import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Business } from "@/data/mockBusinesses";
 import { normalizeBusiness } from "@/data/leadTypes";
+import { formatCategoryLabel } from "@/data/dfsCategories";
 import { searchBusinesses, fetchBusinessesByCids, SearchError } from "@/lib/api";
 import { setSearchResults } from "@/lib/businessCache";
 import { useLeadStore } from "@/hooks/useLeadStore";
 import { useSavedSearches } from "@/hooks/useSavedSearches";
 import { useCredits } from "@/hooks/useCredits";
+import { usePreferences } from "@/hooks/usePreferences";
 import { LeadScoreBadge } from "@/components/LeadScoreBadge";
 import { LeadDetailPanel } from "@/components/LeadDetailPanel";
 import { CategoryCombobox } from "@/components/CategoryCombobox";
@@ -29,6 +31,8 @@ import { motion } from "framer-motion";
 
 const RADIUS_STEPS = [1, 5, 10, 15, 20, 30, 40, 50] as const;
 type Radius = (typeof RADIUS_STEPS)[number];
+const MAX_RADIUS: Radius = 10;
+const MAX_RADIUS_INDEX = RADIUS_STEPS.indexOf(MAX_RADIUS);
 
 function relativeTime(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
@@ -55,6 +59,14 @@ function StatusCell({ status }: { status: "pass" | "fail" | "na" }) {
   );
 }
 
+/** Normalize raw API category strings like "Handyman/Handywoman/Handyperson" → "Handyman" */
+function cleanCategory(raw: string): string {
+  if (!raw) return raw;
+  // Take the first value from slash-separated lists
+  const first = raw.split("/")[0].trim();
+  return first || raw;
+}
+
 type ViewState = "empty" | "loading" | "results" | "error";
 type SortDir = "asc" | "desc";
 const DEFAULT_SORT_COL = "score";
@@ -68,7 +80,8 @@ const Index = () => {
   const [selectedCategory, setSelectedCategory] = useState<string>(searchParams.get("category") || "all");
   const [radius, setRadius] = useState<Radius>(() => {
     const r = Number(searchParams.get("radius"));
-    return (RADIUS_STEPS as readonly number[]).includes(r) ? (r as Radius) : 10;
+    const parsed = (RADIUS_STEPS as readonly number[]).includes(r) ? (r as Radius) : 10;
+    return parsed > MAX_RADIUS ? MAX_RADIUS : parsed;
   });
   const [sortBy, setSortBy] = useState<string>(DEFAULT_SORT_COL);
   const [sortDir, setSortDir] = useState<SortDir>(DEFAULT_SORT_DIR);
@@ -97,9 +110,16 @@ const Index = () => {
     [store.savedLeads],
   );
 
-  // Client-side filtering of API results (name filter + omitted leads)
+  const { prefs } = usePreferences();
+
+  // Client-side filtering of API results (name filter + omitted leads + preferences)
   const filteredResults = useMemo(() => {
-    let results = apiResults.filter((b) => !omittedIds.has(b.id));
+    let results = apiResults.filter(
+      (b) =>
+        !omittedIds.has(b.id) &&
+        (b.legitimacyScore ?? 100) >= prefs.legitimacyScoreMin &&
+        (b.leadScore ?? 0) >= prefs.opportunityScoreMin,
+    );
 
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
@@ -135,7 +155,7 @@ const Index = () => {
       }
     });
     return results;
-  }, [apiResults, searchQuery, sortBy, sortDir, omittedIds]);
+  }, [apiResults, searchQuery, sortBy, sortDir, omittedIds, prefs.legitimacyScoreMin, prefs.opportunityScoreMin]);
 
   // Search is now saved server-side after API call — no client-side auto-save needed
 
@@ -302,9 +322,12 @@ const Index = () => {
 
   const canSearch = !!location.trim();
 
+  const toTitleCase = (s: string) =>
+    s.replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+
   const searchSummary = [
-    selectedCategory !== "all" ? selectedCategory : null,
-    location ? location : null,
+    selectedCategory !== "all" ? formatCategoryLabel(selectedCategory) : null,
+    location ? toTitleCase(location.trim()) : null,
   ].filter(Boolean).join(" in ");
 
   // Helper: snap slider index → radius value
@@ -361,18 +384,32 @@ const Index = () => {
               <div className="px-1">
                 <Slider
                   min={0}
-                  max={RADIUS_STEPS.length - 1}
+                  max={MAX_RADIUS_INDEX}
                   step={1}
                   value={[indexFromRadius(radius)]}
                   onValueChange={([i]) => setRadius(radiusFromIndex(i))}
                   aria-label="Search radius"
+                  className="flex-grow"
+                  style={{ width: `${((MAX_RADIUS_INDEX) / (RADIUS_STEPS.length - 1)) * 100}%` }}
                 />
                 <div className="flex justify-between mt-1.5">
-                  {RADIUS_STEPS.map((r) => (
-                    <span key={r} className={`text-[10px] ${radius === r ? "text-foreground font-medium" : "text-muted-foreground"}`}>
-                      {r}
-                    </span>
-                  ))}
+                  {RADIUS_STEPS.map((r) => {
+                    const disabled = r > MAX_RADIUS;
+                    return (
+                      <span
+                        key={r}
+                        className={`text-[10px] ${
+                          disabled
+                            ? "text-muted-foreground/30 line-through"
+                            : radius === r
+                              ? "text-foreground font-medium"
+                              : "text-muted-foreground"
+                        }`}
+                      >
+                        {r}
+                      </span>
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -435,7 +472,7 @@ const Index = () => {
 
   // ── LOADING STATE ──
   if (viewState === "loading") {
-    const cat = selectedCategory !== "all" ? selectedCategory : "businesses";
+    const cat = selectedCategory !== "all" ? formatCategoryLabel(selectedCategory) : "businesses";
     const loc = location ? location : "your area";
     return (
       <div className="p-6 flex items-center justify-center min-h-[80vh]">
@@ -525,12 +562,12 @@ const Index = () => {
           b.leadScore,
           b.label || "",
           b.name,
-          b.category,
+          cleanCategory(b.category),
           b.phone || "",
           a.hasWebsite ? a.websiteUrl || "Yes" : "None",
           ternary(a.hasWebsite, a.hasHttps),
           ternary(a.hasWebsite, a.mobileFriendly),
-          a.hasOnlineAds ? "Yes" : "No",
+          a.hasOnlineAds ? "Yes" : (!a.hasWebsite ? "N/A" : "No"),
           a.hasWebsite ? a.seoScore : "N/A",
         ];
       });
@@ -635,10 +672,15 @@ const Index = () => {
                   <td className="py-3 px-3">
                     <LeadScoreBadge score={b.leadScore} label={b.label} size="sm" />
                   </td>
-                  <td className="py-3 px-3">
-                    <span className="font-medium">{b.name}</span>
+                  <td className="py-3 px-3 max-w-[220px]">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="font-medium block truncate">{b.name}</span>
+                      </TooltipTrigger>
+                      {b.name.length > 35 && <TooltipContent>{b.name}</TooltipContent>}
+                    </Tooltip>
                   </td>
-                  <td className="py-3 px-3 text-muted-foreground">{b.category}</td>
+                  <td className="py-3 px-3 text-muted-foreground">{cleanCategory(b.category)}</td>
                   <td className="py-3 px-3" onClick={(e) => e.stopPropagation()}>
                     {b.phone ? (
                       <span className="inline-flex items-center gap-1.5">
@@ -683,7 +725,7 @@ const Index = () => {
                     <StatusCell status={!a.hasWebsite ? "na" : a.mobileFriendly ? "pass" : "fail"} />
                   </td>
                   <td className="py-3 px-3 text-center">
-                    <StatusCell status={a.hasOnlineAds ? "pass" : "fail"} />
+                    <StatusCell status={!a.hasWebsite ? "na" : a.hasOnlineAds ? "pass" : "fail"} />
                   </td>
                   <td className="py-3 px-3">
                     {a.hasWebsite && a.seoScore > 0 ? (

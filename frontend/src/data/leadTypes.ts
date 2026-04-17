@@ -22,6 +22,7 @@ export interface ApiScoring {
 export interface ApiBusinessData {
   description: string | null;
   isClaimed: boolean;
+  permanentlyClosed: boolean;
   additionalCategories: string[] | null;
   city: string | null;
   zip: string | null;

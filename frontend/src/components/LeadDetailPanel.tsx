@@ -164,6 +164,16 @@ function formatBytes(b: number | null | undefined): string {
   return `${(b / 1024 / 1024).toFixed(2)} MB`;
 }
 
+function formatPhone(raw: string): string {
+  const digits = raw.replace(/\D/g, "");
+  // US number: strip leading 1 and format as (XXX) XXX-XXXX
+  const national = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+  if (national.length === 10) {
+    return `(${national.slice(0, 3)}) ${national.slice(3, 6)}-${national.slice(6)}`;
+  }
+  return raw; // fallback to original if not a standard US number
+}
+
 // ─── Main Panel ───────────────────────────────────────────────────────────────
 
 interface LeadDetailPanelProps {
@@ -233,7 +243,7 @@ export function LeadDetailPanel({ business }: LeadDetailPanelProps) {
           )}
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2 mb-1">
-              <Badge variant="secondary">{business.category}</Badge>
+              <Badge variant="secondary">{business.category.split("/")[0].trim()}</Badge>
               <LeadScoreBadge score={business.leadScore} label={business.label} size="lg" />
               {business.currentStatus && (
                 <Badge variant={business.currentStatus === "open" ? "default" : "outline"} className="text-xs">
@@ -252,14 +262,14 @@ export function LeadDetailPanel({ business }: LeadDetailPanelProps) {
 
         <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
           {addressLine && <span className="flex items-center gap-1"><MapPin className="h-4 w-4" />{addressLine}</span>}
-          {business.phone && <span className="flex items-center gap-1"><Phone className="h-4 w-4" />{business.phone}</span>}
+          {business.phone && <a href={`tel:${business.phone}`} className="flex items-center gap-1 hover:text-foreground transition-colors"><Phone className="h-4 w-4" />{formatPhone(business.phone)}</a>}
           {business.googleRating > 0 && (
             <span className="flex items-center gap-1">
               <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
               {business.googleRating} ({business.reviewCount} reviews)
             </span>
           )}
-          {a.websiteUrl && <span className="flex items-center gap-1"><Globe className="h-4 w-4" />{a.websiteUrl}</span>}
+          {a.websiteUrl && <a href={a.websiteUrl.startsWith("http") ? a.websiteUrl : `https://${a.websiteUrl}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-foreground transition-colors"><Globe className="h-4 w-4" /><span className="underline">{a.websiteUrl}</span></a>}
         </div>
 
         <div className="flex gap-2">
@@ -360,7 +370,24 @@ export function LeadDetailPanel({ business }: LeadDetailPanelProps) {
               <CardTitle className="text-base">Website & Security</CardTitle>
             </CardHeader>
             <CardContent className="divide-y divide-border">
-              <StatusRow icon={Globe} label="Has Website" value={a.hasWebsite ? a.websiteUrl || "Yes" : "No website"} status={a.hasWebsite ? "good" : "critical"} />
+              {a.hasWebsite ? (
+                <div className="flex items-center justify-between py-2.5 px-1">
+                  <div className="flex items-center gap-3">
+                    <Globe className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm">Has Website</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {a.websiteUrl ? (
+                      <a href={a.websiteUrl.startsWith("http") ? a.websiteUrl : `https://${a.websiteUrl}`} target="_blank" rel="noreferrer" className="text-sm text-primary hover:underline">{a.websiteUrl}</a>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">Yes</span>
+                    )}
+                    <CheckCircle2 className="h-4 w-4 text-green-500" />
+                  </div>
+                </div>
+              ) : (
+                <StatusRow icon={Globe} label="Has Website" value="No website" status="critical" />
+              )}
               {a.hasWebsite ? (
                 <StatusRow icon={a.hasHttps ? Shield : ShieldOff} label="HTTPS" value={a.hasHttps ? "Secure" : "Not Secure"} status={a.hasHttps ? "good" : "critical"} />
               ) : (
@@ -465,6 +492,48 @@ export function LeadDetailPanel({ business }: LeadDetailPanelProps) {
               </CardContent>
             </Card>
           )}
+
+          {/* Legitimacy Score */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Shield className="h-4 w-4" /> Legitimacy Score
+              </CardTitle>
+              <CardDescription>How likely this is a real, operating business</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center gap-4">
+                <div className={cn(
+                  "text-3xl font-bold tabular-nums",
+                  (business.legitimacyScore ?? 0) >= 50 ? "text-green-500" :
+                  (business.legitimacyScore ?? 0) >= 25 ? "text-yellow-500" : "text-red-500"
+                )}>
+                  {business.legitimacyScore ?? 0}
+                </div>
+                <div className="flex-1">
+                  <Progress value={business.legitimacyScore ?? 0} className="h-2" />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {(business.legitimacyScore ?? 0) >= 50 ? "Likely legitimate" :
+                     (business.legitimacyScore ?? 0) >= 25 ? "Uncertain — verify manually" :
+                     "Likely ghost business"}
+                  </p>
+                </div>
+              </div>
+              {business.legitimacyReasons && business.legitimacyReasons.length > 0 && (
+                <ul className="space-y-1.5">
+                  {business.legitimacyReasons.map((r, i) => (
+                    <li key={i} className="flex items-start gap-2 text-sm">
+                      <span className={cn(
+                        "mt-1.5 h-1.5 w-1.5 rounded-full shrink-0",
+                        r.startsWith("-") || r.includes("(-") ? "bg-red-500" : "bg-green-500"
+                      )} />
+                      <span className="text-muted-foreground">{r}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="actions" className="space-y-4">

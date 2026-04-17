@@ -21,6 +21,14 @@
         "function": "getBusinessesByCids"
       },
       {
+        "source": "/api/recalculate-legitimacy",
+        "function": "recalculateLegitimacy"
+      },
+      {
+        "source": "/api/ghost-businesses",
+        "function": "getGhostBusinesses"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

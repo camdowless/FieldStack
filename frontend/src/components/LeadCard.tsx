@@ -21,7 +21,7 @@ export function LeadCard({ business, isSaved, onSave, index = 0 }: LeadCardProps
   if (!analysis.hasWebsite) flags.push("No Website");
   if (analysis.hasWebsite && !analysis.mobileFriendly) flags.push("Not Mobile-Friendly");
   if (analysis.hasWebsite && !analysis.hasHttps) flags.push("No HTTPS");
-  if (!analysis.hasOnlineAds) flags.push("No Ads");
+  if (analysis.hasWebsite && !analysis.hasOnlineAds) flags.push("No Ads");
   if (analysis.facebookAsWebsite) flags.push("FB as Website");
 
   return (
@@ -35,7 +35,7 @@ export function LeadCard({ business, isSaved, onSave, index = 0 }: LeadCardProps
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 mb-1 flex-wrap">
-                <Badge variant="secondary" className="text-xs shrink-0">{business.category}</Badge>
+                <Badge variant="secondary" className="text-xs shrink-0">{business.category.split("/")[0].trim()}</Badge>
                 <LeadScoreBadge score={business.leadScore} label={business.label} size="sm" />
               </div>
               <Link to={`/lead/${business.id}`}>

@@ -402,6 +402,7 @@ export function score(input: ScorerInput): ScoreResult {
 // Answers: "Is this an actual operating business?"
 // Independent of the lead/opportunity score.
 // Returns 0–100 where higher = more likely legitimate.
+// Uses penalties for missing critical signals + bonuses for positive ones.
 
 export interface LegitimacyResult {
   legitimacyScore: number;
@@ -412,93 +413,209 @@ export function computeLegitimacy(input: ScorerInput): LegitimacyResult {
   let raw = 0;
   const reasons: string[] = [];
 
-  // ── Review count (max +20) ──
+  // ─────────────────────────────────────────────
+  // HARD DISQUALIFIERS — return 0 immediately
+  // ─────────────────────────────────────────────
+
+  if (input.permanentlyClosed) {
+    return {
+      legitimacyScore: 0,
+      legitimacyBreakdown: { total: 0, reasons: ["DISQUALIFIED: Permanently closed"] },
+    };
+  }
+
+  // No phone AND no website AND no address = shell listing
+  if (!input.phone && !input.website && !input.address) {
+    return {
+      legitimacyScore: 0,
+      legitimacyBreakdown: { total: 0, reasons: ["DISQUALIFIED: No phone, website, or address"] },
+    };
+  }
+
+  // ─────────────────────────────────────────────
+  // PENALTIES (applied first so we can go negative)
+  // ─────────────────────────────────────────────
+
+  // Unclaimed listing — strongest ghost signal
+  if (!input.isClaimed) {
+    raw -= 20;
+    reasons.push("Unclaimed listing (-20)");
+  }
+
+  // No reviews at all
   const reviews = input.reviewCount ?? 0;
-  if (reviews >= 10) {
-    raw += 20;
-    reasons.push(`${reviews} reviews (+20)`);
-  } else if (reviews >= 5) {
+  if (reviews === 0) {
+    raw -= 20;
+    reasons.push("Zero reviews (-20)");
+  }
+
+  // No phone number — core to "will they answer the phone"
+  if (!input.phone) {
+    raw -= 15;
+    reasons.push("No phone number (-15)");
+  }
+
+  // No photos — strong ghost indicator
+  const photos = input.totalPhotos ?? 0;
+  if (photos === 0) {
+    raw -= 10;
+    reasons.push("No photos (-10)");
+  }
+
+  // Review recency — stale reviews mean dead or dying business
+  if (input.daysSinceLastReview !== null) {
+    if (input.daysSinceLastReview > 730) {
+      raw -= 25;
+      reasons.push(`Last review ${Math.floor(input.daysSinceLastReview / 365)}yr ago (-25)`);
+    } else if (input.daysSinceLastReview > 365) {
+      raw -= 15;
+      reasons.push("Last review over 1yr ago (-15)");
+    }
+  } else if (reviews > 0) {
+    // Has reviews but no date data — mild penalty for uncertainty
+    raw -= 5;
+    reasons.push("Review recency unknown (-5)");
+  }
+
+  // Suspicious rating: 5.0 with very few reviews = likely fake/friends
+  if (input.rating !== null && input.rating >= 4.8 && reviews > 0 && reviews <= 3) {
+    raw -= 8;
+    reasons.push(`Suspicious rating (${input.rating} from only ${reviews} reviews) (-8)`);
+  }
+
+  // ─────────────────────────────────────────────
+  // POSITIVE SIGNALS
+  // ─────────────────────────────────────────────
+
+  // Review count — higher bar, recency bonus stacks separately
+  if (reviews >= 50) {
+    raw += 25;
+    reasons.push(`${reviews} reviews (+25)`);
+  } else if (reviews >= 20) {
+    raw += 18;
+    reasons.push(`${reviews} reviews (+18)`);
+  } else if (reviews >= 10) {
     raw += 12;
     reasons.push(`${reviews} reviews (+12)`);
+  } else if (reviews >= 5) {
+    raw += 6;
+    reasons.push(`${reviews} reviews (+6)`);
   } else if (reviews >= 1) {
-    raw += 5;
-    reasons.push(`${reviews} review(s) (+5)`);
+    raw += 2;
+    reasons.push(`${reviews} review(s) (+2)`);
   }
 
-  // ── Rating quality (max +10) ──
-  if (input.rating !== null && input.rating >= 4.0 && reviews >= 3) {
+  // Recency bonus — biggest trust signal (null = skip, future reviews API)
+  if (input.daysSinceLastReview !== null) {
+    if (input.daysSinceLastReview <= 30) {
+      raw += 20;
+      reasons.push("Review within last 30 days (+20)");
+    } else if (input.daysSinceLastReview <= 90) {
+      raw += 15;
+      reasons.push("Review within last 90 days (+15)");
+    } else if (input.daysSinceLastReview <= 180) {
+      raw += 10;
+      reasons.push("Review within last 6 months (+10)");
+    } else if (input.daysSinceLastReview <= 365) {
+      raw += 5;
+      reasons.push("Review within last year (+5)");
+    }
+  }
+
+  // Rating quality — only meaningful with decent review volume
+  if (input.rating !== null && reviews >= 5) {
+    if (input.rating >= 4.0) {
+      raw += 8;
+      reasons.push(`${input.rating}★ rating (+8)`);
+    } else if (input.rating >= 3.0) {
+      raw += 3;
+      reasons.push(`${input.rating}★ rating (+3)`);
+    }
+  }
+
+  // Claimed listing — owner is engaged
+  if (input.isClaimed) {
+    raw += 15;
+    reasons.push("Claimed listing (+15)");
+  }
+
+  // Phone number
+  if (input.phone) {
+    raw += 12;
+    reasons.push("Has phone number (+12)");
+  }
+
+  // Website
+  if (input.website) {
     raw += 10;
-    reasons.push(`${input.rating} rating with ${reviews}+ reviews (+10)`);
+    reasons.push("Has website (+10)");
   }
 
-  // ── Photos (max +15) ──
-  const photos = input.totalPhotos ?? 0;
-  if (photos >= 5) {
+  // Photos
+  if (photos >= 20) {
     raw += 15;
     reasons.push(`${photos} photos (+15)`);
-  } else if (photos >= 1) {
-    raw += 8;
-    reasons.push(`${photos} photo(s) (+8)`);
-  }
-
-  // ── Facebook link (max +15) ──
-  if (input.hasFacebookLink) {
-    raw += 15;
-    reasons.push("Has Facebook link (+15)");
-  }
-
-  // ── Other social links (max +5, stacks with Facebook) ──
-  if (input.socialLinkCount > (input.hasFacebookLink ? 1 : 0)) {
-    raw += 5;
-    reasons.push(`${input.socialLinkCount} social link(s) (+5)`);
-  }
-
-  // ── Claimed listing (max +10) ──
-  if (input.isClaimed) {
+  } else if (photos >= 5) {
     raw += 10;
-    reasons.push("Listing is claimed (+10)");
+    reasons.push(`${photos} photos (+10)`);
+  } else if (photos >= 1) {
+    raw += 4;
+    reasons.push(`${photos} photo(s) (+4)`);
   }
 
-  // ── Has address (max +5) ──
+  // Owner responds to reviews — very strong active signal (future: reviews API)
+  if (input.hasOwnerResponses) {
+    raw += 10;
+    reasons.push("Owner responds to reviews (+10)");
+  }
+
+  // Business hours posted
+  if (input.hasBusinessHours) {
+    raw += 8;
+    reasons.push("Business hours listed (+8)");
+  }
+
+  // Physical address
   if (input.address) {
     raw += 5;
-    reasons.push("Has physical address (+5)");
+    reasons.push("Has address (+5)");
   }
 
-  // ── Has phone (max +5) ──
-  if (input.phone) {
+  // Social presence — reduced weight, Facebook is not special
+  if (input.socialLinkCount >= 2) {
     raw += 5;
-    reasons.push("Has phone number (+5)");
-  }
-
-  // ── Logo or main image (max +5) ──
-  if (input.hasLogo || input.hasMainImage) {
-    raw += 5;
-    reasons.push("Has logo/image (+5)");
-  }
-
-  // ── Attributes filled in (max +3) ──
-  if (input.hasAttributes) {
+    reasons.push(`${input.socialLinkCount} social links (+5)`);
+  } else if (input.hasFacebookLink || input.socialLinkCount >= 1) {
     raw += 3;
-    reasons.push("Has listing attributes (+3)");
+    reasons.push("Social link (+3)");
   }
 
-  // ── Has website (max +5) ──
-  if (input.website) {
-    raw += 5;
-    reasons.push("Has website (+5)");
+  // Secondary signals — low weight, nice to have
+  if (input.hasLogo || input.hasMainImage) {
+    raw += 3;
+    reasons.push("Has logo/image (+3)");
   }
-
-  // ── Current status open (max +5) ──
-  if (input.currentStatus === "open") {
-    raw += 5;
-    reasons.push("Status: open (+5)");
-  }
-
-  // ── Has description (max +2) ──
   if (input.hasDescription) {
+    raw += 3;
+    reasons.push("Has description (+3)");
+  }
+  if (input.hasAttributes) {
     raw += 2;
-    reasons.push("Has description (+2)");
+    reasons.push("Has attributes (+2)");
+  }
+  if (input.currentStatus === "open") {
+    raw += 3;
+    reasons.push("Currently open (+3)");
+  }
+
+  // Bonus: Google knowledge graph signals
+  if (input.hasPeopleAlsoSearch) {
+    raw += 5;
+    reasons.push("In Google's 'people also search' (+5)");
+  }
+  if (input.hasPlaceTopics) {
+    raw += 5;
+    reasons.push("Has Google place topics from reviews (+5)");
   }
 
   const clamped = Math.min(100, Math.max(0, raw));

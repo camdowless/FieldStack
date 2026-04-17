@@ -97,6 +97,7 @@ export function extractBusinessData(b: BusinessRaw): BusinessData {
   return {
     description: b.description,
     isClaimed: b.is_claimed,
+    permanentlyClosed: b.permanently_closed,
     additionalCategories: b.additional_categories,
     city: b.address_info?.city ?? null,
     zip: b.address_info?.zip ?? null,

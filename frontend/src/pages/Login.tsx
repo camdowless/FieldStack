@@ -5,31 +5,26 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Search } from "lucide-react";
+import { SignUpModal } from "@/components/SignUpModal";
 
 export default function Login() {
-  const { signIn, signUp } = useAuth();
-  const [isSignUp, setIsSignUp] = useState(false);
+  const { signIn } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [signUpOpen, setSignUpOpen] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
     try {
-      if (isSignUp) {
-        await signUp(email, password);
-      } else {
-        await signIn(email, password);
-      }
+      await signIn(email, password);
     } catch (err: any) {
       const code = err?.code as string | undefined;
       if (code === "auth/invalid-credential" || code === "auth/wrong-password" || code === "auth/user-not-found") {
         setError("Invalid email or password.");
-      } else if (code === "auth/email-already-in-use") {
-        setError("An account with this email already exists.");
       } else if (code === "auth/weak-password") {
         setError("Password must be at least 6 characters.");
       } else {
@@ -52,9 +47,7 @@ export default function Login() {
           <CardTitle className="text-xl">
             Lead<span className="gradient-text">Scout</span>
           </CardTitle>
-          <CardDescription>
-            {isSignUp ? "Create an account to get started" : "Sign in to your account"}
-          </CardDescription>
+          <CardDescription>Sign in to your account</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -80,26 +73,27 @@ export default function Login() {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 minLength={6}
-                autoComplete={isSignUp ? "new-password" : "current-password"}
+                autoComplete="current-password"
               />
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
             <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? "Please wait…" : isSignUp ? "Create account" : "Sign in"}
+              {loading ? "Please wait…" : "Sign in"}
             </Button>
           </form>
           <div className="mt-4 text-center text-sm text-muted-foreground">
-            {isSignUp ? "Already have an account?" : "Don't have an account?"}{" "}
+            Don't have an account?{" "}
             <button
               type="button"
               className="text-primary underline-offset-4 hover:underline"
-              onClick={() => { setIsSignUp(!isSignUp); setError(""); }}
+              onClick={() => setSignUpOpen(true)}
             >
-              {isSignUp ? "Sign in" : "Sign up"}
+              Sign up
             </button>
           </div>
         </CardContent>
       </Card>
+      <SignUpModal open={signUpOpen} onOpenChange={setSignUpOpen} />
     </div>
   );
 }

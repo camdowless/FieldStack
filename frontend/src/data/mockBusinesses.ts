@@ -1,6 +1,3 @@
-import { sampleApiBusinesses } from "./sampleApiResponse";
-import { normalizeBusiness } from "./leadTypes";
-
 export type BusinessCategory = string;
 
 export type LeadStatus = "new" | "contacted" | "follow-up" | "not-interested" | "closed-won";
@@ -66,18 +63,11 @@ export interface Business {
   totalPhotos?: number | null;
 }
 
-export const mockBusinesses: Business[] = sampleApiBusinesses.map(normalizeBusiness);
+// No longer derived from sample data — empty defaults for backward compat.
+export const allCategories: string[] = [];
+export const allCities: string[] = [];
 
-// Derive unique categories + cities from the data for filter dropdowns.
-export const allCategories: string[] = Array.from(
-  new Set(mockBusinesses.map((b) => b.category))
-).sort();
-
-export const allCities: string[] = Array.from(
-  new Set(mockBusinesses.filter((b) => b.city).map((b) => `${b.city}, ${b.state}`))
-).sort();
-
-// Kept for backward compatibility (no longer used by the app, but exported just in case).
+// Kept for backward compatibility.
 export function calculateLeadScore(_a: WebsiteAnalysis): number {
   return 0;
 }

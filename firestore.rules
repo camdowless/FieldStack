@@ -10,6 +10,11 @@ service cloud.firestore {
       allow read: if request.auth != null && request.auth.uid == uid;
       allow write: if false; // server-side only via Admin SDK
 
+      // Allow users to update their own preferences
+      match /preferences/{doc} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+
       match /searches/{searchId} {
         allow read: if request.auth != null && request.auth.uid == uid;
         allow delete: if request.auth != null && request.auth.uid == uid;

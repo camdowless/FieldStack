@@ -213,6 +213,16 @@ function buildScorerInput(
   const contacts = b.contact_info ?? [];
   const socialContacts = contacts.filter((c) => socialTypes.includes(c.type));
 
+  // Business hours: timetable is non-null and has at least one day entry
+  const timetable = b.work_time?.work_hours?.timetable;
+  const hasBusinessHours = !!(timetable && Object.keys(timetable).length > 0);
+
+  // people_also_search: non-empty array means Google considers this a real entity
+  const hasPeopleAlsoSearch = !!(b.people_also_search && b.people_also_search.length > 0);
+
+  // place_topics: extracted from review content by Google
+  const hasPlaceTopics = !!(b.place_topics && Object.keys(b.place_topics).length > 0);
+
   return {
     website: overrides.website ?? b.url ?? null,
     htmlSignals: overrides.htmlSignals ?? null,
@@ -223,6 +233,7 @@ function buildScorerInput(
     phone: b.phone,
     isClaimed: b.is_claimed,
     currentStatus: b.work_time?.work_hours?.current_status ?? null,
+    permanentlyClosed: b.permanently_closed,
     reviewCount: b.rating?.votes_count ?? null,
     rating: b.rating?.value ?? null,
     ratingDistribution: b.rating_distribution,
@@ -235,7 +246,14 @@ function buildScorerInput(
     hasMainImage: !!b.main_image,
     hasAttributes: !!(b.attributes?.available_attributes && Object.keys(b.attributes.available_attributes).length > 0),
     hasDescription: !!b.description,
+    hasBusinessHours,
     address: b.address,
+    // Future: reviews API
+    daysSinceLastReview: null,
+    hasOwnerResponses: false,
+    // Bonus signals
+    hasPeopleAlsoSearch,
+    hasPlaceTopics,
   };
 }
 
@@ -345,10 +363,9 @@ export const dataforseoBusinessSearch = functions
           return { results: [] };
         }
 
-        // 2. Pre-flight filter: remove permanently_closed and Facebook URLs
+        // 2. Pre-flight filter: remove Facebook URLs (permanently closed handled by legitimacy score)
         const filtered = businesses.filter(
           (b) =>
-            !b.permanently_closed &&
             !(b.url && b.url.toLowerCase().includes("facebook.com"))
         );
 
@@ -612,7 +629,192 @@ export const dataforseoBusinessSearch = functions
     });
   });
 
+// ─── Reconstruct ScorerInput from a cached ScoredBusiness ─────────────────────
+// Used by recalculateLegitimacy to re-score existing businesses without
+// re-fetching from DataForSEO. Fields only available on BusinessRaw
+// (hasBusinessHours, hasAttributes, permanentlyClosed, hasPeopleAlsoSearch)
+// are approximated from what's stored.
+
+function scorerInputFromCached(biz: ScoredBusiness): ScorerInput {
+  const bd = biz.businessData;
+  const sc = biz.scoring;
+  const socialLinks = bd?.socialLinks ?? [];
+
+  return {
+    website: biz.website,
+    htmlSignals: biz.websiteData ?? null,
+    lighthousePerformance: sc?.lighthousePerformance ?? null,
+    lighthouseSeo: sc?.lighthouseSeo ?? null,
+    domainAgeYears: sc?.domainAgeYears ?? null,
+    isExpiredDomain: sc?.isExpiredDomain ?? false,
+    phone: biz.phone,
+    isClaimed: bd?.isClaimed ?? false,
+    currentStatus: bd?.currentStatus ?? null,
+    permanentlyClosed: bd?.permanentlyClosed ?? false, // now persisted on BusinessData
+    reviewCount: biz.reviewCount,
+    rating: biz.rating,
+    ratingDistribution: bd?.ratingDistribution ?? null,
+    firstSeen: bd?.firstSeen ?? null,
+    totalPhotos: bd?.totalPhotos ?? null,
+    hasFacebookLink: socialLinks.some((l) => l.type === "facebook"),
+    socialLinkCount: socialLinks.length,
+    hasLogo: !!bd?.logo,
+    hasMainImage: !!bd?.mainImage,
+    hasAttributes: false, // not stored on BusinessData; conservative default
+    hasDescription: !!bd?.description,
+    hasBusinessHours: false, // not stored on BusinessData; conservative default
+    address: biz.address,
+    daysSinceLastReview: null, // future: reviews API
+    hasOwnerResponses: false, // future: reviews API
+    hasPeopleAlsoSearch: false, // not stored on BusinessData; conservative default
+    hasPlaceTopics: !!(bd?.placeTopics && Object.keys(bd.placeTopics).length > 0),
+  };
+}
+
+// ─── Recalculate Legitimacy Scores for cached businesses ──────────────────────
+
+export const recalculateLegitimacy = functions
+  .runWith({ timeoutSeconds: 300 })
+  .https.onRequest((req, res) => {
+    corsHandler(req, res, async () => {
+      if (req.method !== "POST") {
+        res.status(405).json({ error: "Method not allowed" });
+        return;
+      }
+
+      try {
+        await verifyAuth(req);
+      } catch {
+        res.status(401).json({ error: "Unauthorized. Please sign in." });
+        return;
+      }
+
+      // Accept optional CID list; if omitted, process all cached businesses
+      const cids = req.body?.cids;
+      const hasSpecificCids = Array.isArray(cids) && cids.length > 0;
+
+      try {
+        let updated = 0;
+        let processed = 0;
+
+        if (hasSpecificCids) {
+          // Recalculate specific businesses by CID
+          const safeCids = cids
+            .slice(0, 500)
+            .filter((c: unknown): c is string => typeof c === "string" && c.length > 0);
+          const cached = await getCachedBusinesses(safeCids);
+
+          const batch = db.batch();
+          for (const [cid, biz] of cached) {
+            const input = scorerInputFromCached(biz);
+            const { legitimacyScore, legitimacyBreakdown } = computeLegitimacy(input);
+            processed++;
+
+            if (legitimacyScore !== biz.legitimacyScore) {
+              const ref = db.collection(BUSINESSES_COLLECTION).doc(cid);
+              batch.update(ref, { legitimacyScore, legitimacyBreakdown });
+              updated++;
+            }
+          }
+
+          if (updated > 0) await batch.commit();
+        } else {
+          // Paginated scan of all cached businesses
+          const PAGE_SIZE = 200;
+          let lastDoc: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+          let hasMore = true;
+
+          while (hasMore) {
+            let query = db
+              .collection(BUSINESSES_COLLECTION)
+              .orderBy("__name__")
+              .limit(PAGE_SIZE);
+
+            if (lastDoc) {
+              query = query.startAfter(lastDoc);
+            }
+
+            const snapshot = await query.get();
+            if (snapshot.empty || snapshot.docs.length === 0) {
+              hasMore = false;
+              break;
+            }
+
+            const batch = db.batch();
+            let batchUpdates = 0;
+
+            for (const doc of snapshot.docs) {
+              const biz = doc.data() as ScoredBusiness;
+              const input = scorerInputFromCached(biz);
+              const { legitimacyScore, legitimacyBreakdown } = computeLegitimacy(input);
+              processed++;
+
+              // Only write if the score actually changed
+              const oldScore = biz.legitimacyScore ?? -1;
+              if (legitimacyScore !== oldScore) {
+                batch.update(doc.ref, { legitimacyScore, legitimacyBreakdown });
+                batchUpdates++;
+                updated++;
+              }
+            }
+
+            if (batchUpdates > 0) await batch.commit();
+
+            lastDoc = snapshot.docs[snapshot.docs.length - 1];
+            if (snapshot.docs.length < PAGE_SIZE) hasMore = false;
+          }
+        }
+
+        console.log(`[recalculateLegitimacy] processed=${processed} updated=${updated}`);
+        res.status(200).json({ processed, updated });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Internal server error";
+        console.error("[recalculateLegitimacy] error:", msg);
+        res.status(500).json({ error: "An unexpected error occurred. Please try again." });
+      }
+    });
+  });
+
 // ─── Get Businesses by CIDs (free retrieval from cache) ───────────────────────
+
+export const getGhostBusinesses = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== "GET") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+
+    try {
+      await verifyAuth(req);
+    } catch {
+      res.status(401).json({ error: "Unauthorized. Please sign in." });
+      return;
+    }
+
+    const threshold = Number(req.query.threshold) || 25;
+    const limitParam = Number(req.query.limit) || 50;
+    const safeLimit = Math.min(limitParam, 200);
+
+    try {
+      const snapshot = await db
+        .collection(BUSINESSES_COLLECTION)
+        .where("legitimacyScore", "<=", threshold)
+        .orderBy("legitimacyScore", "asc")
+        .limit(safeLimit)
+        .get();
+
+      const results = snapshot.docs.map((doc) => doc.data() as ScoredBusiness);
+      console.log(`[getGhostBusinesses] threshold=${threshold} found=${results.length}`);
+      res.status(200).json({ results, threshold });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Internal server error";
+      console.error("[getGhostBusinesses] error:", msg);
+      res.status(500).json({ error: "An unexpected error occurred. Please try again." });
+    }
+  });
+});
+
+// ─── Get Businesses by CIDs ──────────────────────────────────────────────────
 
 export const getBusinessesByCids = functions.https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
