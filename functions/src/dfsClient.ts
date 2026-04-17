@@ -421,6 +421,18 @@ export async function searchBusinesses(
   const tasks = data.tasks as Array<Record<string, unknown>> | undefined;
   const result = tasks?.[0]?.result as Array<Record<string, unknown>> | undefined;
   const items = result?.[0]?.items as BusinessRaw[] | undefined;
+
+  console.log("[searchBusinesses] Response parsed:", {
+    statusCode: data.status_code,
+    statusMessage: data.status_message,
+    cost: data.cost,
+    tasksCount: tasks?.length ?? 0,
+    taskStatusCode: tasks?.[0]?.status_code,
+    taskStatusMessage: tasks?.[0]?.status_message,
+    resultCount: result?.[0]?.total_count ?? 0,
+    itemsCount: items?.length ?? 0,
+  });
+
   return { items: items ?? [], cost: topCost };
 }
 

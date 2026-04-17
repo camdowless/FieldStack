@@ -13,6 +13,10 @@
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [
       {
+        "source": "/api/search/cancel",
+        "function": "cancelSearchJob"
+      },
+      {
         "source": "/api/search",
         "function": "dataforseoBusinessSearch"
       },

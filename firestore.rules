@@ -6,6 +6,16 @@ service cloud.firestore {
       allow write: if false; // server-side only via Admin SDK
     }
 
+    match /jobs/{jobId} {
+      allow read: if request.auth != null && resource.data.uid == request.auth.uid;
+      allow write: if false;
+
+      match /results/{resultId} {
+        allow read: if request.auth != null && resource.data.uid == request.auth.uid;
+        allow write: if false;
+      }
+    }
+
     match /users/{uid} {
       allow read: if request.auth != null && request.auth.uid == uid;
       allow write: if false; // server-side only via Admin SDK

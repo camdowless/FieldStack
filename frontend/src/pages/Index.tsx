@@ -1,10 +1,9 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Business } from "@/data/mockBusinesses";
-import { normalizeBusiness } from "@/data/leadTypes";
 import { formatCategoryLabel } from "@/data/dfsCategories";
-import { searchBusinesses, SearchError } from "@/lib/api";
 import { setSearchResults } from "@/lib/businessCache";
+import { useSearchJob, deriveProgressDisplay } from "@/hooks/useSearchJob";
 import { useFirebaseLeadStore } from "@/hooks/useFirebaseLeadStore";
 import { useSavedSearches } from "@/hooks/useSavedSearches";
 import { useCredits } from "@/hooks/useCredits";
@@ -89,18 +88,29 @@ const Index = () => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [copiedPhone, setCopiedPhone] = useState<string | null>(null);
 
-  // API results (from real backend)
-  const [apiResults, setApiResults] = useState<Business[]>([]);
-  const [viewState, setViewState] = useState<ViewState>("empty");
-  const [errorMessage, setErrorMessage] = useState<string>("");
-  const [isRetryable, setIsRetryable] = useState(false);
-  const [timedOut, setTimedOut] = useState(false);
+  // Job-based search hook
+  const searchJob = useSearchJob();
+  const progressDisplay = deriveProgressDisplay(searchJob.status, searchJob.progress);
+
+  // Track whether user explicitly reset to empty state
+  const [forceEmpty, setForceEmpty] = useState(true);
+
+  // Derive view state from hook status
+  const viewState: ViewState = (() => {
+    if (forceEmpty && (searchJob.status === "idle" || searchJob.status === "cancelled")) return "empty";
+    switch (searchJob.status) {
+      case "idle": return "empty";
+      case "creating":
+      case "running": return "loading";
+      case "completed": return "results";
+      case "failed": return "error";
+      case "cancelled": return "results";
+      default: return "empty";
+    }
+  })();
 
   // Slide-over detail panel
   const [selectedBusiness, setSelectedBusiness] = useState<Business | null>(null);
-
-  // Abort controller for in-flight requests
-  const abortRef = useRef<AbortController | null>(null);
 
   const fbStore = useFirebaseLeadStore();
   const credits = useCredits();
@@ -110,7 +120,7 @@ const Index = () => {
 
   // Client-side filtering of API results (name filter + preferences)
   const filteredResults = useMemo(() => {
-    let results = apiResults.filter(
+    let results = searchJob.results.filter(
       (b) =>
         (b.legitimacyScore ?? 100) >= prefs.legitimacyScoreMin &&
         (b.leadScore ?? 0) >= prefs.opportunityScoreMin,
@@ -150,59 +160,26 @@ const Index = () => {
       }
     });
     return results;
-  }, [apiResults, searchQuery, sortBy, sortDir, prefs.legitimacyScoreMin, prefs.opportunityScoreMin]);
+  }, [searchJob.results, searchQuery, sortBy, sortDir, prefs.legitimacyScoreMin, prefs.opportunityScoreMin]);
 
-  // Search is now saved server-side after API call — no client-side auto-save needed
-
-  const executeSearch = useCallback(async (keyword: string, loc: string, radiusMiles: number) => {
-    // Abort any in-flight request
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    setViewState("loading");
-    setErrorMessage("");
-    setTimedOut(false);
-
-    try {
-      const response = await searchBusinesses(
-        { keyword, location: loc, radius: radiusMiles },
-        controller.signal,
-      );
-
-      // Normalize API response → Business[]
-      const businesses = response.results.map(normalizeBusiness);
-
-      // Populate the module-level cache for LeadDetail
-      setSearchResults(businesses);
-      setApiResults(businesses);
-      setTimedOut(response.timedOut === true);
-      setViewState("results");
-
-      // Log cost breakdown
-      if (response.cost) {
-        console.log("[search] Cost breakdown:", response.cost);
-      }
-
-      // Deduct credit on successful search
-      credits.consume(1);
-
-      if (response.timedOut) {
-        toast.warning("Search timed out — showing partial results. Some businesses may still be processing.");
-      }
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
-
-      const message = err instanceof SearchError
-        ? err.message
-        : "Something went wrong. Please try again.";
-      const retryable = err instanceof SearchError ? err.isRetryable : true;
-
-      setErrorMessage(message);
-      setIsRetryable(retryable);
-      setViewState("error");
+  // Update business cache when results change
+  useEffect(() => {
+    if (searchJob.results.length > 0) {
+      setSearchResults(searchJob.results);
     }
-  }, [credits]);
+  }, [searchJob.results]);
+
+  // Deduct credit when search completes
+  const prevStatusRef = useRef(searchJob.status);
+  useEffect(() => {
+    if (prevStatusRef.current !== "completed" && searchJob.status === "completed") {
+      credits.consume(1);
+      if (searchJob.cost) {
+        console.log("[search] Cost breakdown:", searchJob.cost);
+      }
+    }
+    prevStatusRef.current = searchJob.status;
+  }, [searchJob.status, searchJob.cost, credits]);
 
   const handleSearch = useCallback(() => {
     const keyword = selectedCategory !== "all" ? selectedCategory : "businesses";
@@ -213,13 +190,9 @@ const Index = () => {
       return;
     }
 
-    executeSearch(keyword, loc, radius);
-  }, [selectedCategory, location, radius, executeSearch]);
-
-  // Cleanup abort controller on unmount
-  useEffect(() => {
-    return () => abortRef.current?.abort();
-  }, []);
+    searchJob.startSearch({ keyword, location: loc, radius });
+    setForceEmpty(false);
+  }, [selectedCategory, location, radius, searchJob.startSearch]);
 
   // Reset all search state when navigating to this page without a restore param
   // (e.g. clicking "Lead Search" in sidebar or after logout/login)
@@ -229,15 +202,13 @@ const Index = () => {
     // If there's no restore param and we previously had one,
     // reset to empty state so stale results don't linger.
     if (!restoreId && prevRestoreRef.current) {
-      abortRef.current?.abort();
+      setForceEmpty(true);
       setSearchQuery("");
       setLocation("");
       setSelectedCategory("all");
       setRadius(10);
       setSortBy("score");
       setSortDir("desc");
-      setApiResults([]);
-      setViewState("empty");
       setSelectedBusiness(null);
       setSelectedIds(new Set());
     }
@@ -245,20 +216,19 @@ const Index = () => {
   }, [searchParams]);
 
   const handleNewSearch = useCallback(() => {
-    abortRef.current?.abort();
+    searchJob.cancelSearch();
+    setForceEmpty(true);
     setSearchQuery("");
     setLocation("");
     setSelectedCategory("all");
     setRadius(10);
     setSortBy("score");
     setSortDir("desc");
-    setApiResults([]);
-    setViewState("empty");
     setSelectedBusiness(null);
     setSelectedIds(new Set());
     // Clear URL params (e.g. ?restore=...) and reset state
     setSearchParams({}, { replace: true });
-  }, [setSearchParams]);
+  }, [setSearchParams, searchJob.cancelSearch]);
 
   const recentSearches = firestoreSearches.slice(0, 5);
   const savedLeadsCount = fbStore.savedLeads.length;
@@ -448,19 +418,27 @@ const Index = () => {
     );
   }
 
-  // ── LOADING STATE ──
-  if (viewState === "loading") {
+  // ── LOADING STATE (no partial results yet) ──
+  if (viewState === "loading" && searchJob.results.length === 0) {
     const cat = selectedCategory !== "all" ? formatCategoryLabel(selectedCategory) : "businesses";
     const loc = location ? location : "your area";
+
+    let progressMessage: string;
+    if (progressDisplay.kind === "analyzing") {
+      progressMessage = `Analyzing ${progressDisplay.analyzed} of ${progressDisplay.total} websites…`;
+    } else {
+      progressMessage = "Starting search…";
+    }
+
     return (
       <div className="p-6 flex items-center justify-center min-h-[80vh]">
         <div className="w-full max-w-sm text-center">
           <Loader2 className="h-12 w-12 text-primary animate-spin mx-auto mb-6" />
           <p className="text-lg font-medium mb-2">Searching {cat} near {loc}…</p>
-          <p className="text-sm text-muted-foreground">
-            This may take up to a minute while we analyze websites.
+          <p className="text-sm text-muted-foreground mb-1">
+            {progressMessage}
           </p>
-          <Button variant="ghost" size="sm" className="mt-4" onClick={handleNewSearch}>
+          <Button variant="ghost" size="sm" className="mt-4" onClick={() => searchJob.cancelSearch()}>
             Cancel
           </Button>
         </div>
@@ -475,11 +453,8 @@ const Index = () => {
         <div className="w-full max-w-sm text-center">
           <AlertTriangle className="h-12 w-12 text-destructive mx-auto mb-4" />
           <h2 className="text-xl font-bold mb-2">Search Failed</h2>
-          <p className="text-sm text-muted-foreground mb-6">{errorMessage}</p>
+          <p className="text-sm text-muted-foreground mb-6">{searchJob.error}</p>
           <div className="flex gap-2 justify-center">
-            {isRetryable && (
-              <Button onClick={() => setViewState("empty")}>Try Again</Button>
-            )}
             <Button variant="outline" onClick={handleNewSearch}>New Search</Button>
           </div>
         </div>
@@ -575,11 +550,21 @@ const Index = () => {
               <div>
                 <h1 className="text-2xl font-bold">Results for {searchSummary || "all businesses"}</h1>
                 <p className="text-sm text-muted-foreground">
-                  {filteredResults.length} leads found
-                  {timedOut && " (partial — search timed out)"}
+                  {viewState === "loading" && progressDisplay.kind === "analyzing"
+                    ? `Analyzing ${progressDisplay.analyzed} of ${progressDisplay.total} websites… (${filteredResults.length} results so far)`
+                    : viewState === "loading"
+                      ? `Starting search… (${filteredResults.length} results so far)`
+                      : `${filteredResults.length} leads found`}
+                  {searchJob.status === "cancelled" && " (partial — search was cancelled)"}
+                  {progressDisplay.kind === "no-results" && " — no businesses found in this area"}
                 </p>
               </div>
             </div>
+            {viewState === "loading" && (
+              <Button variant="ghost" size="sm" onClick={() => searchJob.cancelSearch()}>
+                Cancel
+              </Button>
+            )}
           </div>
 
         <div className="flex flex-col sm:flex-row gap-2">

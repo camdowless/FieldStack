@@ -1,5 +1,6 @@
 // ─── Business Listings API (raw from DataForSEO) ──────────────────────────────
 
+import { Timestamp } from "firebase-admin/firestore";
 export interface BusinessRaw {
   title: string;
   description: string | null;
@@ -304,4 +305,43 @@ export interface SearchResponse {
   results: ScoredBusiness[];
   timedOut?: boolean;
   cost?: CostBreakdown;
+}
+// ─── Async Job Types ──────────────────────────────────────────────────────────
+
+export type JobStatus = "running" | "completed" | "failed" | "cancelled";
+
+export interface JobParams {
+  keyword: string;
+  location: string;
+  radius: number;
+}
+
+export interface JobProgress {
+  analyzed: number;
+  total: number;
+}
+
+export interface JobDocument {
+  uid: string;
+  status: JobStatus;
+  params: JobParams;
+  progress: JobProgress;
+  resultCount: number | null;
+  error: string | null;
+  cost: CostBreakdown | null;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+  ttl: Timestamp;
+}
+
+export interface ResultDocument extends ScoredBusiness {
+  uid: string;
+}
+
+export interface CreateJobResponse {
+  jobId: string;
+}
+
+export interface CancelJobResponse {
+  success: boolean;
 }

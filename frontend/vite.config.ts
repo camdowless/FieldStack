@@ -12,15 +12,17 @@ export default defineConfig(({ mode }) => ({
       overlay: false,
     },
     proxy: {
-      // In dev, proxy /api/search → Firebase Functions emulator or deployed function
+      // In dev, proxy /api → Firebase Functions emulator or deployed function
       "/api": {
         target: process.env.VITE_API_TARGET || "https://us-central1-search-edc58.cloudfunctions.net",
         changeOrigin: true,
         rewrite: (path: string) => {
-          // /api/search → /dataforseoBusinessSearch
+          // Order matters: more specific paths first
+          if (path === "/api/search/cancel") return "/cancelSearchJob";
           if (path === "/api/search") return "/dataforseoBusinessSearch";
-          // /api/businesses → /getBusinessesByCids
           if (path === "/api/businesses") return "/getBusinessesByCids";
+          if (path === "/api/recalculate-legitimacy") return "/recalculateLegitimacy";
+          if (path.startsWith("/api/ghost-businesses")) return path.replace("/api/ghost-businesses", "/getGhostBusinesses");
           return path;
         },
       },

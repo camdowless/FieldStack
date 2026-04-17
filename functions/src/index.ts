@@ -11,11 +11,14 @@ import {
 } from "./dfsClient";
 import { lookupDomainInfo } from "./rdap";
 import { score, computeLegitimacy } from "./scorer";
-import { ScoredBusiness, SearchResponse, CostBreakdown, BusinessRaw, ScorerInput } from "./types";
+import { ScoredBusiness, CostBreakdown, BusinessRaw, ScorerInput, JobDocument } from "./types";
 import { geocodeLocation, milesToKm, buildLocationCoordinate } from "./geocode";
+import { computeJobId, deleteResultsSubcollection, createOrReuseJob, isJobCancelled, cancelJob, identifyStuckJobs, identifyExpiredJobs } from "./jobHelpers";
+import { Timestamp } from "firebase-admin/firestore";
 
 admin.initializeApp();
 const db = admin.firestore();
+db.settings({ ignoreUndefinedProperties: true });
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────
 // In production, lock this down to your Firebase Hosting domain.
@@ -72,7 +75,8 @@ async function ensureUserProfile(uid: string): Promise<void> {
 /**
  * Save a search to the user's searches subcollection.
  */
-function saveSearchToUser(
+// Exported for Job_Processor (Task 3.1)
+export function saveSearchToUser(
   uid: string,
   search: { query: string; location: string; category: string; radius: number; cids: string[] },
 ): void {
@@ -97,17 +101,7 @@ function saveSearchToUser(
 
 // ─── Input Validation Helpers ─────────────────────────────────────────────────
 
-const MAX_KEYWORD_LEN = 120;
-const MAX_LOCATION_LEN = 200;
-const SAFE_TEXT_RE = /^[\p{L}\p{N}\s.,\-'&#/()]+$/u;
-
-function sanitizeString(raw: unknown, maxLen: number): string | null {
-  if (typeof raw !== "string") return null;
-  const trimmed = raw.trim().slice(0, maxLen);
-  if (trimmed.length === 0) return null;
-  if (!SAFE_TEXT_RE.test(trimmed)) return null;
-  return trimmed;
-}
+import { sanitizeString, MAX_KEYWORD_LEN, MAX_LOCATION_LEN } from "./validation";
 
 // ─── Firestore Cache Helpers ──────────────────────────────────────────────────
 
@@ -146,7 +140,8 @@ async function getCachedBusinesses(cids: string[]): Promise<Map<string, ScoredBu
  * Save scored businesses to Firestore (fire-and-forget).
  * Only saves businesses that have a non-null cid.
  */
-function saveBusinessesToCache(businesses: ScoredBusiness[]): void {
+// Exported for Job_Processor (Task 3.1)
+export function saveBusinessesToCache(businesses: ScoredBusiness[]): void {
   const toSave = businesses.filter((b) => b.cid);
   if (toSave.length === 0) return;
 
@@ -198,7 +193,8 @@ setInterval(() => {
 // ─── DataForSEO Business Search ───────────────────────────────────────────────
 
 // Helper: build ScorerInput from a BusinessRaw + optional enrichment data
-function buildScorerInput(
+// Exported for Job_Processor (Task 3.1)
+export function buildScorerInput(
   b: BusinessRaw,
   overrides: {
     website?: string | null;
@@ -312,322 +308,568 @@ export const dataforseoBusinessSearch = functions
         ? Math.max(1, Math.min(100, rawRadius))
         : 10;
 
-      // ── Geocode location → coordinates ──
-      const googleApiKey = process.env.GOOGLE_PLACES_API_KEY;
-      let locationCoordinate: string;
-      try {
-        const geo = await geocodeLocation(location, googleApiKey);
-        const radiusKm = Math.round(milesToKm(radiusMiles));
-        locationCoordinate = buildLocationCoordinate(geo.lat, geo.lng, radiusKm);
-        console.log(`[dataforseoBusinessSearch] Geocoded "${location}" → ${locationCoordinate}`);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Could not resolve location";
-        res.status(400).json({ error: msg });
-        return;
-      }
+      // ── Compute deterministic job ID and create job document ──
+      const jobId = computeJobId(uid, keyword, location, radiusMiles);
+      const jobRef = db.collection("jobs").doc(jobId);
 
-      // ── Env var check ──
-      const dfsEmail = process.env.DFS_EMAIL;
-      const dfsPassword = process.env.DFS_PASSWORD;
-      if (!dfsEmail || !dfsPassword) {
-        console.error("[dataforseoBusinessSearch] Missing DFS_EMAIL or DFS_PASSWORD env vars");
-        res.status(500).json({ error: "Server configuration error" });
-        return;
-      }
-
-      const auth = buildAuthHeader(dfsEmail, dfsPassword);
-
-      // Partial results accumulator for timeout scenario
-      let partialResults: ScoredBusiness[] = [];
-      const costTracker: CostBreakdown = {
-        businessSearch: 0,
-        instantPages: 0,
-        lighthouse: 0,
-        totalDfs: 0,
-        firestoreReads: 0,
-        firestoreWrites: 0,
-        cachedBusinesses: 0,
-        freshBusinesses: 0,
+      const now = Date.now();
+      const jobData: JobDocument = {
+        uid,
+        status: "running",
+        params: { keyword, location, radius: radiusMiles },
+        progress: { analyzed: 0, total: 0 },
+        resultCount: null,
+        error: null,
+        cost: null,
+        createdAt: Timestamp.fromMillis(now),
+        updatedAt: Timestamp.fromMillis(now),
+        ttl: Timestamp.fromMillis(now + 24 * 60 * 60 * 1000),
       };
 
-      const pipeline = async (): Promise<SearchResponse> => {
-        // 1. Business discovery
-        let businesses;
-        try {
-          const searchResult = await searchBusinesses(keyword, locationCoordinate, auth);
-          businesses = searchResult.items;
-          costTracker.businessSearch = searchResult.cost;
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : "DataForSEO business search failed";
-          res.status(502).json({ error: msg });
-          return { results: [] };
-        }
-
-        // 2. Pre-flight filter: remove Facebook URLs (permanently closed handled by legitimacy score)
-        const filtered = businesses.filter(
-          (b) =>
-            !(b.url && b.url.toLowerCase().includes("facebook.com"))
-        );
-
-        // 3. Split into no-website and has-website groups
-        const noWebsite = filtered.filter((b) => !b.url);
-        const hasWebsite = filtered.filter((b) => !!b.url);
-
-        // 3.5 Check cache for businesses we've already scored
-        const allCids = filtered
-          .map((b) => b.cid)
-          .filter((cid): cid is string => cid !== null);
-        const cachedMap = await getCachedBusinesses(allCids);
-        costTracker.firestoreReads = allCids.length;
-        costTracker.cachedBusinesses = cachedMap.size;
-
-        // Separate cached from uncached in each group
-        const noWebsiteUncached = noWebsite.filter((b) => !b.cid || !cachedMap.has(b.cid));
-        const hasWebsiteUncached = hasWebsite.filter((b) => !b.cid || !cachedMap.has(b.cid));
-        const cachedResults: ScoredBusiness[] = [...cachedMap.values()];
-
-        // 4. Score no-website businesses using the scorer
-        const noWebsiteScored: ScoredBusiness[] = noWebsiteUncached.map((b) => {
-          const scorerInput = buildScorerInput(b, { website: null });
-          const { score: s, label, scoring } = score(scorerInput);
-          const { legitimacyScore, legitimacyBreakdown } = computeLegitimacy(scorerInput);
-          return {
-            cid: b.cid,
-            name: b.title,
-            address: b.address,
-            phone: b.phone,
-            website: null,
-            rating: b.rating?.value ?? null,
-            reviewCount: b.rating?.votes_count ?? null,
-            category: b.category,
-            score: s,
-            label,
-            scoring,
-            legitimacyScore,
-            legitimacyBreakdown,
-            businessData: extractBusinessData(b),
-            websiteData: null,
-          };
-        });
-
-        partialResults = [...cachedResults, ...noWebsiteScored];
-
-        // 5. Fetch instant pages for all has-website businesses (uncached only)
-        const websiteUrls = hasWebsiteUncached.map((b) => b.url as string);
-        const instantPagesResult = await fetchInstantPages(websiteUrls, auth);
-        const htmlSignalsArr = instantPagesResult.signals;
-        costTracker.instantPages = instantPagesResult.cost;
-
-        // 6. Classify: dead site → parked → normal
-        const deadSiteScored: ScoredBusiness[] = [];
-        const parkedScored: ScoredBusiness[] = [];
-        const nonParkedBusinesses: Array<{
-          business: typeof hasWebsite[0];
-          url: string;
-          htmlSignals: typeof htmlSignalsArr[0];
-        }> = [];
-
-        for (let i = 0; i < hasWebsiteUncached.length; i++) {
-          const b = hasWebsiteUncached[i];
-          const signals = htmlSignalsArr[i];
-          const url = b.url as string;
-
-          if (signals.fetchFailed) {
-            const scorerInput = buildScorerInput(b, { website: url, htmlSignals: signals });
-            const { score: s, label, scoring } = score(scorerInput);
-            const { legitimacyScore, legitimacyBreakdown } = computeLegitimacy(scorerInput);
-
-            deadSiteScored.push({
-              cid: b.cid,
-              name: b.title,
-              address: b.address,
-              phone: b.phone,
-              website: url,
-              rating: b.rating?.value ?? null,
-              reviewCount: b.rating?.votes_count ?? null,
-              category: b.category,
-              score: s,
-              label,
-              scoring,
-              legitimacyScore,
-              legitimacyBreakdown,
-              businessData: extractBusinessData(b),
-              websiteData: signals,
-            });
-          } else if (isParkedDomain(signals)) {
-            const parkedInput = buildScorerInput(b, { website: url, htmlSignals: signals });
-            const { legitimacyScore, legitimacyBreakdown } = computeLegitimacy(parkedInput);
-            parkedScored.push({
-              cid: b.cid,
-              name: b.title,
-              address: b.address,
-              phone: b.phone,
-              website: url,
-              rating: b.rating?.value ?? null,
-              reviewCount: b.rating?.votes_count ?? null,
-              category: b.category,
-              score: null,
-              label: "parked",
-              scoring: {
-                total: 0,
-                reasons: ["Domain contains parking keywords"],
-                lighthousePerformance: null,
-                lighthouseSeo: null,
-                domainAgeYears: null,
-                isExpiredDomain: false,
-                isHttps: signals.isHttps,
-                wordCount: signals.wordCount,
-                hasMetaDescription: signals.hasMetaDescription,
-                hasFavicon: signals.hasFavicon,
-                fetchFailed: false,
-                statusCode: signals.statusCode,
-                onpageScore: signals.onpageScore,
-              },
-              legitimacyScore,
-              legitimacyBreakdown,
-              businessData: extractBusinessData(b),
-              websiteData: signals,
-            });
-          } else {
-            nonParkedBusinesses.push({ business: b, url, htmlSignals: signals });
-          }
-        }
-
-        partialResults = [...cachedResults, ...noWebsiteScored, ...deadSiteScored, ...parkedScored];
-
-        // 7. First 25 non-parked get Lighthouse; all non-parked get domain age
-        const first25Urls = nonParkedBusinesses.slice(0, 25).map((x) => x.url);
-        const allNonParkedUrls = nonParkedBusinesses.map((x) => x.url);
-
-        // 8. Run Lighthouse (first 25) + domain info (all non-parked) in parallel
-        const [lighthouseResult, domainInfoResults] = await Promise.all([
-          fetchLighthouse(first25Urls, auth),
-          Promise.allSettled(allNonParkedUrls.map((url) => {
-            try {
-              const domain = new URL(url).hostname;
-              return lookupDomainInfo(domain);
-            } catch {
-              return Promise.resolve({ ageYears: null, isExpired: false });
-            }
-          })),
-        ]);
-
-        const lighthouseResults = lighthouseResult.scores;
-        costTracker.lighthouse = lighthouseResult.cost;
-
-        // 9. Score each non-parked business
-        const nonParkedScored: ScoredBusiness[] = nonParkedBusinesses.map((item, idx) => {
-          const lighthouseScore = idx < 25 ? (lighthouseResults[idx] ?? null) : null;
-          const domainInfoOutcome = domainInfoResults[idx];
-          const domainInfo = domainInfoOutcome.status === "fulfilled"
-            ? domainInfoOutcome.value
-            : { ageYears: null, isExpired: false };
-
-          const scorerInput = buildScorerInput(item.business, {
-            website: item.url,
-            htmlSignals: item.htmlSignals,
-            lighthousePerformance: lighthouseScore?.performance ?? null,
-            lighthouseSeo: lighthouseScore?.seo ?? null,
-            domainAgeYears: domainInfo.ageYears,
-            isExpiredDomain: domainInfo.isExpired,
-          });
-
-          const { score: s, label, scoring } = score(scorerInput);
-          const { legitimacyScore, legitimacyBreakdown } = computeLegitimacy(scorerInput);
-
-          return {
-            cid: item.business.cid,
-            name: item.business.title,
-            address: item.business.address,
-            phone: item.business.phone,
-            website: item.url,
-            rating: item.business.rating?.value ?? null,
-            reviewCount: item.business.rating?.votes_count ?? null,
-            category: item.business.category,
-            score: s,
-            label,
-            scoring,
-            legitimacyScore,
-            legitimacyBreakdown,
-            businessData: extractBusinessData(item.business),
-            websiteData: item.htmlSignals,
-          };
-        });
-
-        const allScored = [
-          ...cachedResults,
-          ...noWebsiteScored,
-          ...deadSiteScored,
-          ...parkedScored,
-          ...nonParkedScored,
-        ];
-
-        // 10. Sort: non-null scores descending, nulls last
-        allScored.sort((a, b) => {
-          if (a.score === null && b.score === null) return 0;
-          if (a.score === null) return 1;
-          if (b.score === null) return -1;
-          return b.score - a.score;
-        });
-
-        // 11. Save newly scored businesses to cache (fire-and-forget)
-        const newlyScored = [
-          ...noWebsiteScored,
-          ...deadSiteScored,
-          ...parkedScored,
-          ...nonParkedScored,
-        ];
-        saveBusinessesToCache(newlyScored);
-        costTracker.firestoreWrites = newlyScored.filter((b) => b.cid).length;
-        costTracker.freshBusinesses = newlyScored.length;
-        costTracker.totalDfs = costTracker.businessSearch + costTracker.instantPages + costTracker.lighthouse;
-
-        partialResults = allScored;
-        return { results: allScored, cost: costTracker };
-      };
-
-      // Wrap in 290s timeout race
-      const timeoutPromise = new Promise<SearchResponse>((resolve) => {
-        setTimeout(() => {
-          const sorted = [...partialResults].sort((a, b) => {
-            if (a.score === null && b.score === null) return 0;
-            if (a.score === null) return 1;
-            if (b.score === null) return -1;
-            return b.score - a.score;
-          });
-          costTracker.totalDfs = costTracker.businessSearch + costTracker.instantPages + costTracker.lighthouse;
-          resolve({ results: sorted, timedOut: true, cost: costTracker });
-        }, 290_000);
-      });
-
       try {
-        const result = await Promise.race([pipeline(), timeoutPromise]);
-        if (!res.headersSent) {
-          console.log(`[dataforseoBusinessSearch] COST: $${costTracker.totalDfs.toFixed(4)} (search=$${costTracker.businessSearch.toFixed(4)} pages=$${costTracker.instantPages.toFixed(4)} lighthouse=$${costTracker.lighthouse.toFixed(4)}) | ${costTracker.cachedBusinesses} cached, ${costTracker.freshBusinesses} fresh, ${costTracker.firestoreReads} reads, ${costTracker.firestoreWrites} writes`);
-          // Save search to user profile (fire-and-forget)
-          const resultCids = result.results
-            .map((b) => b.cid)
-            .filter((cid): cid is string => cid !== null);
-          saveSearchToUser(uid, {
-            query: keyword,
-            location: location,
-            category: keyword,
-            radius: radiusMiles,
-            cids: resultCids,
-          });
-
-          res.status(200).json(result);
+        const result = await createOrReuseJob(jobId, jobData, jobRef as unknown as import("./jobHelpers").JobDocRef, deleteResultsSubcollection);
+        if (result.isExisting) {
+          console.log(`[Job_Creator] Returning existing running job ${jobId}`);
+        } else {
+          console.log(`[Job_Creator] Created new job ${jobId} for uid=${uid}`);
         }
-      } catch (err) {
-        if (!res.headersSent) {
-          const msg = err instanceof Error ? err.message : "Internal server error";
-          console.error("[dataforseoBusinessSearch] error:", msg);
-          // Don't leak internal error details to client
-          res.status(500).json({ error: "An unexpected error occurred. Please try again." });
-        }
+        res.status(200).json({ jobId });
+      } catch (err: unknown) {
+        console.error("[Job_Creator] Firestore error:", err);
+        res.status(500).json({ error: "An unexpected error occurred. Please try again." });
       }
     });
   });
+
+// ─── Job_Processor: Firestore onCreate trigger ───────────────────────────────
+
+/**
+ * Write scored business results to the results subcollection.
+ * Each result doc uses the CID as its document ID and includes the uid for security rules.
+ */
+async function writeResultsBatch(
+  jobId: string,
+  uid: string,
+  businesses: ScoredBusiness[]
+): Promise<number> {
+  const toWrite = businesses.filter((b) => b.cid);
+  if (toWrite.length === 0) return 0;
+
+  console.log(`[Job_Processor] Writing ${toWrite.length} results to jobs/${jobId}/results`);
+
+  const batchSize = 500;
+  for (let i = 0; i < toWrite.length; i += batchSize) {
+    const chunk = toWrite.slice(i, i + batchSize);
+    const batch = db.batch();
+    for (const biz of chunk) {
+      const ref = db.collection("jobs").doc(jobId).collection("results").doc(biz.cid as string);
+      batch.set(ref, { ...biz, uid });
+    }
+    await batch.commit();
+  }
+
+  return toWrite.length;
+}
+
+/**
+ * Update the job document with progress and updatedAt timestamp.
+ */
+async function updateJobProgress(
+  jobId: string,
+  analyzed: number,
+  total: number
+): Promise<void> {
+  await db.collection("jobs").doc(jobId).update({
+    progress: { analyzed, total },
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+}
+
+/**
+ * Score a batch of businesses that have no website.
+ */
+function scoreNoWebsiteBatch(businesses: BusinessRaw[]): ScoredBusiness[] {
+  return businesses.map((b) => {
+    const input = buildScorerInput(b, { website: null });
+    const { score: s, label, scoring } = score(input);
+    const { legitimacyScore, legitimacyBreakdown } = computeLegitimacy(input);
+    return {
+      cid: b.cid,
+      name: b.title,
+      address: b.address,
+      phone: b.phone,
+      website: null,
+      rating: b.rating?.value ?? null,
+      reviewCount: b.rating?.votes_count ?? null,
+      category: b.category,
+      score: s,
+      label,
+      scoring,
+      legitimacyScore,
+      legitimacyBreakdown,
+      businessData: extractBusinessData(b),
+      websiteData: null,
+    };
+  });
+}
+
+/**
+ * Score a batch of businesses with their HTML signals (dead-site or parked).
+ */
+function scoreWithSignals(
+  businesses: BusinessRaw[],
+  signalsMap: Map<string, import("./types").HtmlSignals>,
+  rdapMap: Map<string, import("./rdap").DomainInfo>,
+  lighthouseMap: Map<string, { performance: number; seo: number }>
+): ScoredBusiness[] {
+  return businesses.map((b) => {
+    const url = b.url ?? "";
+    const htmlSignals = signalsMap.get(url) ?? null;
+    const domain = b.domain ?? "";
+    const rdap = rdapMap.get(domain);
+    const lh = lighthouseMap.get(url);
+
+    const input = buildScorerInput(b, {
+      website: b.url,
+      htmlSignals,
+      lighthousePerformance: lh?.performance ?? null,
+      lighthouseSeo: lh?.seo ?? null,
+      domainAgeYears: rdap?.ageYears ?? null,
+      isExpiredDomain: rdap?.isExpired ?? false,
+    });
+
+    const { score: s, label, scoring } = score(input);
+    const { legitimacyScore, legitimacyBreakdown } = computeLegitimacy(input);
+
+    return {
+      cid: b.cid,
+      name: b.title,
+      address: b.address,
+      phone: b.phone,
+      website: b.url,
+      rating: b.rating?.value ?? null,
+      reviewCount: b.rating?.votes_count ?? null,
+      category: b.category,
+      score: s,
+      label,
+      scoring,
+      legitimacyScore,
+      legitimacyBreakdown,
+      businessData: extractBusinessData(b),
+      websiteData: htmlSignals,
+    };
+  });
+}
+
+export const processSearchJob = functions
+  .runWith({ timeoutSeconds: 300 })
+  .firestore.document("jobs/{jobId}")
+  .onCreate(async (snap, context) => {
+    const jobId = context.params.jobId;
+    const jobData = snap.data() as JobDocument;
+    const { uid, params } = jobData;
+    const { keyword, location, radius: radiusMiles } = params;
+    const jobRef = db.collection("jobs").doc(jobId);
+
+    console.log(`[Job_Processor] Starting job ${jobId} for uid=${uid}`);
+
+    const cost: CostBreakdown = {
+      businessSearch: 0,
+      instantPages: 0,
+      lighthouse: 0,
+      totalDfs: 0,
+      firestoreReads: 0,
+      firestoreWrites: 0,
+      cachedBusinesses: 0,
+      freshBusinesses: 0,
+    };
+
+    try {
+      // ── Step 1: Geocode ──
+      const DFS_EMAIL = process.env.DFS_EMAIL;
+      const DFS_PASSWORD = process.env.DFS_PASSWORD;
+      if (!DFS_EMAIL || !DFS_PASSWORD) {
+        await jobRef.update({
+          status: "failed",
+          error: "Server configuration error",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        return;
+      }
+
+      const authHeader = buildAuthHeader(DFS_EMAIL, DFS_PASSWORD);
+
+      let geo: { lat: number; lng: number };
+      try {
+        const geoResult = await geocodeLocation(location);
+        geo = { lat: geoResult.lat, lng: geoResult.lng };
+      } catch (geoErr) {
+        const msg = geoErr instanceof Error ? geoErr.message : "Geocoding failed";
+        await jobRef.update({
+          status: "failed",
+          error: msg,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        return;
+      }
+
+      const radiusKm = milesToKm(radiusMiles);
+      const locationCoord = buildLocationCoordinate(geo.lat, geo.lng, radiusKm);
+
+      // ── Step 2: DFS Business Search ──
+      let dfsItems: BusinessRaw[];
+      try {
+        const dfsResult = await searchBusinesses(keyword, locationCoord, authHeader);
+        dfsItems = dfsResult.items;
+        cost.businessSearch = dfsResult.cost;
+      } catch (dfsErr) {
+        const msg = dfsErr instanceof Error ? dfsErr.message : "DataForSEO business search failed";
+        await jobRef.update({
+          status: "failed",
+          error: msg,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        return;
+      }
+
+      // ── Zero results: complete immediately ──
+      if (dfsItems.length === 0) {
+        console.log(`[Job_Processor] Job ${jobId}: DFS returned 0 businesses, completing immediately`);
+        cost.totalDfs = cost.businessSearch;
+        await jobRef.update({
+          status: "completed",
+          progress: { analyzed: 0, total: 0 },
+          resultCount: 0,
+          cost,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        console.log(`[Job_Processor] Job ${jobId} completed with 0 results`);
+        return;
+      }
+
+      const totalBusinesses = dfsItems.length;
+
+      console.log(`[Job_Processor] Job ${jobId}: DFS returned ${totalBusinesses} businesses`);
+
+      // Write initial progress: 0 analyzed out of N total
+      await updateJobProgress(jobId, 0, totalBusinesses);
+
+      // ── Check cancellation after DFS search ──
+      if (await isJobCancelled(jobId)) {
+        await jobRef.update({
+          status: "cancelled",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        console.log(`[Job_Processor] Job ${jobId} cancelled after DFS search`);
+        return;
+      }
+
+      // ── Step 3: Split businesses into batches ──
+      // Check cache first
+      const allCids = dfsItems.filter((b) => b.cid).map((b) => b.cid as string);
+      const cachedMap = await getCachedBusinesses(allCids);
+      cost.firestoreReads += allCids.length;
+      cost.cachedBusinesses = cachedMap.size;
+
+      console.log(`[Job_Processor] Job ${jobId}: ${cachedMap.size} cached, ${dfsItems.length - cachedMap.size} fresh`);
+
+      // Separate cached vs fresh businesses
+      const cachedBusinesses: ScoredBusiness[] = [];
+      const freshItems: BusinessRaw[] = [];
+      for (const b of dfsItems) {
+        if (b.cid && cachedMap.has(b.cid)) {
+          cachedBusinesses.push(cachedMap.get(b.cid)!);
+        } else {
+          freshItems.push(b);
+        }
+      }
+      cost.freshBusinesses = freshItems.length;
+
+      let totalResultsWritten = 0;
+      let analyzed = 0;
+
+      // Write cached results immediately
+      if (cachedBusinesses.length > 0) {
+        const written = await writeResultsBatch(jobId, uid, cachedBusinesses);
+        totalResultsWritten += written;
+        analyzed += cachedBusinesses.length;
+        await updateJobProgress(jobId, analyzed, totalBusinesses);
+      }
+
+      // Split fresh businesses into: no-website, has-website
+      const noWebsite = freshItems.filter((b) => !b.url);
+      const hasWebsite = freshItems.filter((b) => !!b.url);
+
+      // ── Batch 1: No-website businesses ──
+      if (noWebsite.length > 0) {
+        const scored = scoreNoWebsiteBatch(noWebsite);
+        const written = await writeResultsBatch(jobId, uid, scored);
+        totalResultsWritten += written;
+        analyzed += noWebsite.length;
+        await updateJobProgress(jobId, analyzed, totalBusinesses);
+
+        // Save to cache (fire-and-forget)
+        saveBusinessesToCache(scored);
+        cost.firestoreWrites += scored.filter((b) => b.cid).length;
+
+        // Check cancellation
+        if (await isJobCancelled(jobId)) {
+          await jobRef.update({
+            status: "cancelled",
+            resultCount: totalResultsWritten,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          console.log(`[Job_Processor] Job ${jobId} cancelled after no-website batch`);
+          return;
+        }
+      }
+
+      if (hasWebsite.length === 0) {
+        // All businesses had no website — complete
+        cost.totalDfs = cost.businessSearch;
+        await jobRef.update({
+          status: "completed",
+          progress: { analyzed: totalBusinesses, total: totalBusinesses },
+          resultCount: totalResultsWritten,
+          cost,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+
+        // Fire-and-forget: save search to user
+        const allCidsForSearch = [...cachedBusinesses, ...scoreNoWebsiteBatch(noWebsite)]
+          .filter((b) => b.cid)
+          .map((b) => b.cid as string);
+        saveSearchToUser(uid, {
+          query: keyword,
+          location,
+          category: keyword,
+          radius: radiusMiles,
+          cids: allCidsForSearch,
+        });
+
+        console.log(`[Job_Processor] Job ${jobId} completed with ${totalResultsWritten} results`);
+        return;
+      }
+
+      // ── Step 4: Fetch Instant Pages for all websites ──
+      const websiteUrls = hasWebsite.map((b) => b.url!);
+      const { signals: htmlSignals, cost: ipCost } = await fetchInstantPages(websiteUrls, authHeader);
+      cost.instantPages = ipCost;
+
+      // Build signals map
+      const signalsMap = new Map<string, import("./types").HtmlSignals>();
+      for (let i = 0; i < websiteUrls.length; i++) {
+        signalsMap.set(websiteUrls[i], htmlSignals[i]);
+      }
+
+      // ── Split has-website businesses into: dead-site, parked, non-parked ──
+      const deadSite: BusinessRaw[] = [];
+      const parked: BusinessRaw[] = [];
+      const nonParked: BusinessRaw[] = [];
+
+      for (const b of hasWebsite) {
+        const url = b.url!;
+        const sig = signalsMap.get(url);
+        if (!sig) {
+          deadSite.push(b);
+        } else if (sig.fetchFailed) {
+          deadSite.push(b);
+        } else if (isParkedDomain(sig)) {
+          parked.push(b);
+        } else {
+          nonParked.push(b);
+        }
+      }
+
+      // Check cancellation after Instant Pages
+      if (await isJobCancelled(jobId)) {
+        await jobRef.update({
+          status: "cancelled",
+          resultCount: totalResultsWritten,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        console.log(`[Job_Processor] Job ${jobId} cancelled after Instant Pages`);
+        return;
+      }
+
+      // ── Batch 2: Dead-site businesses ──
+      if (deadSite.length > 0) {
+        const emptyRdap = new Map<string, import("./rdap").DomainInfo>();
+        const emptyLh = new Map<string, { performance: number; seo: number }>();
+        const scored = scoreWithSignals(deadSite, signalsMap, emptyRdap, emptyLh);
+        const written = await writeResultsBatch(jobId, uid, scored);
+        totalResultsWritten += written;
+        analyzed += deadSite.length;
+        await updateJobProgress(jobId, analyzed, totalBusinesses);
+
+        saveBusinessesToCache(scored);
+        cost.firestoreWrites += scored.filter((b) => b.cid).length;
+      }
+
+      // ── Batch 3: Parked businesses ──
+      if (parked.length > 0) {
+        const emptyRdap = new Map<string, import("./rdap").DomainInfo>();
+        const emptyLh = new Map<string, { performance: number; seo: number }>();
+        const scored = scoreWithSignals(parked, signalsMap, emptyRdap, emptyLh);
+        const written = await writeResultsBatch(jobId, uid, scored);
+        totalResultsWritten += written;
+        analyzed += parked.length;
+        await updateJobProgress(jobId, analyzed, totalBusinesses);
+
+        saveBusinessesToCache(scored);
+        cost.firestoreWrites += scored.filter((b) => b.cid).length;
+
+        // Check cancellation after dead-site + parked batches
+        if (await isJobCancelled(jobId)) {
+          await jobRef.update({
+            status: "cancelled",
+            resultCount: totalResultsWritten,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+          console.log(`[Job_Processor] Job ${jobId} cancelled after dead-site/parked batches`);
+          return;
+        }
+      }
+
+      // ── Batch 4: Non-parked businesses (Lighthouse + RDAP) ──
+      if (nonParked.length > 0) {
+        const nonParkedUrls = nonParked.map((b) => b.url!);
+        const nonParkedDomains = nonParked
+          .map((b) => b.domain)
+          .filter((d): d is string => !!d);
+
+        // Lighthouse
+        const { scores: lhScores, cost: lhCost } = await fetchLighthouse(nonParkedUrls, authHeader);
+        cost.lighthouse = lhCost;
+
+        const lighthouseMap = new Map<string, { performance: number; seo: number }>();
+        for (let i = 0; i < nonParkedUrls.length; i++) {
+          if (lhScores[i]) {
+            lighthouseMap.set(nonParkedUrls[i], lhScores[i]!);
+          }
+        }
+
+        // RDAP domain lookups
+        const rdapMap = new Map<string, import("./rdap").DomainInfo>();
+        const uniqueDomains = [...new Set(nonParkedDomains)];
+        const rdapResults = await Promise.allSettled(
+          uniqueDomains.map((d) => lookupDomainInfo(d))
+        );
+        for (let i = 0; i < uniqueDomains.length; i++) {
+          if (rdapResults[i].status === "fulfilled") {
+            rdapMap.set(uniqueDomains[i], (rdapResults[i] as PromiseFulfilledResult<import("./rdap").DomainInfo>).value);
+          }
+        }
+
+        const scored = scoreWithSignals(nonParked, signalsMap, rdapMap, lighthouseMap);
+        const written = await writeResultsBatch(jobId, uid, scored);
+        totalResultsWritten += written;
+        analyzed += nonParked.length;
+        await updateJobProgress(jobId, analyzed, totalBusinesses);
+
+        saveBusinessesToCache(scored);
+        cost.firestoreWrites += scored.filter((b) => b.cid).length;
+      }
+
+      // ── Completion ──
+      cost.totalDfs = cost.businessSearch + cost.instantPages + cost.lighthouse;
+
+      console.log(`[Job_Processor] Job ${jobId}: completing with ${totalResultsWritten} results, analyzed=${analyzed}/${totalBusinesses}`);
+
+      await jobRef.update({
+        status: "completed",
+        progress: { analyzed: totalBusinesses, total: totalBusinesses },
+        resultCount: totalResultsWritten,
+        cost,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // Fire-and-forget: save search to user's history
+      const allResultCids = allCids.length > 0 ? allCids : [];
+      saveSearchToUser(uid, {
+        query: keyword,
+        location,
+        category: keyword,
+        radius: radiusMiles,
+        cids: allResultCids,
+      });
+
+      console.log(`[Job_Processor] Job ${jobId} completed with ${totalResultsWritten} results`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "An unexpected error occurred";
+      console.error(`[Job_Processor] Job ${jobId} failed:`, err);
+      try {
+        await jobRef.update({
+          status: "failed",
+          error: msg,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      } catch (updateErr) {
+        console.error(`[Job_Processor] Failed to update job ${jobId} status:`, updateErr);
+      }
+    }
+  });
+
+// ─── Job_Canceller: Cancel a running search job ──────────────────────────────
+
+export const cancelSearchJob = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    // ── Method check ──
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+
+    // ── Auth check ──
+    let decodedToken: admin.auth.DecodedIdToken;
+    try {
+      decodedToken = await verifyAuth(req);
+    } catch {
+      res.status(401).json({ error: "Unauthorized. Please sign in." });
+      return;
+    }
+
+    const uid = decodedToken.uid;
+
+    // ── Read jobId from request body ──
+    const jobId = req.body?.jobId;
+    if (!jobId || typeof jobId !== "string") {
+      res.status(400).json({ error: "Missing jobId" });
+      return;
+    }
+
+    // ── Cancel the job via extracted logic ──
+    const jobRef = db.collection("jobs").doc(jobId);
+    const result = await cancelJob(uid, {
+      get: async () => {
+        const snap = await jobRef.get();
+        return { exists: snap.exists, data: () => snap.data() as JobDocument | undefined };
+      },
+      update: async (data) => {
+        await jobRef.update({
+          ...data,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      },
+    });
+
+    switch (result.outcome) {
+      case "not_found":
+        res.status(404).json({ error: "Job not found" });
+        return;
+      case "forbidden":
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      case "not_running":
+        res.status(409).json({ error: "Job is not running" });
+        return;
+      case "cancelled":
+        res.status(200).json({ success: true });
+        return;
+    }
+  });
+});
+
 
 // ─── Reconstruct ScorerInput from a cached ScoredBusiness ─────────────────────
 // Used by recalculateLegitimacy to re-score existing businesses without
@@ -866,3 +1108,84 @@ export const getBusinessesByCids = functions.https.onRequest((req, res) => {
     }
   });
 });
+
+// ─── Cleanup: Mark stuck running jobs as failed ───────────────────────────────
+
+export const cleanupStuckJobs = functions.pubsub
+  .schedule("every 5 minutes")
+  .onRun(async () => {
+    const tenMinutesAgo = Timestamp.fromMillis(Date.now() - 10 * 60 * 1000);
+
+    const snapshot = await db
+      .collection("jobs")
+      .where("status", "==", "running")
+      .where("createdAt", "<", tenMinutesAgo)
+      .get();
+
+    if (snapshot.empty) {
+      console.log("[cleanupStuckJobs] No stuck jobs found");
+      return;
+    }
+
+    const stuckIds = identifyStuckJobs(
+      snapshot.docs.map((doc) => ({
+        id: doc.id,
+        status: doc.data().status,
+        createdAt: doc.data().createdAt,
+        ttl: doc.data().ttl,
+      })),
+      Date.now()
+    );
+
+    const batch = db.batch();
+    for (const jobId of stuckIds) {
+      const ref = db.collection("jobs").doc(jobId);
+      batch.update(ref, {
+        status: "failed",
+        error: "Search timed out. Please try again.",
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+
+    await batch.commit();
+    console.log(`[cleanupStuckJobs] Marked ${stuckIds.length} stuck jobs as failed`);
+  });
+
+
+// ─── Cleanup: Delete expired job documents and their results ──────────────────
+
+export const cleanupExpiredJobs = functions.pubsub
+  .schedule("every 24 hours")
+  .onRun(async () => {
+    const now = Timestamp.now();
+
+    const snapshot = await db
+      .collection("jobs")
+      .where("ttl", "<", now)
+      .get();
+
+    if (snapshot.empty) {
+      console.log("[cleanupExpiredJobs] No expired jobs found");
+      return;
+    }
+
+    const expiredIds = identifyExpiredJobs(
+      snapshot.docs.map((doc) => ({
+        id: doc.id,
+        status: doc.data().status,
+        createdAt: doc.data().createdAt,
+        ttl: doc.data().ttl,
+      })),
+      now.toMillis()
+    );
+
+    for (const jobId of expiredIds) {
+      // Delete all results subcollection documents first
+      await deleteResultsSubcollection(jobId);
+      // Then delete the parent job document
+      await db.collection("jobs").doc(jobId).delete();
+    }
+
+    console.log(`[cleanupExpiredJobs] Deleted ${expiredIds.length} expired jobs`);
+  });
+

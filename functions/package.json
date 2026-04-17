@@ -4,7 +4,8 @@
   "scripts": {
     "build": "tsc",
     "serve": "npm run build && firebase emulators:start --only functions",
-    "deploy": "firebase deploy --only functions"
+    "deploy": "firebase deploy --only functions",
+    "test": "vitest run"
   },
   "engines": {
     "node": "20"
@@ -17,6 +18,7 @@
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "fast-check": "^3.23.2",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "vitest": "^4.1.4"
   }
 }

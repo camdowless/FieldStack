@@ -68,5 +68,6 @@ export function buildLocationCoordinate(
   lng: number,
   radiusKm: number,
 ): string {
-  return `${lat},${lng},${radiusKm}`;
+  // DFS API requires integer radius — decimal values cause "Invalid Field" errors
+  return `${lat},${lng},${Math.round(radiusKm)}`;
 }
