@@ -1,0 +1,766 @@
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
+import { Business } from "@/data/mockBusinesses";
+import { normalizeBusiness } from "@/data/leadTypes";
+import { searchBusinesses, fetchBusinessesByCids, SearchError } from "@/lib/api";
+import { setSearchResults } from "@/lib/businessCache";
+import { useLeadStore } from "@/hooks/useLeadStore";
+import { useSavedSearches } from "@/hooks/useSavedSearches";
+import { useCredits } from "@/hooks/useCredits";
+import { LeadScoreBadge } from "@/components/LeadScoreBadge";
+import { LeadDetailPanel } from "@/components/LeadDetailPanel";
+import { CategoryCombobox } from "@/components/CategoryCombobox";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Slider } from "@/components/ui/slider";
+import {
+  Search, MapPin, X, Check, Bookmark, BookmarkCheck, ExternalLink, Loader2,
+  ArrowLeft, ArrowUp, ArrowDown, Clock, Bookmark as BookmarkIcon, ChevronRight,
+  Copy, Download, AlertTriangle,
+} from "lucide-react";
+import { Link } from "react-router-dom";
+import { toast } from "sonner";
+import { motion } from "framer-motion";
+
+const RADIUS_STEPS = [1, 5, 10, 15, 20, 30, 40, 50] as const;
+type Radius = (typeof RADIUS_STEPS)[number];
+
+function relativeTime(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diffMs / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m} minute${m === 1 ? "" : "s"} ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} hour${h === 1 ? "" : "s"} ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d} day${d === 1 ? "" : "s"} ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+function StatusCell({ status }: { status: "pass" | "fail" | "na" }) {
+  if (status === "pass") return <Check className="h-4 w-4 text-green-500 mx-auto" aria-label="Present" />;
+  if (status === "fail") return <X className="h-4 w-4 text-red-500 mx-auto" aria-label="Missing" />;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="text-muted-foreground cursor-help" aria-label="N/A">—</span>
+      </TooltipTrigger>
+      <TooltipContent>N/A — no website detected for this business</TooltipContent>
+    </Tooltip>
+  );
+}
+
+type ViewState = "empty" | "loading" | "results" | "error";
+type SortDir = "asc" | "desc";
+const DEFAULT_SORT_COL = "score";
+const DEFAULT_SORT_DIR: SortDir = "desc";
+
+const Index = () => {
+  const [searchParams] = useSearchParams();
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const [location, setLocation] = useState(searchParams.get("location") || "");
+  const [selectedCategory, setSelectedCategory] = useState<string>(searchParams.get("category") || "all");
+  const [radius, setRadius] = useState<Radius>(() => {
+    const r = Number(searchParams.get("radius"));
+    return (RADIUS_STEPS as readonly number[]).includes(r) ? (r as Radius) : 10;
+  });
+  const [sortBy, setSortBy] = useState<string>(DEFAULT_SORT_COL);
+  const [sortDir, setSortDir] = useState<SortDir>(DEFAULT_SORT_DIR);
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [copiedPhone, setCopiedPhone] = useState<string | null>(null);
+
+  // API results (from real backend)
+  const [apiResults, setApiResults] = useState<Business[]>([]);
+  const [viewState, setViewState] = useState<ViewState>("empty");
+  const [errorMessage, setErrorMessage] = useState<string>("");
+  const [isRetryable, setIsRetryable] = useState(false);
+  const [timedOut, setTimedOut] = useState(false);
+
+  // Slide-over detail panel
+  const [selectedBusiness, setSelectedBusiness] = useState<Business | null>(null);
+
+  // Abort controller for in-flight requests
+  const abortRef = useRef<AbortController | null>(null);
+
+  const store = useLeadStore();
+  const credits = useCredits();
+  const { searches: firestoreSearches } = useSavedSearches();
+  const omittedIds = useMemo(
+    () => new Set(store.savedLeads.filter((l) => l.omitFromSearch).map((l) => l.business.id)),
+    [store.savedLeads],
+  );
+
+  // Client-side filtering of API results (name filter + omitted leads)
+  const filteredResults = useMemo(() => {
+    let results = apiResults.filter((b) => !omittedIds.has(b.id));
+
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      results = results.filter(
+        (b) =>
+          b.name.toLowerCase().includes(q) ||
+          b.category.toLowerCase().includes(q) ||
+          (b.city || "").toLowerCase().includes(q),
+      );
+    }
+
+    const dir = sortDir === "asc" ? 1 : -1;
+    const cmp = (a: string | number | null | undefined, b: string | number | null | undefined) => {
+      const av = a ?? (typeof b === "number" ? -Infinity : "");
+      const bv = b ?? (typeof a === "number" ? -Infinity : "");
+      if (typeof av === "number" && typeof bv === "number") return dir * (av - bv);
+      return dir * String(av).localeCompare(String(bv));
+    };
+    results.sort((a, b) => {
+      const an = a.analysis;
+      const bn = b.analysis;
+      switch (sortBy) {
+        case "score": return cmp(a.leadScore, b.leadScore);
+        case "name": return cmp(a.name, b.name);
+        case "industry": return cmp(a.category, b.category);
+        case "phone": return cmp(a.phone, b.phone);
+        case "website": return cmp(an.hasWebsite ? 1 : 0, bn.hasWebsite ? 1 : 0);
+        case "https": return cmp(!an.hasWebsite ? -1 : an.hasHttps ? 1 : 0, !bn.hasWebsite ? -1 : bn.hasHttps ? 1 : 0);
+        case "mobile": return cmp(!an.hasWebsite ? -1 : an.mobileFriendly ? 1 : 0, !bn.hasWebsite ? -1 : bn.mobileFriendly ? 1 : 0);
+        case "ads": return cmp(an.hasOnlineAds ? 1 : 0, bn.hasOnlineAds ? 1 : 0);
+        case "seo": return cmp(an.hasWebsite ? an.seoScore : -1, bn.hasWebsite ? bn.seoScore : -1);
+        default: return 0;
+      }
+    });
+    return results;
+  }, [apiResults, searchQuery, sortBy, sortDir, omittedIds]);
+
+  // Search is now saved server-side after API call — no client-side auto-save needed
+
+  const executeSearch = useCallback(async (keyword: string, loc: string, radiusMiles: number) => {
+    // Abort any in-flight request
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    setViewState("loading");
+    setErrorMessage("");
+    setTimedOut(false);
+
+    try {
+      const response = await searchBusinesses(
+        { keyword, location: loc, radius: radiusMiles },
+        controller.signal,
+      );
+
+      // Normalize API response → Business[]
+      const businesses = response.results.map(normalizeBusiness);
+
+      // Populate the module-level cache for LeadDetail
+      setSearchResults(businesses);
+      setApiResults(businesses);
+      setTimedOut(response.timedOut === true);
+      setViewState("results");
+
+      // Log cost breakdown
+      if (response.cost) {
+        console.log("[search] Cost breakdown:", response.cost);
+      }
+
+      // Deduct credit on successful search
+      credits.consume(1);
+
+      if (response.timedOut) {
+        toast.warning("Search timed out — showing partial results. Some businesses may still be processing.");
+      }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+
+      const message = err instanceof SearchError
+        ? err.message
+        : "Something went wrong. Please try again.";
+      const retryable = err instanceof SearchError ? err.isRetryable : true;
+
+      setErrorMessage(message);
+      setIsRetryable(retryable);
+      setViewState("error");
+    }
+  }, [credits]);
+
+  const handleSearch = useCallback(() => {
+    const keyword = selectedCategory !== "all" ? selectedCategory : "businesses";
+    const loc = location.trim();
+
+    if (!loc) {
+      toast.error("Please enter a location (zip code or city).");
+      return;
+    }
+
+    executeSearch(keyword, loc, radius);
+  }, [selectedCategory, location, radius, executeSearch]);
+
+  // Cleanup abort controller on unmount
+  useEffect(() => {
+    return () => abortRef.current?.abort();
+  }, []);
+
+  const handleNewSearch = () => {
+    abortRef.current?.abort();
+    setSearchQuery("");
+    setLocation("");
+    setSelectedCategory("all");
+    setRadius(10);
+    setSortBy("score");
+    setSortDir("desc");
+    setApiResults([]);
+    setViewState("empty");
+  };
+
+  const recentSearches = firestoreSearches.slice(0, 5);
+  const savedLeadsCount = store.savedLeads.length;
+
+  const restoreSearch = useCallback(async (s: typeof firestoreSearches[number]) => {
+    setLocation(s.location || "");
+    setSelectedCategory(s.category || "all");
+    setSortBy("score");
+    setSortDir("desc");
+    setSearchQuery("");
+
+    // Fetch businesses by CIDs from cache — no API cost
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setViewState("loading");
+    setErrorMessage("");
+    setTimedOut(false);
+
+    try {
+      const response = await fetchBusinessesByCids(s.cids, controller.signal);
+      const businesses = response.results.map(normalizeBusiness);
+      setSearchResults(businesses);
+      setApiResults(businesses);
+      setViewState("results");
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      const message = err instanceof SearchError ? err.message : "Failed to load saved search.";
+      setErrorMessage(message);
+      setIsRetryable(true);
+      setViewState("error");
+    }
+  }, []);
+
+  // Auto-restore search from URL param (e.g. from SearchHistory page)
+  const hasRestoredRef = useRef(false);
+  useEffect(() => {
+    if (hasRestoredRef.current) return;
+    const restoreId = searchParams.get("restore");
+    if (!restoreId || firestoreSearches.length === 0) return;
+    const match = firestoreSearches.find((s) => s.id === restoreId);
+    if (match) {
+      hasRestoredRef.current = true;
+      restoreSearch(match);
+    }
+  }, [searchParams, firestoreSearches, restoreSearch]);
+
+  const describeRecent = (s: typeof firestoreSearches[number]) => {
+    const parts: string[] = [];
+    if (s.category) parts.push(s.category);
+    if (s.location) parts.push(s.location);
+    return parts.length > 0 ? parts.join(" · ") : "All leads";
+  };
+
+  const toggleSort = (col: string) => {
+    if (sortBy !== col) {
+      setSortBy(col);
+      setSortDir(col === "name" || col === "industry" || col === "phone" || col === "website" ? "asc" : "desc");
+      return;
+    }
+    if (sortDir === "desc") {
+      setSortDir("asc");
+    } else {
+      setSortBy(DEFAULT_SORT_COL);
+      setSortDir(DEFAULT_SORT_DIR);
+    }
+  };
+
+  const SortHeader = ({ col, children, className = "" }: { col: string; children: React.ReactNode; className?: string }) => {
+    const active = sortBy === col;
+    return (
+      <th
+        className={`py-3 px-3 font-medium cursor-pointer select-none hover:text-foreground transition-colors ${className}`}
+        onClick={() => toggleSort(col)}
+      >
+        <span className="inline-flex items-center gap-1">
+          {children}
+          {active && (sortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />)}
+        </span>
+      </th>
+    );
+  };
+
+  const canSearch = !!location.trim();
+
+  const searchSummary = [
+    selectedCategory !== "all" ? selectedCategory : null,
+    location ? location : null,
+  ].filter(Boolean).join(" in ");
+
+  // Helper: snap slider index → radius value
+  const radiusFromIndex = (i: number) => RADIUS_STEPS[i] ?? 10;
+  const indexFromRadius = (r: Radius) => RADIUS_STEPS.indexOf(r);
+
+  // ── EMPTY STATE ──
+  if (viewState === "empty") {
+    return (
+      <div className="p-6 flex items-center justify-center min-h-[80vh]">
+        <div className="w-full max-w-xl text-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 mx-auto mb-6">
+            <Search className="h-8 w-8 text-primary" />
+          </div>
+          <h1 className="text-3xl font-bold mb-2">Find Your Next Client</h1>
+          <p className="text-muted-foreground mb-8">
+            Search by zip code or city to discover businesses with weak online presence.
+          </p>
+
+          <div className="flex flex-col gap-4">
+            {/* Row 1: Category + Location */}
+            <div className="flex flex-col sm:flex-row gap-3">
+              <div className="flex-1 text-left">
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Category</label>
+                <CategoryCombobox
+                  value={selectedCategory}
+                  onChange={setSelectedCategory}
+                  className="w-full"
+                  inputClassName="h-11 text-base"
+                  placeholder="e.g. Landscaper, Plumber"
+                  onKeyDown={(e) => e.key === "Enter" && canSearch && handleSearch()}
+                />
+              </div>
+              <div className="flex-1 text-left">
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Location</label>
+                <div className="relative">
+                  <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Zip code or city"
+                    className="pl-10 h-11 text-base"
+                    value={location}
+                    onChange={(e) => setLocation(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && canSearch && handleSearch()}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Row 2: Radius slider */}
+            <div className="text-left">
+              <label className="text-xs font-medium text-muted-foreground mb-3 block">
+                Search Radius: <span className="text-foreground font-semibold">{radius} mi</span>
+              </label>
+              <div className="px-1">
+                <Slider
+                  min={0}
+                  max={RADIUS_STEPS.length - 1}
+                  step={1}
+                  value={[indexFromRadius(radius)]}
+                  onValueChange={([i]) => setRadius(radiusFromIndex(i))}
+                  aria-label="Search radius"
+                />
+                <div className="flex justify-between mt-1.5">
+                  {RADIUS_STEPS.map((r) => (
+                    <span key={r} className={`text-[10px] ${radius === r ? "text-foreground font-medium" : "text-muted-foreground"}`}>
+                      {r}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Row 3: Search button */}
+            <Button
+              size="lg"
+              className="h-12 text-base mt-1"
+              disabled={!canSearch}
+              onClick={handleSearch}
+            >
+              <Search className="h-4 w-4 mr-2" />
+              Search Leads · 1 credit
+            </Button>
+          </div>
+
+          {recentSearches.length > 0 && (
+            <div className="mt-8 text-left">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
+                Recent searches
+              </h2>
+              <div className="flex flex-col gap-2">
+                {recentSearches.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => restoreSearch(s)}
+                    className="flex items-center gap-3 p-3 rounded-md border bg-card hover:bg-muted/50 transition-colors text-left group"
+                  >
+                    <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{describeRecent(s)}</p>
+                      <p className="text-xs text-muted-foreground">{relativeTime(s.createdAt)}</p>
+                    </div>
+                    <Badge variant="secondary" className="shrink-0">
+                      {s.resultCount} result{s.resultCount === 1 ? "" : "s"}
+                    </Badge>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {savedLeadsCount > 0 && (
+            <Link
+              to="/dashboard"
+              className="mt-3 flex items-center gap-3 p-3 rounded-md border bg-card hover:bg-muted/50 transition-colors text-left group"
+            >
+              <BookmarkIcon className="h-4 w-4 text-primary shrink-0" />
+              <span className="flex-1 text-sm font-medium">
+                Saved Leads — {savedLeadsCount} total
+              </span>
+              <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+            </Link>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── LOADING STATE ──
+  if (viewState === "loading") {
+    const cat = selectedCategory !== "all" ? selectedCategory : "businesses";
+    const loc = location ? location : "your area";
+    return (
+      <div className="p-6 flex items-center justify-center min-h-[80vh]">
+        <div className="w-full max-w-sm text-center">
+          <Loader2 className="h-12 w-12 text-primary animate-spin mx-auto mb-6" />
+          <p className="text-lg font-medium mb-2">Searching {cat} near {loc}…</p>
+          <p className="text-sm text-muted-foreground">
+            This may take up to a minute while we analyze websites.
+          </p>
+          <Button variant="ghost" size="sm" className="mt-4" onClick={handleNewSearch}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── ERROR STATE ──
+  if (viewState === "error") {
+    return (
+      <div className="p-6 flex items-center justify-center min-h-[80vh]">
+        <div className="w-full max-w-sm text-center">
+          <AlertTriangle className="h-12 w-12 text-destructive mx-auto mb-4" />
+          <h2 className="text-xl font-bold mb-2">Search Failed</h2>
+          <p className="text-sm text-muted-foreground mb-6">{errorMessage}</p>
+          <div className="flex gap-2 justify-center">
+            {isRetryable && (
+              <Button onClick={handleSearch}>Try Again</Button>
+            )}
+            <Button variant="outline" onClick={handleNewSearch}>New Search</Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── RESULTS STATE ──
+  const allVisibleSelected = filteredResults.length > 0 && filteredResults.every((b) => selectedIds.has(b.id));
+  const someVisibleSelected = filteredResults.some((b) => selectedIds.has(b.id));
+
+  const toggleSelectAll = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) {
+        filteredResults.forEach((b) => next.delete(b.id));
+      } else {
+        filteredResults.forEach((b) => next.add(b.id));
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectOne = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const copyPhone = async (phone: string) => {
+    try {
+      await navigator.clipboard.writeText(phone);
+      setCopiedPhone(phone);
+      setTimeout(() => setCopiedPhone((p) => (p === phone ? null : p)), 1500);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const saveSelected = () => {
+    filteredResults
+      .filter((b) => selectedIds.has(b.id))
+      .forEach((b) => store.saveLead(b));
+    setSelectedIds(new Set());
+  };
+
+  const exportCsv = () => {
+    const cols = ["Score", "Label", "Business", "Industry", "Phone", "Website", "HTTPS", "Mobile", "Ads", "SEO"];
+    const rows = filteredResults
+      .filter((b) => selectedIds.has(b.id))
+      .map((b) => {
+        const a = b.analysis;
+        const ternary = (has: boolean, ok: boolean) => (!has ? "N/A" : ok ? "Yes" : "No");
+        return [
+          b.leadScore,
+          b.label || "",
+          b.name,
+          b.category,
+          b.phone || "",
+          a.hasWebsite ? a.websiteUrl || "Yes" : "None",
+          ternary(a.hasWebsite, a.hasHttps),
+          ternary(a.hasWebsite, a.mobileFriendly),
+          a.hasOnlineAds ? "Yes" : "No",
+          a.hasWebsite ? a.seoScore : "N/A",
+        ];
+      });
+    const escape = (v: unknown) => {
+      const s = String(v ?? "");
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const csv = [cols, ...rows].map((r) => r.map(escape).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `leads-${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="p-6 pb-24">
+      <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}>
+        <div className="flex flex-col gap-4 mb-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={handleNewSearch}>
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+              <div>
+                <h1 className="text-2xl font-bold">Results for {searchSummary || "all businesses"}</h1>
+                <p className="text-sm text-muted-foreground">
+                  {filteredResults.length} leads found
+                  {timedOut && " (partial — search timed out)"}
+                </p>
+              </div>
+            </div>
+          </div>
+
+        <div className="flex flex-col sm:flex-row gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input placeholder="Filter by name..." className="pl-10 h-9" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
+          </div>
+          {searchQuery && (
+            <Button variant="ghost" size="sm" onClick={() => setSearchQuery("")} className="h-9 px-3">
+              <X className="h-4 w-4 mr-1" /> Clear
+            </Button>
+          )}
+        </div>
+        </div>
+      </motion.div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b text-left text-muted-foreground">
+              <th className="py-3 px-3 w-[40px]">
+                <Checkbox
+                  checked={allVisibleSelected ? true : someVisibleSelected ? "indeterminate" : false}
+                  onCheckedChange={toggleSelectAll}
+                  aria-label="Select all"
+                />
+              </th>
+              <SortHeader col="score" className="w-[70px]">Score</SortHeader>
+              <SortHeader col="name" className="min-w-[180px]">Business</SortHeader>
+              <SortHeader col="industry" className="min-w-[140px]">Industry</SortHeader>
+              <SortHeader col="phone" className="w-[160px]">Phone</SortHeader>
+              <SortHeader col="website" className="w-[100px]">Website</SortHeader>
+              <SortHeader col="https" className="w-[70px] text-center">HTTPS</SortHeader>
+              <SortHeader col="mobile" className="w-[70px] text-center">Mobile</SortHeader>
+              <SortHeader col="ads" className="w-[70px] text-center">Ads</SortHeader>
+              <SortHeader col="seo" className="w-[80px]">SEO</SortHeader>
+              <th className="py-3 px-3 font-medium w-[70px]"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredResults.length === 0 && (
+              <tr>
+                <td colSpan={11} className="py-12 text-center text-muted-foreground">
+                  No leads found. Try a different category or location.
+                </td>
+              </tr>
+            )}
+            {filteredResults.map((b) => {
+              const a = b.analysis;
+              const isSaved = store.isLeadSaved(b.id);
+              const checked = selectedIds.has(b.id);
+              return (
+                <tr
+                  key={b.id}
+                  className="border-b border-border/50 hover:bg-muted/30 group transition-colors cursor-pointer"
+                  onClick={(e) => {
+                    if ((e.target as HTMLElement).closest('button, a, input, [role="checkbox"]')) return;
+                    setSelectedBusiness(b);
+                  }}
+                >
+                  <td className="py-3 px-3" onClick={(e) => e.stopPropagation()}>
+                    <Checkbox
+                      checked={checked}
+                      onCheckedChange={() => toggleSelectOne(b.id)}
+                      aria-label={`Select ${b.name}`}
+                    />
+                  </td>
+                  <td className="py-3 px-3">
+                    <LeadScoreBadge score={b.leadScore} label={b.label} size="sm" />
+                  </td>
+                  <td className="py-3 px-3">
+                    <span className="font-medium">{b.name}</span>
+                  </td>
+                  <td className="py-3 px-3 text-muted-foreground">{b.category}</td>
+                  <td className="py-3 px-3" onClick={(e) => e.stopPropagation()}>
+                    {b.phone ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        <a href={`tel:${b.phone}`} className="hover:underline">{b.phone}</a>
+                        <Tooltip open={copiedPhone === b.phone ? true : undefined}>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              onClick={() => copyPhone(b.phone!)}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
+                              aria-label="Copy phone"
+                            >
+                              <Copy className="h-4 w-4" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>{copiedPhone === b.phone ? "Copied" : "Copy"}</TooltipContent>
+                        </Tooltip>
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </td>
+                  <td className="py-3 px-3" onClick={(e) => e.stopPropagation()}>
+                    {a.hasWebsite ? (
+                      <a
+                        href={a.websiteUrl || "#"}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-primary hover:underline"
+                      >
+                        Link
+                        <ExternalLink className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </a>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </td>
+                  <td className="py-3 px-3 text-center">
+                    <StatusCell status={!a.hasWebsite ? "na" : a.hasHttps ? "pass" : "fail"} />
+                  </td>
+                  <td className="py-3 px-3 text-center">
+                    <StatusCell status={!a.hasWebsite ? "na" : a.mobileFriendly ? "pass" : "fail"} />
+                  </td>
+                  <td className="py-3 px-3 text-center">
+                    <StatusCell status={a.hasOnlineAds ? "pass" : "fail"} />
+                  </td>
+                  <td className="py-3 px-3">
+                    {a.hasWebsite && a.seoScore > 0 ? (
+                      <span className={`font-medium ${a.seoScore >= 70 ? "text-green-500" : a.seoScore >= 40 ? "text-yellow-500" : "text-red-500"}`}>
+                        {a.seoScore}/100
+                      </span>
+                    ) : (
+                      <StatusCell status="na" />
+                    )}
+                  </td>
+                  <td className="py-3 px-3" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={() => isSaved ? store.removeLead(b.id) : store.saveLead(b)}
+                      >
+                        {isSaved ? <BookmarkCheck className="h-4 w-4 text-primary" /> : <Bookmark className="h-4 w-4" />}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={() => setSelectedBusiness(b)}
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Sticky bulk action bar */}
+      <div
+        className={`fixed bottom-0 left-0 right-0 z-40 border-t bg-background/95 backdrop-blur transition-transform duration-300 ${
+          selectedIds.size > 0 ? "translate-y-0" : "translate-y-full"
+        }`}
+        role="region"
+        aria-label="Bulk actions"
+      >
+        <div className="max-w-screen-2xl mx-auto px-6 py-3 flex items-center justify-between gap-3">
+          <span className="text-sm font-medium">{selectedIds.size} selected</span>
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={saveSelected}>
+              <Bookmark className="h-4 w-4 mr-1.5" /> Save Selected
+            </Button>
+            <Button size="sm" variant="outline" onClick={exportCsv}>
+              <Download className="h-4 w-4 mr-1.5" /> Export CSV
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
+              Deselect All
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Lead detail slide-over */}
+      <Sheet open={!!selectedBusiness} onOpenChange={(open) => { if (!open) setSelectedBusiness(null); }}>
+        <SheetContent side="right" className="p-0 sm:max-w-3xl w-full">
+          <SheetHeader className="sr-only">
+            <SheetTitle>{selectedBusiness?.name ?? "Lead Detail"}</SheetTitle>
+            <SheetDescription>Detailed analysis for this business lead</SheetDescription>
+          </SheetHeader>
+          <ScrollArea className="h-full">
+            <div className="p-6">
+              {selectedBusiness && <LeadDetailPanel business={selectedBusiness} />}
+            </div>
+          </ScrollArea>
+        </SheetContent>
+      </Sheet>
+    </div>
+  );
+};
+
+export default Index;

@@ -1,0 +1,83 @@
+import { sampleApiBusinesses } from "./sampleApiResponse";
+import { normalizeBusiness } from "./leadTypes";
+
+export type BusinessCategory = string;
+
+export type LeadStatus = "new" | "contacted" | "follow-up" | "not-interested" | "closed-won";
+
+export interface WebsiteAnalysis {
+  hasWebsite: boolean;
+  designScore: number;
+  mobileFriendly: boolean;
+  hasHttps: boolean;
+  deprecatedHtmlTags: number;
+  websiteAge: number;
+  copyrightYear: number | null;
+  loadTimeMs: number;
+  isParkedDomain: boolean;
+  isExpiredDomain: boolean;
+  facebookAsWebsite: boolean;
+  hasOnlineAds: boolean;
+  hasMarketingAgency: boolean;
+  seoScore: number;
+  recentGoogleReviews: boolean;
+  facebookActive: boolean;
+  websiteUrl: string | null;
+}
+
+export interface Business {
+  id: string;
+  name: string;
+  category: BusinessCategory;
+  address: string;
+  city: string;
+  state: string;
+  zip: string;
+  phone: string;
+  googleRating: number;
+  reviewCount: number;
+  analysis: WebsiteAnalysis;
+  leadScore: number;
+
+  // Extended (from real API)
+  label?: string;
+  reasons?: string[];
+  description?: string | null;
+  emails?: string[];
+  isClaimed?: boolean;
+  currentStatus?: string | null;
+  additionalCategories?: string[];
+  ratingDistribution?: Record<string, number> | null;
+  logo?: string | null;
+  mainImage?: string | null;
+  checkUrl?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  server?: string | null;
+  mediaType?: string | null;
+  pageSize?: number | null;
+  pageTitle?: string | null;
+  pageDescription?: string | null;
+  statusCode?: number | null;
+  fetchFailed?: boolean;
+  legitimacyScore?: number;
+  legitimacyReasons?: string[];
+  socialLinks?: Array<{ type: string; value: string }>;
+  totalPhotos?: number | null;
+}
+
+export const mockBusinesses: Business[] = sampleApiBusinesses.map(normalizeBusiness);
+
+// Derive unique categories + cities from the data for filter dropdowns.
+export const allCategories: string[] = Array.from(
+  new Set(mockBusinesses.map((b) => b.category))
+).sort();
+
+export const allCities: string[] = Array.from(
+  new Set(mockBusinesses.filter((b) => b.city).map((b) => `${b.city}, ${b.state}`))
+).sort();
+
+// Kept for backward compatibility (no longer used by the app, but exported just in case).
+export function calculateLeadScore(_a: WebsiteAnalysis): number {
+  return 0;
+}

@@ -7,616 +7,341 @@ import {
   fetchInstantPages,
   fetchLighthouse,
   isParkedDomain,
+  extractBusinessData,
 } from "./dfsClient";
 import { lookupDomainInfo } from "./rdap";
-import { score } from "./scorer";
-import { ScoredBusiness, SearchResponse } from "./types";
+import { score, computeLegitimacy } from "./scorer";
+import { ScoredBusiness, SearchResponse, CostBreakdown, BusinessRaw, ScorerInput } from "./types";
+import { geocodeLocation, milesToKm, buildLocationCoordinate } from "./geocode";
 
 admin.initializeApp();
+const db = admin.firestore();
 
-const corsHandler = cors({origin: true});
+// ─── CORS ─────────────────────────────────────────────────────────────────────
+// In production, lock this down to your Firebase Hosting domain.
+const ALLOWED_ORIGINS = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim())
+  : true; // `true` = allow all (dev convenience; override via env var in prod)
 
-interface PlaceResult {
-  name: string;
-  address: string;
-  phone: string;
-  website: string;
-  types: string[];
-  businessStatus: string;
-  openNow: boolean | null;
-  weekdayHours: string[];
-  summary: string;
-  zipCode: string;
+const corsHandler = cors({ origin: ALLOWED_ORIGINS });
+
+// ─── Auth Helper ──────────────────────────────────────────────────────────────
+
+async function verifyAuth(req: functions.https.Request): Promise<admin.auth.DecodedIdToken> {
+  const header = req.headers.authorization;
+  if (!header?.startsWith("Bearer ")) {
+    throw new Error("UNAUTHENTICATED");
+  }
+  return admin.auth().verifyIdToken(header.split("Bearer ")[1]);
 }
 
-interface TextSearchResponse {
-  places?: Array<{
-    displayName?: { text?: string };
-    formattedAddress?: string;
-    nationalPhoneNumber?: string;
-    websiteUri?: string;
-    types?: string[];
-    businessStatus?: string;
-    currentOpeningHours?: {
-      openNow?: boolean;
-      weekdayDescriptions?: string[];
-    };
-    editorialSummary?: { text?: string };
-    primaryTypeDisplayName?: { text?: string };
-  }>;
-  nextPageToken?: string;
-}
+// ─── User Profile Helper ─────────────────────────────────────────────────────
 
-const FIELDS = [
-  "places.displayName",
-  "places.formattedAddress",
-  "places.nationalPhoneNumber",
-  "places.websiteUri",
-  "places.types",
-  "places.businessStatus",
-  "places.currentOpeningHours",
-  "places.editorialSummary",
-  "places.primaryTypeDisplayName",
-  "nextPageToken",
-].join(",");
+const USERS_COLLECTION = "users";
 
-async function searchPlacesForZip(
-  apiKey: string,
-  zipCode: string,
-  businessType?: string,
-  pageToken?: string
-): Promise<{ results: PlaceResult[]; nextPageToken?: string }> {
-  const query = businessType
-    ? `${businessType} in ${zipCode}`
-    : `businesses in ${zipCode}`;
+/**
+ * Ensure a user document exists. Creates one from Firebase Auth data if missing.
+ */
+async function ensureUserProfile(uid: string): Promise<void> {
+  const ref = db.collection(USERS_COLLECTION).doc(uid);
+  const snap = await ref.get();
+  if (snap.exists) return;
 
-  const body: Record<string, unknown> = {
-    textQuery: query,
-    languageCode: "en",
-    pageSize: 20,
-  };
-
-  if (pageToken) {
-    body.pageToken = pageToken;
+  // Pull basic info from Firebase Auth
+  let email: string | null = null;
+  let displayName: string | null = null;
+  let photoURL: string | null = null;
+  try {
+    const userRecord = await admin.auth().getUser(uid);
+    email = userRecord.email ?? null;
+    displayName = userRecord.displayName ?? null;
+    photoURL = userRecord.photoURL ?? null;
+  } catch {
+    // If we can't fetch auth record, just create with uid only
   }
 
-  const url = "https://places.googleapis.com/v1/places:searchText";
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-Goog-Api-Key": apiKey,
-      "X-Goog-FieldMask": FIELDS,
-    },
-    body: JSON.stringify(body),
+  await ref.set({
+    email,
+    displayName,
+    photoURL,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Places API error (${response.status}): ${errorText}`);
-  }
-
-  const data = (await response.json()) as TextSearchResponse;
-
-  console.log(
-    `[searchPlaces] zip=${zipCode} page query returned ` +
-    `${(data.places || []).length} places, ` +
-    `nextPageToken=${data.nextPageToken ? "present" : "absent"}`
-  );
-
-  const results: PlaceResult[] = (data.places || []).map((place) => ({
-    name: place.displayName?.text || "",
-    address: place.formattedAddress || "",
-    phone: place.nationalPhoneNumber || "",
-    website: place.websiteUri || "",
-    types: place.types || [],
-    businessStatus: place.businessStatus || "",
-    openNow: place.currentOpeningHours?.openNow ?? null,
-    weekdayHours: place.currentOpeningHours?.weekdayDescriptions || [],
-    summary: place.editorialSummary?.text ||
-      place.primaryTypeDisplayName?.text || "",
-    zipCode,
-  }));
-
-  return {results, nextPageToken: data.nextPageToken};
+  console.log(`[user] created profile for ${uid}`);
 }
 
-export const searchPlaces = functions.https.onRequest((req, res) => {
-  corsHandler(req, res, async () => {
-    // Verify Firebase Auth token
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith("Bearer ")) {
-      res.status(401).json({error: "Unauthorized"});
-      return;
+/**
+ * Save a search to the user's searches subcollection.
+ */
+function saveSearchToUser(
+  uid: string,
+  search: { query: string; location: string; category: string; radius: number; cids: string[] },
+): void {
+  const ref = db
+    .collection(USERS_COLLECTION)
+    .doc(uid)
+    .collection("searches")
+    .doc();
+
+  ref
+    .set({
+      ...search,
+      resultCount: search.cids.length,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    })
+    .catch((err) => {
+      console.error("[user] failed to save search:", err);
+    });
+
+  console.log(`[user] saving search for ${uid} with ${search.cids.length} CIDs`);
+}
+
+// ─── Input Validation Helpers ─────────────────────────────────────────────────
+
+const MAX_KEYWORD_LEN = 120;
+const MAX_LOCATION_LEN = 200;
+const SAFE_TEXT_RE = /^[\p{L}\p{N}\s.,\-'&#/()]+$/u;
+
+function sanitizeString(raw: unknown, maxLen: number): string | null {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim().slice(0, maxLen);
+  if (trimmed.length === 0) return null;
+  if (!SAFE_TEXT_RE.test(trimmed)) return null;
+  return trimmed;
+}
+
+// ─── Firestore Cache Helpers ──────────────────────────────────────────────────
+
+const BUSINESSES_COLLECTION = "businesses";
+
+/**
+ * Look up cached ScoredBusiness docs by CID.
+ * Returns a Map of cid → ScoredBusiness for any that exist.
+ */
+async function getCachedBusinesses(cids: string[]): Promise<Map<string, ScoredBusiness>> {
+  const cached = new Map<string, ScoredBusiness>();
+  if (cids.length === 0) return cached;
+
+  // Firestore getAll supports up to 100 refs at a time
+  const batches: string[][] = [];
+  for (let i = 0; i < cids.length; i += 100) {
+    batches.push(cids.slice(i, i + 100));
+  }
+
+  for (const batch of batches) {
+    const refs = batch.map((cid) => db.collection(BUSINESSES_COLLECTION).doc(cid));
+    const snapshots = await db.getAll(...refs);
+    for (const snap of snapshots) {
+      if (snap.exists) {
+        const data = snap.data() as ScoredBusiness;
+        cached.set(snap.id, data);
+      }
     }
+  }
 
-    try {
-      await admin.auth().verifyIdToken(authHeader.split("Bearer ")[1]);
-    } catch {
-      res.status(401).json({error: "Invalid token"});
-      return;
-    }
+  console.log(`[cache] looked up ${cids.length} CIDs, found ${cached.size} cached`);
+  return cached;
+}
 
-    if (req.method !== "POST") {
-      res.status(405).json({error: "Method not allowed"});
-      return;
-    }
+/**
+ * Save scored businesses to Firestore (fire-and-forget).
+ * Only saves businesses that have a non-null cid.
+ */
+function saveBusinessesToCache(businesses: ScoredBusiness[]): void {
+  const toSave = businesses.filter((b) => b.cid);
+  if (toSave.length === 0) return;
 
-    const {zipCodes, businessType, maxPages = 10} = req.body;
-
-    if (!zipCodes || !Array.isArray(zipCodes) || zipCodes.length === 0) {
-      res.status(400).json({error: "zipCodes array is required"});
-      return;
-    }
-
-    if (zipCodes.length > 10) {
-      res.status(400).json({error: "Maximum 10 zip codes per request"});
-      return;
-    }
-
-    const apiKey = process.env.GOOGLE_PLACES_API_KEY;
-
-    if (!apiKey) {
-      res.status(500).json({error: "Places API key not configured"});
-      return;
-    }
-
-    try {
-      // Search all zip codes in parallel
-      const allResults = await Promise.all(
-        zipCodes.map(async (zip: string) => {
-          const results: PlaceResult[] = [];
-          let nextPageToken: string | undefined;
-          let page = 0;
-
-          do {
-            const response = await searchPlacesForZip(
-              apiKey, zip, businessType, nextPageToken
-            );
-            results.push(...response.results);
-            nextPageToken = response.nextPageToken;
-            page++;
-            // Google requires a short delay before using page tokens
-            if (nextPageToken && page < maxPages) {
-              await new Promise((r) => setTimeout(r, 2000));
-            }
-          } while (nextPageToken && page < maxPages);
-
-          console.log(
-            `[searchPlaces] zip=${zip} total=${results.length} pages=${page}`
-          );
-          return results;
-        })
-      );
-
-      const flatResults = allResults.flat()
-        .filter((r) => r.businessStatus === "OPERATIONAL" || r.businessStatus === "");
-      // Sort by zip code
-      flatResults.sort((a, b) => a.zipCode.localeCompare(b.zipCode));
-
-      res.json({
-        results: flatResults,
-        totalCount: flatResults.length,
+  // Firestore batch supports up to 500 writes
+  const batchSize = 500;
+  for (let i = 0; i < toSave.length; i += batchSize) {
+    const chunk = toSave.slice(i, i + batchSize);
+    const batch = db.batch();
+    for (const biz of chunk) {
+      const ref = db.collection(BUSINESSES_COLLECTION).doc(biz.cid as string);
+      batch.set(ref, {
+        ...biz,
+        _cachedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      console.error("Search error:", message);
-      res.status(500).json({error: message});
     }
-  });
-});
-
-// ─── Lead Analysis ────────────────────────────────────────────────────────────
-
-interface LeadAnalysis {
-  leadScore: number;
-  scoreReasons: string[];
-  isExcluded: boolean;
-  excludeReason?: string;
-  isHttps: boolean | null;
-  isMobileFriendly: boolean | null;
-  hasViewport: boolean | null;
-  hasMediaQueries: boolean | null;
-  copyrightYear: number | null;
-  lastWaybackSeen: string | null;
-  waybackAgeYears: number | null;
-  neverCrawled: boolean | null;
-  hasGoogleAds: boolean | null;
-}
-
-interface AnalyzedResult extends PlaceResult {
-  analysis: LeadAnalysis | null;
-  analysisFailed?: boolean;
-}
-
-// Business types to exclude from scoring (they don't need our services)
-const EXCLUDED_TYPE_PATTERNS = [
-  "software", "it_company", "computer", "internet_service_provider",
-  "marketing_agency", "advertising_agency", "web_design", "seo",
-  "university", "school", "primary_school", "secondary_school",
-  "hospital", "government_office", "embassy", "city_hall",
-  "real_estate_agency", "corporate_office", "insurance_agency",
-];
-
-// High-value target types (get bonus points)
-const HIGH_VALUE_TYPES = [
-  "plumber", "electrician", "roofing_contractor", "general_contractor",
-  "painter", "hvac_contractor", "landscaper", "carpenter",
-  "car_repair", "auto_body_shop", "car_wash", "auto_parts_store",
-  "dentist", "chiropractor", "physiotherapist", "beauty_salon",
-  "hair_care", "nail_salon", "spa", "gym", "fitness_center",
-  "restaurant", "cafe", "bakery", "bar", "food",
-  "lawyer", "accounting", "insurance_agency", "tax_preparation",
-  "florist", "jewelry_store", "clothing_store", "shoe_store",
-  "pet_store", "veterinary_care", "laundry", "dry_cleaning",
-];
-
-function isExcludedBusiness(types: string[]): { excluded: boolean; reason?: string } {
-  const typeStr = types.join(" ").toLowerCase();
-  for (const pattern of EXCLUDED_TYPE_PATTERNS) {
-    if (typeStr.includes(pattern)) {
-      return { excluded: true, reason: `Business type '${pattern}' excluded` };
-    }
-  }
-  return { excluded: false };
-}
-
-function isHighValueBusiness(types: string[]): boolean {
-  const typeStr = types.join(" ").toLowerCase();
-  return HIGH_VALUE_TYPES.some((t) => typeStr.includes(t));
-}
-
-async function checkWayback(
-  url: string
-): Promise<{ lastSeen: string | null; ageYears: number | null; neverCrawled: boolean }> {
-  try {
-    const domain = new URL(url).hostname;
-
-    // Availability API — returns the most recent snapshot directly
-    const availUrl = `https://archive.org/wayback/available?url=${encodeURIComponent(domain)}`;
-    const res = await fetch(availUrl, { signal: AbortSignal.timeout(10000) });
-
-    if (!res.ok) return { lastSeen: null, ageYears: null, neverCrawled: false };
-
-    const data = await res.json() as {
-      archived_snapshots?: {
-        closest?: { available: boolean; url: string; timestamp: string; status: string };
-      };
-    };
-
-    const closest = data.archived_snapshots?.closest;
-
-    if (!closest || !closest.available) {
-      return { lastSeen: null, ageYears: null, neverCrawled: true };
-    }
-
-    // timestamp format: YYYYMMDDHHmmss
-    const ts = closest.timestamp;
-    const lastDate = new Date(
-      parseInt(ts.slice(0, 4)),
-      parseInt(ts.slice(4, 6)) - 1,
-      parseInt(ts.slice(6, 8))
-    );
-    const ageYears = (Date.now() - lastDate.getTime()) / (1000 * 60 * 60 * 24 * 365);
-
-    return {
-      lastSeen: lastDate.toISOString().slice(0, 10),
-      ageYears: Math.round(ageYears * 10) / 10,
-      neverCrawled: false,
-    };
-  } catch {
-    return { lastSeen: null, ageYears: null, neverCrawled: false };
-  }
-}
-
-async function fetchWebsiteSignals(url: string): Promise<{
-  isHttps: boolean;
-  hasViewport: boolean | null;
-  hasMediaQueries: boolean | null;
-  copyrightYear: number | null;
-  hasGoogleAds: boolean | null;
-  fetchFailed: boolean;
-}> {
-  const isHttps = url.startsWith("https://");
-
-  try {
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(10000),
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; LeadFinderBot/1.0)" },
-      redirect: "follow",
+    batch.commit().catch((err) => {
+      console.error("[cache] batch write failed:", err);
     });
-
-    // If we got redirected to HTTPS, update the flag
-    const finalUrl = res.url || url;
-    const finalIsHttps = finalUrl.startsWith("https://");
-
-    if (!res.ok) {
-      return { isHttps: finalIsHttps, hasViewport: null, hasMediaQueries: null, copyrightYear: null, hasGoogleAds: null, fetchFailed: true };
-    }
-
-    const html = await res.text();
-    const lower = html.toLowerCase();
-
-    const hasViewport = lower.includes('name="viewport"') || lower.includes("name='viewport'");
-    const hasMediaQueries = lower.includes("@media");
-
-    // Google Ads tag: AW- conversion ID in gtag or googletag
-    const hasGoogleAds = /AW-\d{9,12}/.test(html) || lower.includes("googleadservices.com");
-
-    // Copyright year: look for © or "copyright" followed by a 4-digit year
-    const copyrightMatch = html.match(/(?:©|&copy;|copyright)\s*(?:\d{4}\s*[-–]\s*)?(\d{4})/i);
-    const copyrightYear = copyrightMatch ? parseInt(copyrightMatch[1]) : null;
-
-    return { isHttps: finalIsHttps, hasViewport, hasMediaQueries, copyrightYear, hasGoogleAds, fetchFailed: false };
-  } catch {
-    // Fetch failed entirely (timeout, DNS, blocked) — don't penalize the business
-    return { isHttps, hasViewport: null, hasMediaQueries: null, copyrightYear: null, hasGoogleAds: null, fetchFailed: true };
   }
+
+  console.log(`[cache] saving ${toSave.length} businesses to Firestore`);
 }
 
-async function analyzeLead(place: PlaceResult): Promise<AnalyzedResult> {
-  const exclusionCheck = isExcludedBusiness(place.types);
+// ─── Rate Limiting (simple per-IP, in-memory) ────────────────────────────────
 
-  if (exclusionCheck.excluded) {
-    return {
-      ...place,
-      analysis: {
-        leadScore: 0,
-        scoreReasons: [],
-        isExcluded: true,
-        excludeReason: exclusionCheck.reason,
-        isHttps: null,
-        isMobileFriendly: null,
-        hasViewport: null,
-        hasMediaQueries: null,
-        copyrightYear: null,
-        lastWaybackSeen: null,
-        waybackAgeYears: null,
-        neverCrawled: null,
-        hasGoogleAds: null,
-      },
-    };
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
+const RATE_LIMIT_MAX = 10; // max requests per window per IP
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const entry = rateLimitMap.get(ip);
+  if (!entry || now > entry.resetAt) {
+    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
+    return false;
   }
-
-  const currentYear = new Date().getFullYear();
-  let score = 0;
-  const reasons: string[] = [];
-
-  // No website — max score, skip web analysis
-  if (!place.website) {
-    score = 60;
-    reasons.push("No website found (+60)");
-
-    if (isHighValueBusiness(place.types)) {
-      score += 7;
-      reasons.push("High-value business type (+7)");
-    }
-
-    return {
-      ...place,
-      analysis: {
-        leadScore: Math.min(score, 100),
-        scoreReasons: reasons,
-        isExcluded: false,
-        isHttps: null,
-        isMobileFriendly: null,
-        hasViewport: null,
-        hasMediaQueries: null,
-        copyrightYear: null,
-        lastWaybackSeen: null,
-        waybackAgeYears: null,
-        neverCrawled: null,
-        hasGoogleAds: null,
-      },
-    };
-  }
-
-  // Run wayback + website fetch in parallel
-  const [wayback, webSignals] = await Promise.all([
-    checkWayback(place.website),
-    fetchWebsiteSignals(place.website),
-  ]);
-
-  // Wayback scoring
-  if (wayback.neverCrawled) {
-    score += 20;
-    reasons.push("Never crawled by Wayback Machine (+20)");
-  } else if (wayback.ageYears !== null) {
-    if (wayback.ageYears > 2) {
-      score += 15;
-      reasons.push(`Last crawled ${wayback.ageYears.toFixed(1)}yr ago (+15)`);
-    } else if (wayback.ageYears > 1) {
-      score += 8;
-      reasons.push(`Last crawled ${wayback.ageYears.toFixed(1)}yr ago (+8)`);
-    }
-  }
-
-  // HTTPS — only score if fetch succeeded or URL is clearly HTTP
-  if (!webSignals.isHttps) {
-    score += 8;
-    reasons.push("Not using HTTPS (+8)");
-  }
-
-  // Mobile friendliness — only penalize if we actually fetched the page
-  if (!webSignals.fetchFailed) {
-    if (!webSignals.hasViewport) {
-      score += 12;
-      reasons.push("No viewport meta tag — not mobile friendly (+12)");
-    }
-    if (!webSignals.hasMediaQueries) {
-      score += 5;
-      reasons.push("No CSS media queries detected (+5)");
-    }
-
-    // Copyright year staleness
-    if (webSignals.copyrightYear !== null) {
-      const yearDiff = currentYear - webSignals.copyrightYear;
-      if (yearDiff >= 2) {
-        score += 8;
-        reasons.push(`Copyright year ${webSignals.copyrightYear} is stale (+8)`);
-      }
-    }
-  }
-
-  // High-value type bonus
-  if (isHighValueBusiness(place.types)) {
-    score += 7;
-    reasons.push("High-value business type (+7)");
-  }
-
-  const isMobileFriendly = webSignals.fetchFailed
-    ? null
-    : (webSignals.hasViewport === true && webSignals.hasMediaQueries === true);
-
-  return {
-    ...place,
-    analysis: {
-      leadScore: Math.min(score, 100),
-      scoreReasons: reasons,
-      isExcluded: false,
-      isHttps: webSignals.isHttps,
-      isMobileFriendly,
-      hasViewport: webSignals.hasViewport,
-      hasMediaQueries: webSignals.hasMediaQueries,
-      copyrightYear: webSignals.copyrightYear,
-      lastWaybackSeen: wayback.lastSeen,
-      waybackAgeYears: wayback.ageYears,
-      neverCrawled: wayback.neverCrawled,
-      hasGoogleAds: webSignals.hasGoogleAds,
-    },
-  };
+  entry.count++;
+  return entry.count > RATE_LIMIT_MAX;
 }
 
-// Concurrency-limited parallel execution
-async function pLimit<T>(
-  tasks: (() => Promise<T>)[],
-  limit: number
-): Promise<T[]> {
-  const results: T[] = new Array(tasks.length);
-  let index = 0;
-
-  async function worker() {
-    while (index < tasks.length) {
-      const i = index++;
-      results[i] = await tasks[i]();
-    }
+// Periodically clean up stale entries to prevent memory leak
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of rateLimitMap) {
+    if (now > entry.resetAt) rateLimitMap.delete(ip);
   }
-
-  const workers = Array.from({ length: Math.min(limit, tasks.length) }, worker);
-  await Promise.all(workers);
-  return results;
-}
-
-export const analyzeLeads = functions
-  .runWith({ timeoutSeconds: 300, memory: "512MB" })
-  .https.onRequest((req, res) => {
-    corsHandler(req, res, async () => {
-      const authHeader = req.headers.authorization;
-      if (!authHeader?.startsWith("Bearer ")) {
-        res.status(401).json({ error: "Unauthorized" });
-        return;
-      }
-      try {
-        await admin.auth().verifyIdToken(authHeader.split("Bearer ")[1]);
-      } catch {
-        res.status(401).json({ error: "Invalid token" });
-        return;
-      }
-
-      if (req.method !== "POST") {
-        res.status(405).json({ error: "Method not allowed" });
-        return;
-      }
-
-      const { places } = req.body as { places: PlaceResult[] };
-
-      if (!places || !Array.isArray(places) || places.length === 0) {
-        res.status(400).json({ error: "places array is required" });
-        return;
-      }
-
-      if (places.length > 200) {
-        res.status(400).json({ error: "Maximum 200 places per request" });
-        return;
-      }
-
-      try {
-        const tasks = places.map((place) => async (): Promise<AnalyzedResult> => {
-          try {
-            return await analyzeLead(place);
-          } catch (err) {
-            console.error(`[analyzeLeads] failed for ${place.name}:`, err);
-            return { ...place, analysis: null, analysisFailed: true };
-          }
-        });
-
-        // 5 concurrent requests — polite to external servers
-        const analyzed = await pLimit(tasks, 5);
-
-        // Sort by lead score descending, excluded last
-        analyzed.sort((a, b) => {
-          if (a.analysis?.isExcluded && !b.analysis?.isExcluded) return 1;
-          if (!a.analysis?.isExcluded && b.analysis?.isExcluded) return -1;
-          return (b.analysis?.leadScore ?? 0) - (a.analysis?.leadScore ?? 0);
-        });
-
-        res.json({ results: analyzed, totalCount: analyzed.length });
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : "Unknown error";
-        console.error("[analyzeLeads] error:", message);
-        res.status(500).json({ error: message });
-      }
-    });
-  });
+}, RATE_LIMIT_WINDOW_MS * 2);
 
 // ─── DataForSEO Business Search ───────────────────────────────────────────────
+
+// Helper: build ScorerInput from a BusinessRaw + optional enrichment data
+function buildScorerInput(
+  b: BusinessRaw,
+  overrides: {
+    website?: string | null;
+    htmlSignals?: ScorerInput["htmlSignals"];
+    lighthousePerformance?: number | null;
+    lighthouseSeo?: number | null;
+    domainAgeYears?: number | null;
+    isExpiredDomain?: boolean;
+  } = {}
+): ScorerInput {
+  const socialTypes = ["facebook", "instagram", "twitter", "linkedin", "youtube", "pinterest", "tiktok"];
+  const contacts = b.contact_info ?? [];
+  const socialContacts = contacts.filter((c) => socialTypes.includes(c.type));
+
+  return {
+    website: overrides.website ?? b.url ?? null,
+    htmlSignals: overrides.htmlSignals ?? null,
+    lighthousePerformance: overrides.lighthousePerformance ?? null,
+    lighthouseSeo: overrides.lighthouseSeo ?? null,
+    domainAgeYears: overrides.domainAgeYears ?? null,
+    isExpiredDomain: overrides.isExpiredDomain ?? false,
+    phone: b.phone,
+    isClaimed: b.is_claimed,
+    currentStatus: b.work_time?.work_hours?.current_status ?? null,
+    reviewCount: b.rating?.votes_count ?? null,
+    rating: b.rating?.value ?? null,
+    ratingDistribution: b.rating_distribution,
+    firstSeen: b.first_seen,
+    // Legitimacy signals
+    totalPhotos: b.total_photos,
+    hasFacebookLink: socialContacts.some((c) => c.type === "facebook"),
+    socialLinkCount: socialContacts.length,
+    hasLogo: !!b.logo,
+    hasMainImage: !!b.main_image,
+    hasAttributes: !!(b.attributes?.available_attributes && Object.keys(b.attributes.available_attributes).length > 0),
+    hasDescription: !!b.description,
+    address: b.address,
+  };
+}
 
 export const dataforseoBusinessSearch = functions
   .runWith({ timeoutSeconds: 300 })
   .https.onRequest((req, res) => {
     corsHandler(req, res, async () => {
-      // Method check
+      // ── Method check ──
       if (req.method !== "POST") {
         res.status(405).json({ error: "Method not allowed" });
         return;
       }
 
-      // Body validation
-      const { keyword, location } = req.body as { keyword?: string; location?: string };
+      // ── Auth check ──
+      let decodedToken: admin.auth.DecodedIdToken;
+      try {
+        decodedToken = await verifyAuth(req);
+      } catch {
+        res.status(401).json({ error: "Unauthorized. Please sign in." });
+        return;
+      }
+
+      const uid = decodedToken.uid;
+
+      // Ensure user profile exists (fire-and-forget)
+      ensureUserProfile(uid).catch((err) => {
+        console.error("[user] ensureUserProfile failed:", err);
+      });
+
+      // ── Rate limiting ──
+      const clientIp = req.ip || req.headers["x-forwarded-for"] || "unknown";
+      if (isRateLimited(String(clientIp))) {
+        res.status(429).json({ error: "Too many requests. Please wait a moment." });
+        return;
+      }
+
+      // ── Input validation & sanitization ──
+      const rawKeyword = req.body?.keyword;
+      const rawLocation = req.body?.location;
+      const rawRadius = req.body?.radius;
+
+      const keyword = sanitizeString(rawKeyword, MAX_KEYWORD_LEN);
+      const location = sanitizeString(rawLocation, MAX_LOCATION_LEN);
+
       if (!keyword) {
-        res.status(400).json({ error: "Missing required field: keyword" });
+        res.status(400).json({ error: "Missing or invalid field: keyword (letters, numbers, basic punctuation only)" });
         return;
       }
       if (!location) {
-        res.status(400).json({ error: "Missing required field: location" });
+        res.status(400).json({ error: "Missing or invalid field: location (letters, numbers, basic punctuation only)" });
         return;
       }
 
-      // Env var check
+      // Radius: default 10 miles, clamp to 1–100
+      const radiusMiles = typeof rawRadius === "number"
+        ? Math.max(1, Math.min(100, rawRadius))
+        : 10;
+
+      // ── Geocode location → coordinates ──
+      const googleApiKey = process.env.GOOGLE_PLACES_API_KEY;
+      let locationCoordinate: string;
+      try {
+        const geo = await geocodeLocation(location, googleApiKey);
+        const radiusKm = Math.round(milesToKm(radiusMiles));
+        locationCoordinate = buildLocationCoordinate(geo.lat, geo.lng, radiusKm);
+        console.log(`[dataforseoBusinessSearch] Geocoded "${location}" → ${locationCoordinate}`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Could not resolve location";
+        res.status(400).json({ error: msg });
+        return;
+      }
+
+      // ── Env var check ──
       const dfsEmail = process.env.DFS_EMAIL;
       const dfsPassword = process.env.DFS_PASSWORD;
       if (!dfsEmail || !dfsPassword) {
-        res.status(500).json({ error: "Missing configuration: DFS_EMAIL and DFS_PASSWORD are required" });
+        console.error("[dataforseoBusinessSearch] Missing DFS_EMAIL or DFS_PASSWORD env vars");
+        res.status(500).json({ error: "Server configuration error" });
         return;
       }
-
-      console.log("[dataforseoBusinessSearch] DFS_EMAIL present:", !!dfsEmail, "| first 4 chars:", dfsEmail.substring(0, 4));
 
       const auth = buildAuthHeader(dfsEmail, dfsPassword);
 
       // Partial results accumulator for timeout scenario
       let partialResults: ScoredBusiness[] = [];
+      const costTracker: CostBreakdown = {
+        businessSearch: 0,
+        instantPages: 0,
+        lighthouse: 0,
+        totalDfs: 0,
+        firestoreReads: 0,
+        firestoreWrites: 0,
+        cachedBusinesses: 0,
+        freshBusinesses: 0,
+      };
 
       const pipeline = async (): Promise<SearchResponse> => {
         // 1. Business discovery
         let businesses;
         try {
-          businesses = await searchBusinesses(keyword, location, auth);
+          const searchResult = await searchBusinesses(keyword, locationCoordinate, auth);
+          businesses = searchResult.items;
+          costTracker.businessSearch = searchResult.cost;
         } catch (err) {
           const msg = err instanceof Error ? err.message : "DataForSEO business search failed";
           res.status(502).json({ error: msg });
-          // Return a sentinel so Promise.race doesn't try to send again
           return { results: [] };
         }
 
@@ -631,38 +356,50 @@ export const dataforseoBusinessSearch = functions
         const noWebsite = filtered.filter((b) => !b.url);
         const hasWebsite = filtered.filter((b) => !!b.url);
 
-        // 4. Score no-website businesses immediately
-        const noWebsiteScored: ScoredBusiness[] = noWebsite.map((b) => ({
-          name: b.title,
-          address: b.address,
-          phone: b.phone,
-          website: null,
-          rating: b.rating?.value ?? null,
-          reviewCount: b.rating?.votes_count ?? null,
-          category: b.category,
-          score: 100,
-          label: "no website" as const,
-          scoring: {
-            total: 100,
-            reasons: ["No website found (+100)"],
-            lighthousePerformance: null,
-            lighthouseSeo: null,
-            domainAgeYears: null,
-            isExpiredDomain: false,
-            isHttps: null,
-            wordCount: null,
-            hasMetaDescription: null,
-            hasFavicon: null,
-            fetchFailed: null,
-            statusCode: null,
-          },
-        }));
+        // 3.5 Check cache for businesses we've already scored
+        const allCids = filtered
+          .map((b) => b.cid)
+          .filter((cid): cid is string => cid !== null);
+        const cachedMap = await getCachedBusinesses(allCids);
+        costTracker.firestoreReads = allCids.length;
+        costTracker.cachedBusinesses = cachedMap.size;
 
-        partialResults = [...noWebsiteScored];
+        // Separate cached from uncached in each group
+        const noWebsiteUncached = noWebsite.filter((b) => !b.cid || !cachedMap.has(b.cid));
+        const hasWebsiteUncached = hasWebsite.filter((b) => !b.cid || !cachedMap.has(b.cid));
+        const cachedResults: ScoredBusiness[] = [...cachedMap.values()];
 
-        // 5. Fetch instant pages for all has-website businesses
-        const websiteUrls = hasWebsite.map((b) => b.url as string);
-        const htmlSignalsArr = await fetchInstantPages(websiteUrls, auth);
+        // 4. Score no-website businesses using the scorer
+        const noWebsiteScored: ScoredBusiness[] = noWebsiteUncached.map((b) => {
+          const scorerInput = buildScorerInput(b, { website: null });
+          const { score: s, label, scoring } = score(scorerInput);
+          const { legitimacyScore, legitimacyBreakdown } = computeLegitimacy(scorerInput);
+          return {
+            cid: b.cid,
+            name: b.title,
+            address: b.address,
+            phone: b.phone,
+            website: null,
+            rating: b.rating?.value ?? null,
+            reviewCount: b.rating?.votes_count ?? null,
+            category: b.category,
+            score: s,
+            label,
+            scoring,
+            legitimacyScore,
+            legitimacyBreakdown,
+            businessData: extractBusinessData(b),
+            websiteData: null,
+          };
+        });
+
+        partialResults = [...cachedResults, ...noWebsiteScored];
+
+        // 5. Fetch instant pages for all has-website businesses (uncached only)
+        const websiteUrls = hasWebsiteUncached.map((b) => b.url as string);
+        const instantPagesResult = await fetchInstantPages(websiteUrls, auth);
+        const htmlSignalsArr = instantPagesResult.signals;
+        costTracker.instantPages = instantPagesResult.cost;
 
         // 6. Classify: dead site → parked → normal
         const deadSiteScored: ScoredBusiness[] = [];
@@ -673,19 +410,18 @@ export const dataforseoBusinessSearch = functions
           htmlSignals: typeof htmlSignalsArr[0];
         }> = [];
 
-        for (let i = 0; i < hasWebsite.length; i++) {
-          const b = hasWebsite[i];
+        for (let i = 0; i < hasWebsiteUncached.length; i++) {
+          const b = hasWebsiteUncached[i];
           const signals = htmlSignalsArr[i];
           const url = b.url as string;
 
-          // Dead site: fetch failed or non-200 — top priority classification
           if (signals.fetchFailed) {
-            const statusCode = signals.statusCode;
-            const reason = statusCode !== null
-              ? `Site returned HTTP ${statusCode} (+90)`
-              : "Site unreachable — DNS failure, timeout, or SSL error (+90)";
+            const scorerInput = buildScorerInput(b, { website: url, htmlSignals: signals });
+            const { score: s, label, scoring } = score(scorerInput);
+            const { legitimacyScore, legitimacyBreakdown } = computeLegitimacy(scorerInput);
 
             deadSiteScored.push({
+              cid: b.cid,
               name: b.title,
               address: b.address,
               phone: b.phone,
@@ -693,25 +429,19 @@ export const dataforseoBusinessSearch = functions
               rating: b.rating?.value ?? null,
               reviewCount: b.rating?.votes_count ?? null,
               category: b.category,
-              score: 90,
-              label: "dead site",
-              scoring: {
-                total: 90,
-                reasons: [reason],
-                lighthousePerformance: null,
-                lighthouseSeo: null,
-                domainAgeYears: null,
-                isExpiredDomain: false,
-                isHttps: signals.isHttps,
-                wordCount: null,
-                hasMetaDescription: null,
-                hasFavicon: null,
-                fetchFailed: true,
-                statusCode: signals.statusCode,
-              },
+              score: s,
+              label,
+              scoring,
+              legitimacyScore,
+              legitimacyBreakdown,
+              businessData: extractBusinessData(b),
+              websiteData: signals,
             });
           } else if (isParkedDomain(signals)) {
+            const parkedInput = buildScorerInput(b, { website: url, htmlSignals: signals });
+            const { legitimacyScore, legitimacyBreakdown } = computeLegitimacy(parkedInput);
             parkedScored.push({
+              cid: b.cid,
               name: b.title,
               address: b.address,
               phone: b.phone,
@@ -734,21 +464,26 @@ export const dataforseoBusinessSearch = functions
                 hasFavicon: signals.hasFavicon,
                 fetchFailed: false,
                 statusCode: signals.statusCode,
+                onpageScore: signals.onpageScore,
               },
+              legitimacyScore,
+              legitimacyBreakdown,
+              businessData: extractBusinessData(b),
+              websiteData: signals,
             });
           } else {
             nonParkedBusinesses.push({ business: b, url, htmlSignals: signals });
           }
         }
 
-        partialResults = [...noWebsiteScored, ...deadSiteScored, ...parkedScored];
+        partialResults = [...cachedResults, ...noWebsiteScored, ...deadSiteScored, ...parkedScored];
 
         // 7. First 25 non-parked get Lighthouse; all non-parked get domain age
         const first25Urls = nonParkedBusinesses.slice(0, 25).map((x) => x.url);
         const allNonParkedUrls = nonParkedBusinesses.map((x) => x.url);
 
         // 8. Run Lighthouse (first 25) + domain info (all non-parked) in parallel
-        const [lighthouseResults, domainInfoResults] = await Promise.all([
+        const [lighthouseResult, domainInfoResults] = await Promise.all([
           fetchLighthouse(first25Urls, auth),
           Promise.allSettled(allNonParkedUrls.map((url) => {
             try {
@@ -760,8 +495,10 @@ export const dataforseoBusinessSearch = functions
           })),
         ]);
 
+        const lighthouseResults = lighthouseResult.scores;
+        costTracker.lighthouse = lighthouseResult.cost;
+
         // 9. Score each non-parked business
-        // Businesses at index >= 25 get null Lighthouse scores
         const nonParkedScored: ScoredBusiness[] = nonParkedBusinesses.map((item, idx) => {
           const lighthouseScore = idx < 25 ? (lighthouseResults[idx] ?? null) : null;
           const domainInfoOutcome = domainInfoResults[idx];
@@ -769,18 +506,20 @@ export const dataforseoBusinessSearch = functions
             ? domainInfoOutcome.value
             : { ageYears: null, isExpired: false };
 
-          const scorerInput = {
+          const scorerInput = buildScorerInput(item.business, {
             website: item.url,
             htmlSignals: item.htmlSignals,
             lighthousePerformance: lighthouseScore?.performance ?? null,
             lighthouseSeo: lighthouseScore?.seo ?? null,
             domainAgeYears: domainInfo.ageYears,
             isExpiredDomain: domainInfo.isExpired,
-          };
+          });
 
           const { score: s, label, scoring } = score(scorerInput);
+          const { legitimacyScore, legitimacyBreakdown } = computeLegitimacy(scorerInput);
 
           return {
+            cid: item.business.cid,
             name: item.business.title,
             address: item.business.address,
             phone: item.business.phone,
@@ -791,10 +530,15 @@ export const dataforseoBusinessSearch = functions
             score: s,
             label,
             scoring,
+            legitimacyScore,
+            legitimacyBreakdown,
+            businessData: extractBusinessData(item.business),
+            websiteData: item.htmlSignals,
           };
         });
 
         const allScored = [
+          ...cachedResults,
           ...noWebsiteScored,
           ...deadSiteScored,
           ...parkedScored,
@@ -809,36 +553,114 @@ export const dataforseoBusinessSearch = functions
           return b.score - a.score;
         });
 
+        // 11. Save newly scored businesses to cache (fire-and-forget)
+        const newlyScored = [
+          ...noWebsiteScored,
+          ...deadSiteScored,
+          ...parkedScored,
+          ...nonParkedScored,
+        ];
+        saveBusinessesToCache(newlyScored);
+        costTracker.firestoreWrites = newlyScored.filter((b) => b.cid).length;
+        costTracker.freshBusinesses = newlyScored.length;
+        costTracker.totalDfs = costTracker.businessSearch + costTracker.instantPages + costTracker.lighthouse;
+
         partialResults = allScored;
-        return { results: allScored };
+        return { results: allScored, cost: costTracker };
       };
 
       // Wrap in 290s timeout race
       const timeoutPromise = new Promise<SearchResponse>((resolve) => {
         setTimeout(() => {
-          // Sort partial results before returning
           const sorted = [...partialResults].sort((a, b) => {
             if (a.score === null && b.score === null) return 0;
             if (a.score === null) return 1;
             if (b.score === null) return -1;
             return b.score - a.score;
           });
-          resolve({ results: sorted, timedOut: true });
+          costTracker.totalDfs = costTracker.businessSearch + costTracker.instantPages + costTracker.lighthouse;
+          resolve({ results: sorted, timedOut: true, cost: costTracker });
         }, 290_000);
       });
 
       try {
         const result = await Promise.race([pipeline(), timeoutPromise]);
-        // If pipeline already sent a 502, result.results will be empty sentinel — don't double-send
         if (!res.headersSent) {
+          console.log(`[dataforseoBusinessSearch] COST: $${costTracker.totalDfs.toFixed(4)} (search=$${costTracker.businessSearch.toFixed(4)} pages=$${costTracker.instantPages.toFixed(4)} lighthouse=$${costTracker.lighthouse.toFixed(4)}) | ${costTracker.cachedBusinesses} cached, ${costTracker.freshBusinesses} fresh, ${costTracker.firestoreReads} reads, ${costTracker.firestoreWrites} writes`);
+          // Save search to user profile (fire-and-forget)
+          const resultCids = result.results
+            .map((b) => b.cid)
+            .filter((cid): cid is string => cid !== null);
+          saveSearchToUser(uid, {
+            query: keyword,
+            location: location,
+            category: keyword,
+            radius: radiusMiles,
+            cids: resultCids,
+          });
+
           res.status(200).json(result);
         }
       } catch (err) {
         if (!res.headersSent) {
           const msg = err instanceof Error ? err.message : "Internal server error";
           console.error("[dataforseoBusinessSearch] error:", msg);
-          res.status(500).json({ error: msg });
+          // Don't leak internal error details to client
+          res.status(500).json({ error: "An unexpected error occurred. Please try again." });
         }
       }
     });
   });
+
+// ─── Get Businesses by CIDs (free retrieval from cache) ───────────────────────
+
+export const getBusinessesByCids = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+
+    try {
+      await verifyAuth(req);
+    } catch {
+      res.status(401).json({ error: "Unauthorized. Please sign in." });
+      return;
+    }
+
+    const cids = req.body?.cids;
+    if (!Array.isArray(cids) || cids.length === 0) {
+      res.status(400).json({ error: "Missing or invalid field: cids (must be a non-empty array)" });
+      return;
+    }
+
+    // Cap at 500 to prevent abuse
+    const safeCids = cids.slice(0, 500).filter((c): c is string => typeof c === "string" && c.length > 0);
+    if (safeCids.length === 0) {
+      res.status(400).json({ error: "No valid CIDs provided" });
+      return;
+    }
+
+    try {
+      const cached = await getCachedBusinesses(safeCids);
+      const results = safeCids
+        .filter((cid) => cached.has(cid))
+        .map((cid) => cached.get(cid)!);
+
+      // Sort by score descending (same as search response)
+      results.sort((a, b) => {
+        if (a.score === null && b.score === null) return 0;
+        if (a.score === null) return 1;
+        if (b.score === null) return -1;
+        return b.score - a.score;
+      });
+
+      console.log(`[getBusinessesByCids] requested ${safeCids.length}, found ${results.length}`);
+      res.status(200).json({ results });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Internal server error";
+      console.error("[getBusinessesByCids] error:", msg);
+      res.status(500).json({ error: "An unexpected error occurred. Please try again." });
+    }
+  });
+});

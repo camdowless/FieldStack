@@ -1,0 +1,20 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /businesses/{cid} {
+      allow read: if request.auth != null;
+      allow write: if false; // server-side only via Admin SDK
+    }
+
+    match /users/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if false; // server-side only via Admin SDK
+
+      match /searches/{searchId} {
+        allow read: if request.auth != null && request.auth.uid == uid;
+        allow delete: if request.auth != null && request.auth.uid == uid;
+        allow create, update: if false; // server-side only via Admin SDK
+      }
+    }
+  }
+}

@@ -1,0 +1,550 @@
+import type { Business } from "@/data/mockBusinesses";
+import {
+  generateColdEmail, generateColdCallScript,
+  generateFixActionItems, generateAdCampaignOutline,
+} from "@/data/actionItems";
+import { useLeadStore } from "@/hooks/useLeadStore";
+import { LeadScoreBadge } from "@/components/LeadScoreBadge";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Progress } from "@/components/ui/progress";
+import {
+  Bookmark, BookmarkCheck, MapPin, Phone, Star, Globe,
+  Shield, ShieldOff, Gauge, Code, Search as SearchIcon,
+  TrendingDown, ExternalLink, Clock, AlertTriangle, Sparkles,
+  Wrench, Copy, CheckCircle2, XCircle, Mail, Server, Info, Pencil,
+} from "lucide-react";
+import { useState } from "react";
+import { toast } from "@/hooks/use-toast";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function StatusRow({ icon: Icon, label, value, status }: { icon: any; label: string; value: string; status: "good" | "warning" | "critical" | "neutral" }) {
+  return (
+    <div className="flex items-center justify-between py-2.5 px-1">
+      <div className="flex items-center gap-3">
+        <Icon className="h-4 w-4 text-muted-foreground" />
+        <span className="text-sm">{label}</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-sm text-muted-foreground">{value}</span>
+        {status === "good" && <CheckCircle2 className="h-4 w-4 text-green-500" />}
+        {status === "warning" && <AlertTriangle className="h-4 w-4 text-yellow-500" />}
+        {status === "critical" && <XCircle className="h-4 w-4 text-red-500" />}
+      </div>
+    </div>
+  );
+}
+
+function ScoreGauge({ label, score, max = 100 }: { label: string; score: number | null; max?: number }) {
+  if (score == null) {
+    return (
+      <div className="text-center">
+        <div className="text-2xl font-bold text-muted-foreground">—</div>
+        <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
+        <Progress value={0} className="h-1.5 mt-2" />
+      </div>
+    );
+  }
+  const pct = Math.round((score / max) * 100);
+  const color = pct >= 70 ? "text-green-500" : pct >= 40 ? "text-yellow-500" : "text-red-500";
+  return (
+    <div className="text-center">
+      <div className={`text-2xl font-bold ${color}`}>{score}</div>
+      <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
+      <Progress value={pct} className="h-1.5 mt-2" />
+    </div>
+  );
+}
+
+function CopyableBlock({ title, content }: { title: string; content: string }) {
+  const handleCopy = () => {
+    navigator.clipboard.writeText(content);
+    toast({ title: "Copied!", description: `${title} copied to clipboard.` });
+  };
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-base">{title}</CardTitle>
+          <Button variant="ghost" size="sm" onClick={handleCopy}><Copy className="h-4 w-4 mr-1" /> Copy</Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <pre className="whitespace-pre-wrap text-sm text-muted-foreground bg-muted/50 rounded-lg p-4 max-h-96 overflow-y-auto font-mono text-xs leading-relaxed">{content}</pre>
+      </CardContent>
+    </Card>
+  );
+}
+
+function parseEmailScript(text: string): { subject: string; body: string } {
+  const match = text.match(/^\s*Subject:\s*(.+?)\n([\s\S]*)$/);
+  if (match) return { subject: match[1].trim(), body: match[2].replace(/^\s*\n/, "") };
+  return { subject: "", body: text };
+}
+
+interface ScriptBlockProps {
+  title: string;
+  content: string;
+  editable?: boolean;
+  isEditing?: boolean;
+  onToggleEdit?: () => void;
+  onChange?: (text: string) => void;
+  showGmail?: boolean;
+}
+
+function ScriptBlock({ title, content, editable, isEditing, onToggleEdit, onChange, showGmail }: ScriptBlockProps) {
+  const { subject, body } = parseEmailScript(content);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(content);
+    toast({ title: "Copied!", description: `${title} copied to clipboard.` });
+  };
+
+  const openInGmail = () => {
+    const url = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.open(url, "_blank");
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="text-base">{title}</CardTitle>
+          <div className="flex items-center gap-1">
+            {editable && (
+              <Button variant="ghost" size="sm" onClick={onToggleEdit} className="gap-1">
+                {isEditing ? <CheckCircle2 className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+                {isEditing ? "Done" : "Edit"}
+              </Button>
+            )}
+            <Button variant="ghost" size="sm" onClick={handleCopy} className="gap-1">
+              <Copy className="h-4 w-4" /> Copy
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="rounded-lg bg-secondary/50 px-6 py-5">
+          {isEditing ? (
+            <Textarea
+              value={content}
+              onChange={(e) => onChange?.(e.target.value)}
+              className="min-h-[320px] bg-background text-sm leading-[1.6] font-sans resize-y"
+            />
+          ) : (
+            <div className="font-sans text-sm leading-[1.6] text-foreground">
+              {subject && (
+                <p className="font-bold text-[14px] mb-3">{subject}</p>
+              )}
+              <div className="whitespace-pre-wrap">{body}</div>
+            </div>
+          )}
+        </div>
+        {showGmail && (
+          <div className="mt-3">
+            <Button variant="outline" size="sm" onClick={openInGmail} className="gap-2">
+              <Mail className="h-4 w-4" /> Draft in Gmail
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function formatBytes(b: number | null | undefined): string {
+  if (b == null) return "—";
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
+  return `${(b / 1024 / 1024).toFixed(2)} MB`;
+}
+
+// ─── Main Panel ───────────────────────────────────────────────────────────────
+
+interface LeadDetailPanelProps {
+  business: Business;
+}
+
+export function LeadDetailPanel({ business }: LeadDetailPanelProps) {
+  const store = useLeadStore();
+  const [showPricing, setShowPricing] = useState(true);
+  const [isEditingEmail, setIsEditingEmail] = useState(false);
+  const [localCompleted, setLocalCompleted] = useState<string[]>([]);
+  const [localEmailDraft, setLocalEmailDraft] = useState<string | null>(null);
+
+  const { analysis: a } = business;
+  const isSaved = store.isLeadSaved(business.id);
+  const savedRecord = store.getSavedLead(business.id);
+  const fixItems = generateFixActionItems(business);
+
+  const completedActionIds = isSaved ? savedRecord?.completedActions ?? [] : localCompleted;
+  const handleToggleAction = (actionId: string) => {
+    if (isSaved) {
+      store.toggleActionComplete(business.id, actionId);
+    } else {
+      setLocalCompleted((prev) => prev.includes(actionId) ? prev.filter((a) => a !== actionId) : [...prev, actionId]);
+    }
+  };
+
+  const severityRank: Record<string, number> = { critical: 0, medium: 1, low: 2 };
+  const sortedFixItems = [...fixItems].sort((x, y) => {
+    const xDone = completedActionIds.includes(x.id) ? 1 : 0;
+    const yDone = completedActionIds.includes(y.id) ? 1 : 0;
+    if (xDone !== yDone) return xDone - yDone;
+    return severityRank[x.severity] - severityRank[y.severity];
+  });
+
+  const generatedEmail = generateColdEmail(business);
+  const emailContent = (isSaved ? savedRecord?.customEmailScript : localEmailDraft) ?? generatedEmail;
+  const handleEmailChange = (text: string) => {
+    if (isSaved) {
+      store.updateEmailScript(business.id, text);
+    } else {
+      setLocalEmailDraft(text);
+    }
+  };
+
+  const seoGauge = a.hasWebsite && a.seoScore > 0 ? a.seoScore : null;
+  const designGauge = a.hasWebsite && a.designScore > 0 ? a.designScore : null;
+  const speedGauge = a.hasWebsite && a.loadTimeMs > 0 ? Math.max(0, Math.min(100, 100 - Math.round(a.loadTimeMs / 100))) : null;
+
+  const ratingDist = business.ratingDistribution;
+  const ratingTotal = ratingDist ? Object.values(ratingDist).reduce((s, n) => s + n, 0) : 0;
+
+  const addressLine = [business.address, business.city, business.state, business.zip].filter(Boolean).join(", ");
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col gap-4">
+        <div className="flex gap-4 min-w-0 flex-1">
+          {business.logo && (
+            <img
+              src={business.logo}
+              alt={business.name}
+              className="h-14 w-14 rounded-xl object-cover border bg-muted shrink-0"
+              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+            />
+          )}
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2 mb-1">
+              <Badge variant="secondary">{business.category}</Badge>
+              <LeadScoreBadge score={business.leadScore} label={business.label} size="lg" />
+              {business.currentStatus && (
+                <Badge variant={business.currentStatus === "open" ? "default" : "outline"} className="text-xs">
+                  {business.currentStatus === "open" ? "Open now" : "Closed"}
+                </Badge>
+              )}
+              {business.isClaimed && (
+                <Badge variant="outline" className="text-xs gap-1">
+                  <CheckCircle2 className="h-3 w-3" /> Claimed
+                </Badge>
+              )}
+            </div>
+            <h2 className="text-2xl font-extrabold">{business.name}</h2>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+          {addressLine && <span className="flex items-center gap-1"><MapPin className="h-4 w-4" />{addressLine}</span>}
+          {business.phone && <span className="flex items-center gap-1"><Phone className="h-4 w-4" />{business.phone}</span>}
+          {business.googleRating > 0 && (
+            <span className="flex items-center gap-1">
+              <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+              {business.googleRating} ({business.reviewCount} reviews)
+            </span>
+          )}
+          {a.websiteUrl && <span className="flex items-center gap-1"><Globe className="h-4 w-4" />{a.websiteUrl}</span>}
+        </div>
+
+        <div className="flex gap-2">
+          <Button
+            variant={isSaved ? "secondary" : "default"}
+            size="sm"
+            className={!isSaved ? "gradient-bg text-white" : ""}
+            onClick={() => isSaved ? store.removeLead(business.id) : store.saveLead(business)}
+          >
+            {isSaved ? <BookmarkCheck className="h-4 w-4 mr-1.5" /> : <Bookmark className="h-4 w-4 mr-1.5" />}
+            {isSaved ? "Saved" : "Save Lead"}
+          </Button>
+          {business.checkUrl && (
+            <a href={business.checkUrl} target="_blank" rel="noreferrer">
+              <Button variant="outline" size="sm" className="gap-1">
+                <ExternalLink className="h-3.5 w-3.5" /> Google Maps
+              </Button>
+            </a>
+          )}
+        </div>
+      </div>
+
+      <Tabs defaultValue="analysis" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="analysis">Analysis</TabsTrigger>
+          <TabsTrigger value="actions">Action Items</TabsTrigger>
+          <TabsTrigger value="scripts">Outreach Scripts</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="analysis" className="space-y-4">
+          {business.description && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2"><Info className="h-4 w-4" /> About</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground whitespace-pre-line leading-relaxed">{business.description}</p>
+                {business.additionalCategories && business.additionalCategories.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-3">
+                    {business.additionalCategories.map((c) => (
+                      <Badge key={c} variant="outline" className="text-xs">{c}</Badge>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {business.reasons && business.reasons.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2"><Sparkles className="h-4 w-4" /> Why this opportunity score</CardTitle>
+                <CardDescription>What contributed to the {business.leadScore}/100 opportunity score</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ul className="space-y-2">
+                  {business.reasons.map((r, i) => (
+                    <li key={i} className="flex items-start gap-2 text-sm">
+                      <span className="mt-1 h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
+                      <span>{r}</span>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
+
+          <Card>
+            <CardHeader className="pb-1">
+              <CardTitle>Opportunity Score</CardTitle>
+              <CardDescription>Higher score = more room to help</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {a.hasWebsite ? (
+                <div className="grid grid-cols-2 gap-4">
+                  <ScoreGauge label="Opportunity" score={business.leadScore} />
+                  <ScoreGauge label="SEO" score={seoGauge} />
+                  <ScoreGauge label="Performance" score={designGauge} />
+                  <ScoreGauge label="Load Speed" score={speedGauge} />
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex justify-center">
+                    <div className="w-full max-w-xs">
+                      <ScoreGauge label="Opportunity" score={business.leadScore} />
+                    </div>
+                  </div>
+                  <div className="rounded-md border bg-info text-info-foreground border-info-border px-4 py-3 text-sm">
+                    SEO, performance, and load speed will be available once this business has a website.
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Website & Security</CardTitle>
+            </CardHeader>
+            <CardContent className="divide-y divide-border">
+              <StatusRow icon={Globe} label="Has Website" value={a.hasWebsite ? a.websiteUrl || "Yes" : "No website"} status={a.hasWebsite ? "good" : "critical"} />
+              {a.hasWebsite ? (
+                <StatusRow icon={a.hasHttps ? Shield : ShieldOff} label="HTTPS" value={a.hasHttps ? "Secure" : "Not Secure"} status={a.hasHttps ? "good" : "critical"} />
+              ) : (
+                <StatusRow icon={Shield} label="HTTPS" value="—" status="neutral" />
+              )}
+              {business.fetchFailed && (
+                <StatusRow icon={XCircle} label="Site reachable" value={business.statusCode ? `HTTP ${business.statusCode}` : "Unreachable"} status="critical" />
+              )}
+              {a.hasWebsite ? (
+                <StatusRow icon={Code} label="Deprecated HTML" value={`${a.deprecatedHtmlTags} tags`} status={a.deprecatedHtmlTags > 3 ? "warning" : "good"} />
+              ) : (
+                <StatusRow icon={Code} label="Deprecated HTML" value="—" status="neutral" />
+              )}
+              {a.isExpiredDomain && <StatusRow icon={AlertTriangle} label="Expired Domain" value="Domain expired" status="critical" />}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Performance & SEO</CardTitle>
+            </CardHeader>
+            <CardContent className="divide-y divide-border">
+              <StatusRow icon={Gauge} label="Time to Interactive" value={!a.hasWebsite || a.loadTimeMs === 0 ? "—" : `${(a.loadTimeMs / 1000).toFixed(1)}s`} status={a.loadTimeMs > 5000 ? "critical" : a.loadTimeMs > 3000 ? "warning" : "good"} />
+              <StatusRow icon={SearchIcon} label="Lighthouse SEO" value={seoGauge != null ? `${seoGauge}/100` : "—"} status={seoGauge == null ? "warning" : seoGauge < 40 ? "critical" : seoGauge < 70 ? "warning" : "good"} />
+              <StatusRow icon={Gauge} label="Lighthouse Perf" value={designGauge != null ? `${designGauge}/100` : "—"} status={designGauge == null ? "warning" : designGauge < 40 ? "critical" : designGauge < 70 ? "warning" : "good"} />
+              <StatusRow icon={Clock} label="Domain Age" value={a.websiteAge ? `~${a.websiteAge}yr${a.copyrightYear ? ` (©${a.copyrightYear})` : ""}` : "—"} status={a.copyrightYear && a.copyrightYear < 2022 ? "warning" : "good"} />
+            </CardContent>
+          </Card>
+
+          {(business.server || business.mediaType || business.pageSize) && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2"><Server className="h-4 w-4" /> Tech Stack</CardTitle>
+              </CardHeader>
+              <CardContent className="divide-y divide-border">
+                <StatusRow icon={Server} label="Server" value={business.server || "—"} status="neutral" />
+                <StatusRow icon={Code} label="Media Type" value={business.mediaType || "—"} status="neutral" />
+                <StatusRow icon={Gauge} label="Page Size" value={formatBytes(business.pageSize)} status="neutral" />
+              </CardContent>
+            </Card>
+          )}
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Marketing & Activity</CardTitle>
+            </CardHeader>
+            <CardContent className="divide-y divide-border">
+              <StatusRow icon={TrendingDown} label="Ad Pixel Detected" value={a.hasOnlineAds ? "Yes" : "No"} status={a.hasOnlineAds ? "good" : "warning"} />
+              <StatusRow icon={ExternalLink} label="Marketing Agency Footer" value={a.hasMarketingAgency ? "Detected" : "None"} status={a.hasMarketingAgency ? "good" : "warning"} />
+              <StatusRow icon={Star} label="Has Reviews" value={a.recentGoogleReviews ? `${business.reviewCount} reviews` : "None"} status={a.recentGoogleReviews ? "good" : "warning"} />
+              <StatusRow icon={CheckCircle2} label="Listing Claimed" value={business.isClaimed ? "Yes" : "No"} status={business.isClaimed ? "good" : "warning"} />
+            </CardContent>
+          </Card>
+
+          {(business.googleRating > 0 || (ratingDist && ratingTotal > 0)) && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Rating Breakdown</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {business.reviewCount >= 5 && ratingDist && ratingTotal > 0 ? (
+                  [5, 4, 3, 2, 1].map((star) => {
+                    const count = ratingDist[String(star)] ?? 0;
+                    const pct = ratingTotal > 0 ? (count / ratingTotal) * 100 : 0;
+                    return (
+                      <div key={star} className="flex items-center gap-3 text-sm">
+                        <span className="w-8 flex items-center gap-0.5">
+                          {star}<Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
+                        </span>
+                        <Progress value={pct} className="h-2 flex-1" />
+                        <span className="w-8 text-right text-muted-foreground">{count}</span>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div>
+                    <p className="text-sm flex items-center gap-1.5">
+                      <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
+                      <span className="font-medium">{business.googleRating || "—"}</span>
+                      <span className="text-muted-foreground">— {business.reviewCount} review{business.reviewCount === 1 ? "" : "s"}</span>
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">Breakdown available at 5+ reviews</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {business.emails && business.emails.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2"><Mail className="h-4 w-4" /> Contact Emails</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ul className="space-y-1.5">
+                  {business.emails.map((e) => (
+                    <li key={e}>
+                      <a href={`mailto:${e}`} className="text-sm text-primary hover:underline">{e}</a>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="actions" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><Wrench className="h-5 w-5" /> Fix Action Items</CardTitle>
+              <CardDescription>
+                Prioritized technical improvements for this lead
+                {fixItems.length > 0 && (
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    · {completedActionIds.filter((id) => fixItems.some((i) => i.id === id)).length}/{fixItems.length} done
+                  </span>
+                )}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {sortedFixItems.map((item) => {
+                  const checked = completedActionIds.includes(item.id);
+                  const sevClass =
+                    item.severity === "critical"
+                      ? "border border-destructive/30 border-l-4 border-l-destructive bg-destructive/5"
+                      : item.severity === "medium"
+                      ? "border border-yellow-500/30 bg-yellow-500/5"
+                      : "border border-border bg-secondary/40";
+                  const titleWeight =
+                    item.severity === "critical" ? "font-medium text-foreground" : item.severity === "low" ? "font-normal text-muted-foreground" : "font-normal text-foreground";
+                  return (
+                    <label
+                      key={item.id}
+                      className={cn(
+                        "flex items-start gap-3 rounded-lg p-3 text-sm cursor-pointer transition-opacity",
+                        sevClass,
+                        checked && "opacity-50"
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => handleToggleAction(item.id)}
+                        className="mt-0.5 h-[18px] w-[18px] rounded border-input accent-primary cursor-pointer shrink-0"
+                        aria-label={`Mark "${item.text}" as ${checked ? "incomplete" : "done"}`}
+                      />
+                      <span className={cn("flex-1", titleWeight, checked && "line-through")}>{item.text}</span>
+                    </label>
+                  );
+                })}
+                {fixItems.length === 0 && (
+                  <p className="text-sm text-muted-foreground text-center py-6">
+                    Nothing to fix — this lead's online presence looks solid.
+                  </p>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="flex items-center gap-3 mb-2">
+            <h3 className="text-lg font-bold">Ad Campaign Outline</h3>
+            <Button variant="outline" size="sm" onClick={() => setShowPricing(!showPricing)}>
+              {showPricing ? "Hide Pricing" : "Show Pricing"}
+            </Button>
+          </div>
+          <CopyableBlock title="Ad Campaign" content={
+            showPricing ? generateAdCampaignOutline(business) : generateAdCampaignOutline(business).split("## Pricing for Your Services")[0]
+          } />
+        </TabsContent>
+
+        <TabsContent value="scripts" className="space-y-4">
+          <ScriptBlock
+            title="Cold Email Script"
+            content={emailContent}
+            editable
+            isEditing={isEditingEmail}
+            onToggleEdit={() => setIsEditingEmail((v) => !v)}
+            onChange={handleEmailChange}
+            showGmail
+          />
+          <CopyableBlock title="Cold Call Script" content={generateColdCallScript(business)} />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}

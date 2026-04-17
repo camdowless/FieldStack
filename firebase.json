@@ -1,4 +1,8 @@
 {
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
   "functions": {
     "source": "functions",
     "predeploy": ["cd functions && ./node_modules/.bin/tsc"]
@@ -9,12 +13,12 @@
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [
       {
-        "source": "/searchPlaces",
-        "function": "searchPlaces"
+        "source": "/api/search",
+        "function": "dataforseoBusinessSearch"
       },
       {
-        "source": "/analyzeLeads",
-        "function": "analyzeLeads"
+        "source": "/api/businesses",
+        "function": "getBusinessesByCids"
       },
       {
         "source": "**",
