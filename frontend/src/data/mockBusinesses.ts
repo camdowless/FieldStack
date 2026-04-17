@@ -1,6 +1,6 @@
 export type BusinessCategory = string;
 
-export type LeadStatus = "new" | "contacted" | "follow-up" | "not-interested" | "closed-won";
+export type LeadStatus = "saved" | "reached-out" | "in-conversation" | "proposal-sent" | "won" | "not-interested";
 
 export interface WebsiteAnalysis {
   hasWebsite: boolean;

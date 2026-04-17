@@ -72,7 +72,7 @@ export function useLeadStore(): LeadStore {
   const saveLead = useCallback((business: Business) => {
     setSavedLeads((prev) => {
       if (prev.find((l) => l.business.id === business.id)) return prev;
-      return [...prev, { business, status: "new", savedAt: new Date().toISOString(), notes: "", omitFromSearch: false }];
+      return [...prev, { business, status: "saved", savedAt: new Date().toISOString(), notes: "", omitFromSearch: false }];
     });
   }, []);
 

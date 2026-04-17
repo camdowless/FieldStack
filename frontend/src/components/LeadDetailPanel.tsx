@@ -3,6 +3,7 @@ import {
   generateColdEmail, generateColdCallScript,
   generateFixActionItems, generateAdCampaignOutline,
 } from "@/data/actionItems";
+import { useFirebaseLeadStore, LEAD_STATUSES } from "@/hooks/useFirebaseLeadStore";
 import { useLeadStore } from "@/hooks/useLeadStore";
 import { LeadScoreBadge } from "@/components/LeadScoreBadge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -10,16 +11,19 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Bookmark, BookmarkCheck, MapPin, Phone, Star, Globe,
   Shield, ShieldOff, Gauge, Code, Search as SearchIcon,
   TrendingDown, ExternalLink, Clock, AlertTriangle, Sparkles,
   Wrench, Copy, CheckCircle2, XCircle, Mail, Server, Info, Pencil,
+  StickyNote,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { toast } from "@/hooks/use-toast";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import type { LeadStatus } from "@/data/mockBusinesses";
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -181,18 +185,36 @@ interface LeadDetailPanelProps {
 }
 
 export function LeadDetailPanel({ business }: LeadDetailPanelProps) {
+  const fbStore = useFirebaseLeadStore();
   const store = useLeadStore();
   const [showPricing, setShowPricing] = useState(true);
   const [isEditingEmail, setIsEditingEmail] = useState(false);
   const [localCompleted, setLocalCompleted] = useState<string[]>([]);
   const [localEmailDraft, setLocalEmailDraft] = useState<string | null>(null);
 
+  // Notes state with debounced save
+  const savedRecord = fbStore.getSavedLead(business.id);
+  const isSaved = fbStore.isLeadSaved(business.id);
+  const [localNotes, setLocalNotes] = useState(savedRecord?.notes ?? "");
+  const notesTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Sync local notes when savedRecord changes (e.g. real-time update)
+  useEffect(() => {
+    if (savedRecord) setLocalNotes(savedRecord.notes);
+  }, [savedRecord?.notes]);
+
+  const handleNotesChange = (value: string) => {
+    setLocalNotes(value);
+    if (notesTimerRef.current) clearTimeout(notesTimerRef.current);
+    notesTimerRef.current = setTimeout(() => {
+      fbStore.updateNotes(business.id, value);
+    }, 800);
+  };
+
   const { analysis: a } = business;
-  const isSaved = store.isLeadSaved(business.id);
-  const savedRecord = store.getSavedLead(business.id);
   const fixItems = generateFixActionItems(business);
 
-  const completedActionIds = isSaved ? savedRecord?.completedActions ?? [] : localCompleted;
+  const completedActionIds = isSaved ? store.getSavedLead(business.id)?.completedActions ?? [] : localCompleted;
   const handleToggleAction = (actionId: string) => {
     if (isSaved) {
       store.toggleActionComplete(business.id, actionId);
@@ -210,7 +232,7 @@ export function LeadDetailPanel({ business }: LeadDetailPanelProps) {
   });
 
   const generatedEmail = generateColdEmail(business);
-  const emailContent = (isSaved ? savedRecord?.customEmailScript : localEmailDraft) ?? generatedEmail;
+  const emailContent = (isSaved ? store.getSavedLead(business.id)?.customEmailScript : localEmailDraft) ?? generatedEmail;
   const handleEmailChange = (text: string) => {
     if (isSaved) {
       store.updateEmailScript(business.id, text);
@@ -277,11 +299,26 @@ export function LeadDetailPanel({ business }: LeadDetailPanelProps) {
             variant={isSaved ? "secondary" : "default"}
             size="sm"
             className={!isSaved ? "gradient-bg text-white" : ""}
-            onClick={() => isSaved ? store.removeLead(business.id) : store.saveLead(business)}
+            onClick={() => isSaved ? fbStore.removeLead(business.id) : fbStore.saveLead(business)}
           >
             {isSaved ? <BookmarkCheck className="h-4 w-4 mr-1.5" /> : <Bookmark className="h-4 w-4 mr-1.5" />}
             {isSaved ? "Saved" : "Save Lead"}
           </Button>
+          {isSaved && savedRecord && (
+            <Select
+              value={savedRecord.status}
+              onValueChange={(v) => fbStore.updateStatus(business.id, v as LeadStatus)}
+            >
+              <SelectTrigger className="w-[160px] h-8">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {LEAD_STATUSES.map((s) => (
+                  <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
           {business.checkUrl && (
             <a href={business.checkUrl} target="_blank" rel="noreferrer">
               <Button variant="outline" size="sm" className="gap-1">
@@ -290,6 +327,32 @@ export function LeadDetailPanel({ business }: LeadDetailPanelProps) {
             </a>
           )}
         </div>
+
+        {/* Notes */}
+        {isSaved && (
+          <Card>
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <StickyNote className="h-4 w-4" /> Notes
+                </CardTitle>
+                {savedRecord?.notesEditedAt && (
+                  <span className="text-xs text-muted-foreground">
+                    Edited {new Date(savedRecord.notesEditedAt).toLocaleDateString()}
+                  </span>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              <Textarea
+                placeholder="Add notes about this lead..."
+                value={localNotes}
+                onChange={(e) => handleNotesChange(e.target.value)}
+                className="min-h-[100px] resize-y"
+              />
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       <Tabs defaultValue="analysis" className="space-y-4">

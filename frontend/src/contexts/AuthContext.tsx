@@ -40,6 +40,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     await signOut(auth);
+    // Clear URL to root so stale params don't persist after re-login
+    window.history.replaceState(null, "", "/");
   };
 
   return (

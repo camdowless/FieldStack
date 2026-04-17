@@ -3,9 +3,9 @@ import { useSearchParams } from "react-router-dom";
 import { Business } from "@/data/mockBusinesses";
 import { normalizeBusiness } from "@/data/leadTypes";
 import { formatCategoryLabel } from "@/data/dfsCategories";
-import { searchBusinesses, fetchBusinessesByCids, SearchError } from "@/lib/api";
+import { searchBusinesses, SearchError } from "@/lib/api";
 import { setSearchResults } from "@/lib/businessCache";
-import { useLeadStore } from "@/hooks/useLeadStore";
+import { useFirebaseLeadStore } from "@/hooks/useFirebaseLeadStore";
 import { useSavedSearches } from "@/hooks/useSavedSearches";
 import { useCredits } from "@/hooks/useCredits";
 import { usePreferences } from "@/hooks/usePreferences";
@@ -73,7 +73,7 @@ const DEFAULT_SORT_COL = "score";
 const DEFAULT_SORT_DIR: SortDir = "desc";
 
 const Index = () => {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [searchQuery, setSearchQuery] = useState("");
   const [location, setLocation] = useState(searchParams.get("location") || "");
@@ -102,21 +102,16 @@ const Index = () => {
   // Abort controller for in-flight requests
   const abortRef = useRef<AbortController | null>(null);
 
-  const store = useLeadStore();
+  const fbStore = useFirebaseLeadStore();
   const credits = useCredits();
   const { searches: firestoreSearches } = useSavedSearches();
-  const omittedIds = useMemo(
-    () => new Set(store.savedLeads.filter((l) => l.omitFromSearch).map((l) => l.business.id)),
-    [store.savedLeads],
-  );
 
   const { prefs } = usePreferences();
 
-  // Client-side filtering of API results (name filter + omitted leads + preferences)
+  // Client-side filtering of API results (name filter + preferences)
   const filteredResults = useMemo(() => {
     let results = apiResults.filter(
       (b) =>
-        !omittedIds.has(b.id) &&
         (b.legitimacyScore ?? 100) >= prefs.legitimacyScoreMin &&
         (b.leadScore ?? 0) >= prefs.opportunityScoreMin,
     );
@@ -155,7 +150,7 @@ const Index = () => {
       }
     });
     return results;
-  }, [apiResults, searchQuery, sortBy, sortDir, omittedIds, prefs.legitimacyScoreMin, prefs.opportunityScoreMin]);
+  }, [apiResults, searchQuery, sortBy, sortDir, prefs.legitimacyScoreMin, prefs.opportunityScoreMin]);
 
   // Search is now saved server-side after API call — no client-side auto-save needed
 
@@ -226,7 +221,30 @@ const Index = () => {
     return () => abortRef.current?.abort();
   }, []);
 
-  const handleNewSearch = () => {
+  // Reset all search state when navigating to this page without a restore param
+  // (e.g. clicking "Lead Search" in sidebar or after logout/login)
+  const prevRestoreRef = useRef(searchParams.get("restore"));
+  useEffect(() => {
+    const restoreId = searchParams.get("restore");
+    // If there's no restore param and we previously had one,
+    // reset to empty state so stale results don't linger.
+    if (!restoreId && prevRestoreRef.current) {
+      abortRef.current?.abort();
+      setSearchQuery("");
+      setLocation("");
+      setSelectedCategory("all");
+      setRadius(10);
+      setSortBy("score");
+      setSortDir("desc");
+      setApiResults([]);
+      setViewState("empty");
+      setSelectedBusiness(null);
+      setSelectedIds(new Set());
+    }
+    prevRestoreRef.current = restoreId;
+  }, [searchParams]);
+
+  const handleNewSearch = useCallback(() => {
     abortRef.current?.abort();
     setSearchQuery("");
     setLocation("");
@@ -236,53 +254,14 @@ const Index = () => {
     setSortDir("desc");
     setApiResults([]);
     setViewState("empty");
-  };
+    setSelectedBusiness(null);
+    setSelectedIds(new Set());
+    // Clear URL params (e.g. ?restore=...) and reset state
+    setSearchParams({}, { replace: true });
+  }, [setSearchParams]);
 
   const recentSearches = firestoreSearches.slice(0, 5);
-  const savedLeadsCount = store.savedLeads.length;
-
-  const restoreSearch = useCallback(async (s: typeof firestoreSearches[number]) => {
-    setLocation(s.location || "");
-    setSelectedCategory(s.category || "all");
-    setSortBy("score");
-    setSortDir("desc");
-    setSearchQuery("");
-
-    // Fetch businesses by CIDs from cache — no API cost
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-    setViewState("loading");
-    setErrorMessage("");
-    setTimedOut(false);
-
-    try {
-      const response = await fetchBusinessesByCids(s.cids, controller.signal);
-      const businesses = response.results.map(normalizeBusiness);
-      setSearchResults(businesses);
-      setApiResults(businesses);
-      setViewState("results");
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      const message = err instanceof SearchError ? err.message : "Failed to load saved search.";
-      setErrorMessage(message);
-      setIsRetryable(true);
-      setViewState("error");
-    }
-  }, []);
-
-  // Auto-restore search from URL param (e.g. from SearchHistory page)
-  const hasRestoredRef = useRef(false);
-  useEffect(() => {
-    if (hasRestoredRef.current) return;
-    const restoreId = searchParams.get("restore");
-    if (!restoreId || firestoreSearches.length === 0) return;
-    const match = firestoreSearches.find((s) => s.id === restoreId);
-    if (match) {
-      hasRestoredRef.current = true;
-      restoreSearch(match);
-    }
-  }, [searchParams, firestoreSearches, restoreSearch]);
+  const savedLeadsCount = fbStore.savedLeads.length;
 
   const describeRecent = (s: typeof firestoreSearches[number]) => {
     const parts: string[] = [];
@@ -433,10 +412,9 @@ const Index = () => {
               </h2>
               <div className="flex flex-col gap-2">
                 {recentSearches.map((s) => (
-                  <button
+                  <Link
                     key={s.id}
-                    type="button"
-                    onClick={() => restoreSearch(s)}
+                    to="/search-history"
                     className="flex items-center gap-3 p-3 rounded-md border bg-card hover:bg-muted/50 transition-colors text-left group"
                   >
                     <Clock className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -447,7 +425,7 @@ const Index = () => {
                     <Badge variant="secondary" className="shrink-0">
                       {s.resultCount} result{s.resultCount === 1 ? "" : "s"}
                     </Badge>
-                  </button>
+                  </Link>
                 ))}
               </div>
             </div>
@@ -500,7 +478,7 @@ const Index = () => {
           <p className="text-sm text-muted-foreground mb-6">{errorMessage}</p>
           <div className="flex gap-2 justify-center">
             {isRetryable && (
-              <Button onClick={handleSearch}>Try Again</Button>
+              <Button onClick={() => setViewState("empty")}>Try Again</Button>
             )}
             <Button variant="outline" onClick={handleNewSearch}>New Search</Button>
           </div>
@@ -547,7 +525,7 @@ const Index = () => {
   const saveSelected = () => {
     filteredResults
       .filter((b) => selectedIds.has(b.id))
-      .forEach((b) => store.saveLead(b));
+      .forEach((b) => fbStore.saveLead(b));
     setSelectedIds(new Set());
   };
 
@@ -651,7 +629,7 @@ const Index = () => {
             )}
             {filteredResults.map((b) => {
               const a = b.analysis;
-              const isSaved = store.isLeadSaved(b.id);
+              const isSaved = fbStore.isLeadSaved(b.id);
               const checked = selectedIds.has(b.id);
               return (
                 <tr
@@ -741,10 +719,10 @@ const Index = () => {
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
-                        onClick={() => isSaved ? store.removeLead(b.id) : store.saveLead(b)}
+                        className={`h-7 w-7 ${isSaved ? "text-primary bg-primary/10" : ""}`}
+                        onClick={() => isSaved ? fbStore.removeLead(b.id) : fbStore.saveLead(b)}
                       >
-                        {isSaved ? <BookmarkCheck className="h-4 w-4 text-primary" /> : <Bookmark className="h-4 w-4" />}
+                        {isSaved ? <BookmarkCheck className="h-4 w-4" /> : <Bookmark className="h-4 w-4" />}
                       </Button>
                       <Button
                         variant="ghost"
