@@ -314,6 +314,7 @@ export interface JobParams {
   keyword: string;
   location: string;
   radius: number;
+  limit: number;
 }
 
 export interface JobProgress {

@@ -30,8 +30,9 @@ export interface SearchJobState {
 }
 
 export interface UseSearchJobReturn extends SearchJobState {
-  startSearch: (params: { keyword: string; location: string; radius?: number }) => Promise<void>;
+  startSearch: (params: { keyword: string; location: string; radius?: number; limit?: number }) => Promise<void>;
   cancelSearch: () => Promise<void>;
+  reset: () => void;
 }
 
 // ─── Pure helpers (exported for testing) ──────────────────────────────────────
@@ -130,7 +131,7 @@ export function useSearchJob(): UseSearchJobReturn {
   }, [teardown]);
 
   const startSearch = useCallback(
-    async (params: { keyword: string; location: string; radius?: number }) => {
+    async (params: { keyword: string; location: string; radius?: number; limit?: number }) => {
       // Clean up any previous job listeners
       teardown();
 
@@ -299,9 +300,22 @@ export function useSearchJob(): UseSearchJobReturn {
     }
   }, [state.jobId]);
 
+  const reset = useCallback(() => {
+    teardown();
+    setState({
+      jobId: null,
+      status: "idle",
+      progress: null,
+      results: [],
+      error: null,
+      cost: null,
+    });
+  }, [teardown]);
+
   return {
     ...state,
     startSearch,
     cancelSearch,
+    reset,
   };
 }

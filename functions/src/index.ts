@@ -308,6 +308,12 @@ export const dataforseoBusinessSearch = functions
         ? Math.max(1, Math.min(100, rawRadius))
         : 10;
 
+      // Limit: default 50, clamp to 1–500
+      const rawLimit = req.body?.limit;
+      const limit = typeof rawLimit === "number"
+        ? Math.max(1, Math.min(500, Math.round(rawLimit)))
+        : 50;
+
       // ── Compute deterministic job ID and create job document ──
       const jobId = computeJobId(uid, keyword, location, radiusMiles);
       const jobRef = db.collection("jobs").doc(jobId);
@@ -316,7 +322,7 @@ export const dataforseoBusinessSearch = functions
       const jobData: JobDocument = {
         uid,
         status: "running",
-        params: { keyword, location, radius: radiusMiles },
+        params: { keyword, location, radius: radiusMiles, limit },
         progress: { analyzed: 0, total: 0 },
         resultCount: null,
         error: null,
@@ -468,7 +474,7 @@ export const processSearchJob = functions
     const jobId = context.params.jobId;
     const jobData = snap.data() as JobDocument;
     const { uid, params } = jobData;
-    const { keyword, location, radius: radiusMiles } = params;
+    const { keyword, location, radius: radiusMiles, limit: searchLimit } = params;
     const jobRef = db.collection("jobs").doc(jobId);
 
     console.log(`[Job_Processor] Starting job ${jobId} for uid=${uid}`);
@@ -519,7 +525,7 @@ export const processSearchJob = functions
       // ── Step 2: DFS Business Search ──
       let dfsItems: BusinessRaw[];
       try {
-        const dfsResult = await searchBusinesses(keyword, locationCoord, authHeader);
+        const dfsResult = await searchBusinesses(keyword, locationCoord, authHeader, searchLimit ?? 50);
         dfsItems = dfsResult.items;
         cost.businessSearch = dfsResult.cost;
       } catch (dfsErr) {

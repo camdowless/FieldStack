@@ -192,6 +192,12 @@ export function score(input: ScorerInput): ScoreResult {
     };
   }
 
+  // ─── 403 Forbidden: server alive but blocking crawler ────────────────
+  // Strip HTML signals so normal scoring runs on non-HTML data only.
+  if (input.htmlSignals !== null && input.htmlSignals.statusCode === 403) {
+    input = { ...input, htmlSignals: null };
+  }
+
   // ─── Error page detection (403/404 that returned 200 from DFS) ────────
   if (isErrorPage(input)) {
     const title = input.htmlSignals?.pageMeta?.title ?? "error page";

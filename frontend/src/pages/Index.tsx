@@ -32,6 +32,18 @@ const RADIUS_STEPS = [1, 5, 10, 15, 20, 30, 40, 50] as const;
 type Radius = (typeof RADIUS_STEPS)[number];
 const MAX_RADIUS: Radius = 10;
 const MAX_RADIUS_INDEX = RADIUS_STEPS.indexOf(MAX_RADIUS);
+const RESULT_LIMIT_OPTIONS = [25, 50, 100, 200] as const;
+
+const LABEL_FILTER_OPTIONS = [
+  { value: "opportunity", label: "Opportunity" },
+  { value: "low opportunity", label: "Low Opportunity" },
+  { value: "no website", label: "No Website" },
+  { value: "dead site", label: "Dead Site" },
+  { value: "parked", label: "Parked" },
+  { value: "defunct", label: "Defunct" },
+  { value: "disqualified", label: "Disqualified" },
+  { value: "third-party listing", label: "3rd Party" },
+] as const;
 
 function relativeTime(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
@@ -82,8 +94,10 @@ const Index = () => {
     const parsed = (RADIUS_STEPS as readonly number[]).includes(r) ? (r as Radius) : 10;
     return parsed > MAX_RADIUS ? MAX_RADIUS : parsed;
   });
+  const [resultLimit, setResultLimit] = useState(50);
   const [sortBy, setSortBy] = useState<string>(DEFAULT_SORT_COL);
   const [sortDir, setSortDir] = useState<SortDir>(DEFAULT_SORT_DIR);
+  const [labelFilter, setLabelFilter] = useState<Set<string>>(new Set());
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [copiedPhone, setCopiedPhone] = useState<string | null>(null);
@@ -126,6 +140,10 @@ const Index = () => {
         (b.leadScore ?? 0) >= prefs.opportunityScoreMin,
     );
 
+    if (labelFilter.size > 0) {
+      results = results.filter((b) => labelFilter.has(b.label ?? ""));
+    }
+
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       results = results.filter(
@@ -160,7 +178,17 @@ const Index = () => {
       }
     });
     return results;
-  }, [searchJob.results, searchQuery, sortBy, sortDir, prefs.legitimacyScoreMin, prefs.opportunityScoreMin]);
+  }, [searchJob.results, searchQuery, sortBy, sortDir, labelFilter, prefs.legitimacyScoreMin, prefs.opportunityScoreMin]);
+
+  // Count each label across all (pre-label-filter) results for the chips
+  const labelCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const b of searchJob.results) {
+      const l = b.label ?? "";
+      counts.set(l, (counts.get(l) ?? 0) + 1);
+    }
+    return counts;
+  }, [searchJob.results]);
 
   // Update business cache when results change
   useEffect(() => {
@@ -190,9 +218,9 @@ const Index = () => {
       return;
     }
 
-    searchJob.startSearch({ keyword, location: loc, radius });
+    searchJob.startSearch({ keyword, location: loc, radius, limit: resultLimit });
     setForceEmpty(false);
-  }, [selectedCategory, location, radius, searchJob.startSearch]);
+  }, [selectedCategory, location, radius, resultLimit, searchJob.startSearch]);
 
   // Reset all search state when navigating to this page without a restore param
   // (e.g. clicking "Lead Search" in sidebar or after logout/login)
@@ -216,19 +244,21 @@ const Index = () => {
   }, [searchParams]);
 
   const handleNewSearch = useCallback(() => {
-    searchJob.cancelSearch();
+    searchJob.reset();
     setForceEmpty(true);
     setSearchQuery("");
     setLocation("");
     setSelectedCategory("all");
     setRadius(10);
+    setResultLimit(50);
     setSortBy("score");
     setSortDir("desc");
+    setLabelFilter(new Set());
     setSelectedBusiness(null);
     setSelectedIds(new Set());
     // Clear URL params (e.g. ?restore=...) and reset state
     setSearchParams({}, { replace: true });
-  }, [setSearchParams, searchJob.cancelSearch]);
+  }, [setSearchParams, searchJob.reset]);
 
   const recentSearches = firestoreSearches.slice(0, 5);
   const savedLeadsCount = fbStore.savedLeads.length;
@@ -363,16 +393,31 @@ const Index = () => {
               </div>
             </div>
 
-            {/* Row 3: Search button */}
-            <Button
-              size="lg"
-              className="h-12 text-base mt-1"
-              disabled={!canSearch}
-              onClick={handleSearch}
-            >
-              <Search className="h-4 w-4 mr-2" />
-              Search Leads · 1 credit
-            </Button>
+            {/* Row 3: Max results + Search button */}
+            <div className="flex gap-3 items-end mt-1">
+              <div className="text-left shrink-0">
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Max Results</label>
+                <select
+                  value={resultLimit}
+                  onChange={(e) => setResultLimit(Number(e.target.value))}
+                  className="h-12 px-3 rounded-md border border-input bg-background text-sm"
+                  aria-label="Max results"
+                >
+                  {RESULT_LIMIT_OPTIONS.map((n) => (
+                    <option key={n} value={n}>{n}</option>
+                  ))}
+                </select>
+              </div>
+              <Button
+                size="lg"
+                className="h-12 text-base flex-1"
+                disabled={!canSearch}
+                onClick={handleSearch}
+              >
+                <Search className="h-4 w-4 mr-2" />
+                Search Leads · 1 credit
+              </Button>
+            </div>
           </div>
 
           {recentSearches.length > 0 && (
@@ -578,6 +623,43 @@ const Index = () => {
             </Button>
           )}
         </div>
+        {labelCounts.size > 0 && (
+          <div className="flex flex-wrap gap-1.5 mt-1">
+            {LABEL_FILTER_OPTIONS.filter((l) => labelCounts.has(l.value)).map((l) => {
+              const active = labelFilter.has(l.value);
+              return (
+                <button
+                  key={l.value}
+                  type="button"
+                  onClick={() => setLabelFilter((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(l.value)) next.delete(l.value); else next.add(l.value);
+                    return next;
+                  })}
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
+                    active
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-background text-muted-foreground border-border hover:border-foreground hover:text-foreground"
+                  }`}
+                >
+                  {l.label}
+                  <span className={`${active ? "opacity-80" : "opacity-60"}`}>
+                    {labelCounts.get(l.value)}
+                  </span>
+                </button>
+              );
+            })}
+            {labelFilter.size > 0 && (
+              <button
+                type="button"
+                onClick={() => setLabelFilter(new Set())}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <X className="h-3 w-3" /> Clear
+              </button>
+            )}
+          </div>
+        )}
         </div>
       </motion.div>
 

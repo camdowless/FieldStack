@@ -27,6 +27,7 @@ const AGENCY_FOOTER_PATTERNS = [
   /web design by/i,
   /developed by/i,
   /created by/i,
+  /website by/i,
   /a .+ agency/i,
 ];
 
@@ -375,13 +376,14 @@ export function isParkedDomain(signals: HtmlSignals): boolean {
 export async function searchBusinesses(
   keyword: string,
   location: string,
-  authHeader: string
+  authHeader: string,
+  limit: number = 50
 ): Promise<{ items: BusinessRaw[]; cost: number }> {
   const requestBody = [
     {
       categories: [keyword.toLowerCase().replace(/\s+/g, "_")],
       location_coordinate: location.replace(/\s+/g, ""),
-      limit: 50,
+      limit,
     },
   ];
   console.log("[searchBusinesses] Request:", {
@@ -495,6 +497,14 @@ export async function fetchInstantPages(
 
       const pageStatusCode =
         typeof page.status_code === "number" ? page.status_code : null;
+
+      if (pageStatusCode === 403) {
+        // 403 means the server is alive but blocking our crawler (bot protection,
+        // geo-block, auth wall). Treat as unscrapable — not dead — so the scorer
+        // can still run on non-HTML signals (reviews, domain age, RDAP, etc.).
+        results.push({ ...deadSiteSignals(urls[i], 403), fetchFailed: false });
+        continue;
+      }
 
       if (pageStatusCode !== null && pageStatusCode !== 200) {
         results.push(deadSiteSignals(urls[i], pageStatusCode));

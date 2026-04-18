@@ -2,7 +2,7 @@
 
 export const MAX_KEYWORD_LEN = 120;
 export const MAX_LOCATION_LEN = 200;
-export const SAFE_TEXT_RE = /^[\p{L}\p{N}\s.,\-'&#/()]+$/u;
+export const SAFE_TEXT_RE = /^[\p{L}\p{N}\s.,\-'&#/()_]+$/u;
 
 export function sanitizeString(raw: unknown, maxLen: number): string | null {
   if (typeof raw !== "string") return null;
