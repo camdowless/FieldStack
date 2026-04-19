@@ -1115,6 +1115,94 @@ export const getBusinessesByCids = functions.https.onRequest((req, res) => {
   });
 });
 
+// ─── Get Google Places Photos for a business ─────────────────────────────────
+
+export const getBusinessPhotos = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== "GET") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+
+    try {
+      await verifyAuth(req);
+    } catch {
+      res.status(401).json({ error: "Unauthorized. Please sign in." });
+      return;
+    }
+
+    const cid = req.query.cid as string | undefined;
+    if (!cid || typeof cid !== "string") {
+      res.status(400).json({ error: "Missing required query param: cid" });
+      return;
+    }
+
+    const apiKey = process.env.GOOGLE_PLACES_API_KEY;
+    if (!apiKey) {
+      res.status(500).json({ error: "Google Places API key not configured" });
+      return;
+    }
+
+    try {
+      // Step 1: Use legacy Places Details endpoint — supports ?cid= directly
+      const detailsUrl = `https://maps.googleapis.com/maps/api/place/details/json?cid=${encodeURIComponent(cid)}&fields=place_id,photos&key=${apiKey}`;
+      const detailsRes = await fetch(detailsUrl);
+
+      if (!detailsRes.ok) {
+        const errBody = await detailsRes.text();
+        console.error("[getBusinessPhotos] Place details failed:", errBody);
+        res.status(502).json({ error: "Failed to fetch place from Google" });
+        return;
+      }
+
+      const detailsData = await detailsRes.json() as {
+        status: string;
+        result?: {
+          place_id?: string;
+          photos?: Array<{ photo_reference: string; width: number; height: number }>;
+        };
+      };
+
+      if (detailsData.status !== "OK" || !detailsData.result?.photos?.length) {
+        console.log("[getBusinessPhotos] No photos found, status:", detailsData.status);
+        res.status(200).json({ photoUrls: [] });
+        return;
+      }
+
+      // Step 2: Fetch photos server-side and return as base64 (max 20)
+      const photos = detailsData.result.photos.slice(0, 20);
+      const photoResults = await Promise.all(
+        photos.map(async (p, i) => {
+          try {
+            const maxSize = Math.min(Math.max(p.width, p.height), 4800);
+            const photoUrl = `https://maps.googleapis.com/maps/api/place/photo?maxwidth=${maxSize}&photo_reference=${p.photo_reference}&key=${apiKey}`;
+            const imgRes = await fetch(photoUrl);
+            if (!imgRes.ok) return null;
+            const buffer = await imgRes.arrayBuffer();
+            const contentType = imgRes.headers.get("content-type") ?? "image/jpeg";
+            const ext = contentType.includes("png") ? "png" : "jpg";
+            return {
+              index: i + 1,
+              ext,
+              contentType,
+              data: Buffer.from(buffer).toString("base64"),
+            };
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      const photos64 = photoResults.filter(Boolean);
+      res.status(200).json({ photos: photos64 });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Internal server error";
+      console.error("[getBusinessPhotos] error:", msg);
+      res.status(500).json({ error: "An unexpected error occurred." });
+    }
+  });
+});
+
 // ─── Cleanup: Mark stuck running jobs as failed ───────────────────────────────
 
 export const cleanupStuckJobs = functions.pubsub

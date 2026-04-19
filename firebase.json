@@ -33,6 +33,10 @@
         "function": "getGhostBusinesses"
       },
       {
+        "source": "/api/photos",
+        "function": "getBusinessPhotos"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

@@ -30,7 +30,7 @@ import { motion } from "framer-motion";
 
 const RADIUS_STEPS = [1, 5, 10, 15, 20, 30, 40, 50] as const;
 type Radius = (typeof RADIUS_STEPS)[number];
-const MAX_RADIUS: Radius = 10;
+const MAX_RADIUS: Radius = 50;
 const MAX_RADIUS_INDEX = RADIUS_STEPS.indexOf(MAX_RADIUS);
 const RESULT_LIMIT_OPTIONS = [25, 50, 100, 200] as const;
 

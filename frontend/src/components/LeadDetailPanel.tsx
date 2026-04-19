@@ -17,13 +17,15 @@ import {
   Shield, ShieldOff, Gauge, Code, Search as SearchIcon,
   TrendingDown, ExternalLink, Clock, AlertTriangle, Sparkles,
   Wrench, Copy, CheckCircle2, XCircle, Mail, Server, Info, Pencil,
-  StickyNote,
+  StickyNote, Images, Loader2,
 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { toast } from "@/hooks/use-toast";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { LeadStatus } from "@/data/mockBusinesses";
+import { fetchBusinessPhotos } from "@/lib/api";
+import JSZip from "jszip";
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -191,6 +193,7 @@ export function LeadDetailPanel({ business }: LeadDetailPanelProps) {
   const [isEditingEmail, setIsEditingEmail] = useState(false);
   const [localCompleted, setLocalCompleted] = useState<string[]>([]);
   const [localEmailDraft, setLocalEmailDraft] = useState<string | null>(null);
+  const [isDownloadingPhotos, setIsDownloadingPhotos] = useState(false);
 
   // Notes state with debounced save
   const savedRecord = fbStore.getSavedLead(business.id);
@@ -244,6 +247,37 @@ export function LeadDetailPanel({ business }: LeadDetailPanelProps) {
   const seoGauge = a.hasWebsite && a.seoScore > 0 ? a.seoScore : null;
   const designGauge = a.hasWebsite && a.designScore > 0 ? a.designScore : null;
   const speedGauge = a.hasWebsite && a.loadTimeMs > 0 ? Math.max(0, Math.min(100, 100 - Math.round(a.loadTimeMs / 100))) : null;
+
+  const handleDownloadPhotos = async () => {
+    setIsDownloadingPhotos(true);
+    try {
+      const photos = await fetchBusinessPhotos(business.id);
+      if (photos.length === 0) {
+        toast({ title: "No photos found", description: "This business has no photos on Google." });
+        return;
+      }
+
+      const zip = new JSZip();
+      const safeName = business.name.replace(/[^a-z0-9]/gi, "_");
+
+      for (const photo of photos) {
+        zip.file(`${safeName}_photo_${photo.index}.${photo.ext}`, photo.data, { base64: true });
+      }
+
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(zipBlob);
+      a.download = `${safeName}_photos.zip`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+
+      toast({ title: `Downloaded ${photos.length} photo${photos.length === 1 ? "" : "s"}`, description: `Saved as ${safeName}_photos.zip` });
+    } catch (err) {
+      toast({ title: "Failed to fetch photos", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setIsDownloadingPhotos(false);
+    }
+  };
 
   const ratingDist = business.ratingDistribution;
   const ratingTotal = ratingDist ? Object.values(ratingDist).reduce((s, n) => s + n, 0) : 0;
@@ -325,6 +359,20 @@ export function LeadDetailPanel({ business }: LeadDetailPanelProps) {
                 <ExternalLink className="h-3.5 w-3.5" /> Google Maps
               </Button>
             </a>
+          )}
+          {(business.totalPhotos ?? 0) > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1"
+              onClick={handleDownloadPhotos}
+              disabled={isDownloadingPhotos}
+            >
+              {isDownloadingPhotos
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : <Images className="h-3.5 w-3.5" />}
+              {isDownloadingPhotos ? "Downloading..." : `Download Photos${business.totalPhotos ? ` (${business.totalPhotos})` : ""}`}
+            </Button>
           )}
         </div>
 
