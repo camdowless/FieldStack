@@ -17,7 +17,6 @@ export function LeadDetailSheet({ cid, onClose }: LeadDetailSheetProps) {
   const [business, setBusiness] = useState<Business | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
   useEffect(() => {
     if (!cid) {
       setBusiness(null);
@@ -72,7 +71,7 @@ export function LeadDetailSheet({ cid, onClose }: LeadDetailSheetProps) {
           {error && (
             <div className="text-center py-20 text-muted-foreground">{error}</div>
           )}
-          {business && !loading && <LeadDetailPanel business={business} />}
+          {business && !loading && <LeadDetailPanel business={business} onUpdate={setBusiness} />}
         </ScrollArea>
       </SheetContent>
     </Sheet>

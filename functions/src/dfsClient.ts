@@ -244,11 +244,18 @@ export function extractHtmlSignals(
   const deprecatedTagCount =
     typeof checks.deprecated_tags === "number" ? checks.deprecated_tags : 0;
 
-  // HTTPS: check final URL + DFS is_https check
+  // HTTPS: check final URL + DFS is_https check.
+  // Note: we crawl https:// directly (normalized in fetchInstantPages), so
+  // finalUrl will be https:// if the site supports it. redirectedToHttps is
+  // only meaningful when the *original stored URL* was http:// and the crawl
+  // confirmed https works — use page.checks.is_redirect to distinguish a real
+  // redirect from our own URL normalization.
   const finalUrl = typeof page.url === "string" ? page.url : url;
   const dfsIsHttps = checks.is_https === true;
   const isHttps = finalUrl.startsWith("https://") || dfsIsHttps;
-  const redirectedToHttps = !url.startsWith("https://") && isHttps;
+  // Only flag redirectedToHttps if DFS itself observed a redirect (is_redirect=true),
+  // meaning the server actually issued a 3xx, not just that we changed http→https.
+  const redirectedToHttps = !url.startsWith("https://") && isHttps && checks.is_redirect === true;
 
   const { headerText, footerText, copyrightYear } = extractFooterData(
     typeof page.custom_js_response === "string" ? page.custom_js_response : null
@@ -297,7 +304,7 @@ export function extractHtmlSignals(
 }
 
 /** Build a dead-site HtmlSignals stub for URLs that failed to fetch. */
-function deadSiteSignals(url: string, statusCode: number | null): HtmlSignals {
+export function deadSiteSignals(url: string, statusCode: number | null): HtmlSignals {
   return {
     statusCode,
     fetchFailed: true,
@@ -438,12 +445,55 @@ export async function searchBusinesses(
   return { items: items ?? [], cost: topCost };
 }
 
-export async function fetchInstantPages(
-  urls: string[],
-  authHeader: string
-): Promise<{ signals: HtmlSignals[]; cost: number }> {
-  const requests = urls.map((url) =>
-    fetch(`${DFS_BASE}/on_page/instant_pages`, {
+// Task-level status codes from DataForSEO that indicate a transient failure worth retrying
+const DFS_RETRYABLE_TASK_CODES = new Set([
+  40501, // site_unreachable
+  50000, // internal error
+  50401, // internal error - timeout
+]);
+
+/** Parse a single instant_pages item into HtmlSignals, or return null if it needs a retry. */
+function parseInstantPageItem(
+  url: string,
+  page: Record<string, unknown> | undefined
+): HtmlSignals | null {
+  if (!page) return null;
+
+  // resource_type === 'broken' with no status_code means the crawler hit a
+  // timeout, DNS failure, or SSL error — retry with a different proxy pool.
+  if (page.resource_type === "broken" && page.status_code == null) {
+    return null;
+  }
+
+  const pageStatusCode =
+    typeof page.status_code === "number" ? page.status_code : null;
+
+  if (pageStatusCode === 403) {
+    // Server is alive but blocking our crawler — not dead.
+    return { ...deadSiteSignals(url, 403), fetchFailed: false };
+  }
+
+  if (pageStatusCode !== null && pageStatusCode !== 200) {
+    return deadSiteSignals(url, pageStatusCode);
+  }
+
+  return extractHtmlSignals(url, page, pageStatusCode);
+}
+
+interface FetchOnePageResult {
+  page: Record<string, unknown> | undefined;
+  taskStatusCode: number | null;
+  cost: number;
+}
+
+/** Fire a single instant_pages request. Returns the page item, task-level status code, and cost. */
+async function fetchOnePage(
+  url: string,
+  authHeader: string,
+  opts: { switchPool?: boolean; returnDespiteTimeout?: boolean } = {}
+): Promise<FetchOnePageResult> {
+  try {
+    const response = await fetch(`${DFS_BASE}/on_page/instant_pages`, {
       method: "POST",
       headers: {
         Authorization: authHeader,
@@ -456,75 +506,170 @@ export async function fetchInstantPages(
           load_resources: true,
           enable_javascript: true,
           disable_cookie_popup: true,
+          return_despite_timeout: opts.returnDespiteTimeout ?? true,
+          switch_pool: opts.switchPool ?? false,
         },
       ]),
-    })
+    });
+
+    if (!response.ok) return { page: undefined, taskStatusCode: null, cost: 0 };
+
+    const data = (await response.json()) as Record<string, unknown>;
+    const cost = typeof data.cost === "number" ? data.cost : 0;
+    const tasks = data.tasks as Array<Record<string, unknown>> | undefined;
+    const task = tasks?.[0];
+    const taskStatusCode = typeof task?.status_code === "number" ? task.status_code : null;
+    const result = task?.result as Array<Record<string, unknown>> | undefined;
+    const items = result?.[0]?.items as Array<Record<string, unknown>> | undefined;
+
+    if (taskStatusCode !== null) {
+      console.log(`[fetchOnePage] ${url} → task status_code=${taskStatusCode} items=${items?.length ?? 0} switchPool=${opts.switchPool}`);
+    }
+
+    return { page: items?.[0], taskStatusCode, cost };
+  } catch {
+    return { page: undefined, taskStatusCode: null, cost: 0 };
+  }
+}
+
+/** Returns true if the result warrants a retry (transient DFS error or empty items on a retryable code). */
+function shouldRetry(result: FetchOnePageResult): boolean {
+  // Empty items with a known retryable task code
+  if (result.page === undefined && result.taskStatusCode !== null && DFS_RETRYABLE_TASK_CODES.has(result.taskStatusCode)) {
+    return true;
+  }
+  // Empty items with no task code at all (unknown transient failure)
+  if (result.page === undefined && result.taskStatusCode === null) {
+    return true;
+  }
+  // Empty items even on a "success" task code — DFS crawled but got nothing back
+  if (result.page === undefined) {
+    return true;
+  }
+  // Page present but resource_type=broken with no status_code
+  if (result.page !== undefined && result.page.resource_type === "broken" && result.page.status_code == null) {
+    return true;
+  }
+  return false;
+}
+
+/** Resolve the final URL after redirects (e.g. no-www → www). Returns the original if it fails. */
+async function resolveRedirect(url: string): Promise<string> {
+  try {
+    const res = await fetch(url, { method: "GET", redirect: "follow" });
+    const final = res.url;
+    // Only use the resolved URL if it's meaningfully different (different host)
+    if (final && new URL(final).hostname !== new URL(url).hostname) {
+      console.log(`[resolveRedirect] ${url} → ${final}`);
+      return final;
+    }
+    return url;
+  } catch {
+    return url;
+  }
+}
+
+export async function fetchInstantPages(
+  urls: string[],
+  authHeader: string
+): Promise<{ signals: HtmlSignals[]; cost: number }> {
+  // Normalize http:// → https:// before crawling. Most sites that have http://
+  // stored in Google Maps redirect to https:// anyway, and some crawlers/proxies
+  // fail on the redirect chain. We crawl https:// directly and fall back to the
+  // original URL only if https fails.
+  const crawlUrls = urls.map((url) =>
+    url.startsWith("http://") ? url.replace("http://", "https://") : url
   );
 
-  const settled = await Promise.allSettled(requests);
-  const results: HtmlSignals[] = [];
+  // First pass: fetch all URLs in parallel with return_despite_timeout enabled.
+  const firstPass = await Promise.all(
+    crawlUrls.map((url) => fetchOnePage(url, authHeader, { returnDespiteTimeout: true }))
+  );
+
   let totalCost = 0;
+  const results: (HtmlSignals | null)[] = [];
+  const retryIndices: number[] = [];
 
-  for (let i = 0; i < settled.length; i++) {
-    const outcome = settled[i];
-    if (outcome.status === "rejected") {
-      results.push(deadSiteSignals(urls[i], null));
-      continue;
-    }
-
-    const response = outcome.value;
-    if (!response.ok) {
-      results.push(deadSiteSignals(urls[i], null));
-      continue;
-    }
-
-    try {
-      const data = (await response.json()) as Record<string, unknown>;
-      if (typeof data.cost === "number") totalCost += data.cost;
-      const tasks = data.tasks as Array<Record<string, unknown>> | undefined;
-      const result = tasks?.[0]?.result as
-        | Array<Record<string, unknown>>
-        | undefined;
-      const items = result?.[0]?.items as
-        | Array<Record<string, unknown>>
-        | undefined;
-      const page = items?.[0];
-
-      if (!page) {
-        results.push(deadSiteSignals(urls[i], null));
-        continue;
-      }
-
-      const pageStatusCode =
-        typeof page.status_code === "number" ? page.status_code : null;
-
-      if (pageStatusCode === 403) {
-        // 403 means the server is alive but blocking our crawler (bot protection,
-        // geo-block, auth wall). Treat as unscrapable — not dead — so the scorer
-        // can still run on non-HTML signals (reviews, domain age, RDAP, etc.).
-        results.push({ ...deadSiteSignals(urls[i], 403), fetchFailed: false });
-        continue;
-      }
-
-      if (pageStatusCode !== null && pageStatusCode !== 200) {
-        results.push(deadSiteSignals(urls[i], pageStatusCode));
-        continue;
-      }
-
-      results.push(extractHtmlSignals(urls[i], page, pageStatusCode));
-    } catch {
-      results.push(deadSiteSignals(urls[i], null));
+  for (let i = 0; i < firstPass.length; i++) {
+    totalCost += firstPass[i].cost;
+    if (shouldRetry(firstPass[i])) {
+      retryIndices.push(i);
+      results.push(null);
+    } else {
+      // Pass the original url (not crawlUrl) so HtmlSignals.isHttps reflects
+      // the stored URL, but the actual crawl used the normalized https version.
+      results.push(parseInstantPageItem(urls[i], firstPass[i].page));
     }
   }
 
-  return { signals: results, cost: totalCost };
+  // Second pass: retry transient failures with switch_pool (different proxy).
+  if (retryIndices.length > 0) {
+    console.log(
+      `[fetchInstantPages] Retrying ${retryIndices.length} site(s) with switch_pool: ${retryIndices.map((i) => crawlUrls[i]).join(", ")}`
+    );
+    const retryResults = await Promise.all(
+      retryIndices.map((i) =>
+        fetchOnePage(crawlUrls[i], authHeader, { returnDespiteTimeout: true, switchPool: true })
+      )
+    );
+
+    const redirectIndices: number[] = [];
+
+    for (let j = 0; j < retryIndices.length; j++) {
+      const i = retryIndices[j];
+      totalCost += retryResults[j].cost;
+
+      // items=0 on a success code after switch_pool = likely a redirect DFS won't follow
+      if (retryResults[j].page === undefined && retryResults[j].taskStatusCode === 20000) {
+        redirectIndices.push(i);
+        continue;
+      }
+
+      const signal = parseInstantPageItem(urls[i], retryResults[j].page);
+      results[i] = signal ?? deadSiteSignals(urls[i], null);
+      if (signal === null) {
+        console.log(`[fetchInstantPages] ${crawlUrls[i]} still unreachable after retry (taskCode=${retryResults[j].taskStatusCode})`);
+      }
+    }
+
+    // Third pass: resolve redirects and retry with the final URL
+    if (redirectIndices.length > 0) {
+      console.log(
+        `[fetchInstantPages] Resolving redirects for ${redirectIndices.length} site(s): ${redirectIndices.map((i) => crawlUrls[i]).join(", ")}`
+      );
+      const resolvedUrls = await Promise.all(redirectIndices.map((i) => resolveRedirect(crawlUrls[i])));
+      const redirectResults = await Promise.all(
+        resolvedUrls.map((url) => fetchOnePage(url, authHeader, { returnDespiteTimeout: true }))
+      );
+
+      for (let k = 0; k < redirectIndices.length; k++) {
+        const i = redirectIndices[k];
+        totalCost += redirectResults[k].cost;
+        const signal = parseInstantPageItem(urls[i], redirectResults[k].page);
+        results[i] = signal ?? deadSiteSignals(urls[i], null);
+        if (signal === null) {
+          console.log(`[fetchInstantPages] ${resolvedUrls[k]} still unreachable after redirect resolution`);
+        }
+      }
+    }
+  }
+
+  return {
+    signals: results as HtmlSignals[],
+    cost: totalCost,
+  };
 }
 
 export async function fetchLighthouse(
   urls: string[],
   authHeader: string
 ): Promise<{ scores: ({ performance: number; seo: number } | null)[]; cost: number }> {
-  const requests = urls.map((url) =>
+  // Same http→https normalization as fetchInstantPages
+  const crawlUrls = urls.map((url) =>
+    url.startsWith("http://") ? url.replace("http://", "https://") : url
+  );
+
+  const requests = crawlUrls.map((url) =>
     fetch(`${DFS_BASE}/on_page/lighthouse/live/json`, {
       method: "POST",
       headers: {

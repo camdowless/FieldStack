@@ -29,6 +29,10 @@
         "function": "recalculateBusinessRank"
       },
       {
+        "source": "/api/reevaluate-business",
+        "function": "reevaluateBusiness"
+      },
+      {
         "source": "/api/ghost-businesses",
         "function": "getGhostBusinesses"
       },

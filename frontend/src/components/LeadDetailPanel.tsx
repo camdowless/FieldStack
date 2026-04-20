@@ -17,7 +17,7 @@ import {
   Shield, ShieldOff, Gauge, Code, Search as SearchIcon,
   TrendingDown, ExternalLink, Clock, AlertTriangle, Sparkles,
   Wrench, Copy, CheckCircle2, XCircle, Mail, Server, Info, Pencil,
-  StickyNote, Images, Loader2,
+  StickyNote, Images, Loader2, RefreshCw,
 } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { toast } from "@/hooks/use-toast";
@@ -25,6 +25,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { LeadStatus } from "@/data/mockBusinesses";
 import { fetchBusinessPhotos } from "@/lib/api";
+import { reevaluateBusiness } from "@/lib/api";
+import { normalizeBusiness } from "@/data/leadTypes";
 import JSZip from "jszip";
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -184,9 +186,10 @@ function formatPhone(raw: string): string {
 
 interface LeadDetailPanelProps {
   business: Business;
+  onUpdate?: (updated: Business) => void;
 }
 
-export function LeadDetailPanel({ business }: LeadDetailPanelProps) {
+export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
   const fbStore = useFirebaseLeadStore();
   const store = useLeadStore();
   const [showPricing, setShowPricing] = useState(true);
@@ -194,6 +197,7 @@ export function LeadDetailPanel({ business }: LeadDetailPanelProps) {
   const [localCompleted, setLocalCompleted] = useState<string[]>([]);
   const [localEmailDraft, setLocalEmailDraft] = useState<string | null>(null);
   const [isDownloadingPhotos, setIsDownloadingPhotos] = useState(false);
+  const [isReevaluating, setIsReevaluating] = useState(false);
 
   // Notes state with debounced save
   const savedRecord = fbStore.getSavedLead(business.id);
@@ -282,6 +286,20 @@ export function LeadDetailPanel({ business }: LeadDetailPanelProps) {
   const ratingDist = business.ratingDistribution;
   const ratingTotal = ratingDist ? Object.values(ratingDist).reduce((s, n) => s + n, 0) : 0;
 
+  const handleReevaluate = async () => {
+    setIsReevaluating(true);
+    try {
+      const { result } = await reevaluateBusiness(business.id);
+      const updated = normalizeBusiness(result);
+      onUpdate?.(updated);
+      toast({ title: "Re-evaluated", description: `Score updated to ${updated.leadScore} (${updated.label})` });
+    } catch (err) {
+      toast({ title: "Re-evaluation failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
+    } finally {
+      setIsReevaluating(false);
+    }
+  };
+
   const addressLine = [business.address, business.city, business.state, business.zip].filter(Boolean).join(", ");
 
   return (
@@ -328,7 +346,7 @@ export function LeadDetailPanel({ business }: LeadDetailPanelProps) {
           {a.websiteUrl && <a href={a.websiteUrl.startsWith("http") ? a.websiteUrl : `https://${a.websiteUrl}`} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-foreground transition-colors"><Globe className="h-4 w-4" /><span className="underline">{a.websiteUrl}</span></a>}
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <Button
             variant={isSaved ? "secondary" : "default"}
             size="sm"
@@ -374,6 +392,22 @@ export function LeadDetailPanel({ business }: LeadDetailPanelProps) {
               {isDownloadingPhotos ? "Downloading..." : `Download Photos${business.totalPhotos ? ` (${business.totalPhotos})` : ""}`}
             </Button>
           )}
+        </div>
+
+        <div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1"
+            onClick={handleReevaluate}
+            disabled={isReevaluating}
+            title="Re-fetch website data and recalculate score"
+          >
+            {isReevaluating
+              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              : <RefreshCw className="h-3.5 w-3.5" />}
+            {isReevaluating ? "Re-evaluating..." : "Re-evaluate"}
+          </Button>
         </div>
 
         {/* Notes */}

@@ -8,6 +8,7 @@ import {
   fetchLighthouse,
   isParkedDomain,
   extractBusinessData,
+  deadSiteSignals,
 } from "./dfsClient";
 import { lookupDomainInfo } from "./rdap";
 import { score, computeLegitimacy } from "./scorer";
@@ -962,6 +963,136 @@ function scorerInputFromCached(biz: ScoredBusiness): ScorerInput {
     hasPlaceTopics: !!(bd?.placeTopics && Object.keys(bd.placeTopics).length > 0),
   };
 }
+
+// ─── Re-evaluate a single business: full DFS/Lighthouse re-fetch ──────────────
+
+export const reevaluateBusiness = functions
+  .runWith({ timeoutSeconds: 120 })
+  .https.onRequest((req, res) => {
+    corsHandler(req, res, async () => {
+      if (req.method !== "POST") {
+        res.status(405).json({ error: "Method not allowed" });
+        return;
+      }
+
+      try {
+        await verifyAuth(req);
+      } catch {
+        res.status(401).json({ error: "Unauthorized. Please sign in." });
+        return;
+      }
+
+      const cid = req.body?.cid;
+      if (!cid || typeof cid !== "string") {
+        res.status(400).json({ error: "Missing required field: cid" });
+        return;
+      }
+
+      const DFS_EMAIL = process.env.DFS_EMAIL;
+      const DFS_PASSWORD = process.env.DFS_PASSWORD;
+      if (!DFS_EMAIL || !DFS_PASSWORD) {
+        res.status(500).json({ error: "Server configuration error" });
+        return;
+      }
+
+      // Load cached business
+      const cached = await getCachedBusinesses([cid]);
+      const biz = cached.get(cid);
+      if (!biz) {
+        res.status(404).json({ error: "Business not found in cache" });
+        return;
+      }
+
+      const authHeader = buildAuthHeader(DFS_EMAIL, DFS_PASSWORD);
+      const website = biz.website;
+
+      let updatedBiz: ScoredBusiness;
+
+      if (!website) {
+        // No website — just re-score from cached signals
+        const input = scorerInputFromCached(biz);
+        const { score: s, label, scoring } = score(input);
+        const { legitimacyScore, legitimacyBreakdown } = computeLegitimacy(input);
+        updatedBiz = { ...biz, score: s, label, scoring, legitimacyScore, legitimacyBreakdown };
+      } else {
+        // Re-fetch instant pages
+        const { signals, cost: ipCost } = await fetchInstantPages([website], authHeader);
+        // fetchInstantPages guarantees a signal per URL, but guard defensively
+        const htmlSignals = signals[0] ?? deadSiteSignals(website, null);
+        console.log(`[reevaluateBusiness] ${cid} (${website}): fetchFailed=${htmlSignals.fetchFailed} statusCode=${htmlSignals.statusCode} cost=${ipCost}`);
+
+        const signalsMap = new Map([[website, htmlSignals]]);
+
+        let lighthouseMap = new Map<string, { performance: number; seo: number }>();
+        let rdapMap = new Map<string, import("./rdap").DomainInfo>();
+
+        // Only run Lighthouse + RDAP if the site is reachable and not parked
+        if (!htmlSignals.fetchFailed && !isParkedDomain(htmlSignals)) {
+          const [lhResult, rdapResult] = await Promise.allSettled([
+            fetchLighthouse([website], authHeader),
+            biz.businessData?.city != null
+              ? lookupDomainInfo(new URL(website).hostname).catch(() => null)
+              : Promise.resolve(null),
+          ]);
+
+          if (lhResult.status === "fulfilled" && lhResult.value.scores[0]) {
+            lighthouseMap.set(website, lhResult.value.scores[0]);
+            console.log(`[reevaluateBusiness] ${cid}: lighthouse perf=${lhResult.value.scores[0].performance} seo=${lhResult.value.scores[0].seo}`);
+          }
+          if (rdapResult.status === "fulfilled" && rdapResult.value) {
+            const domain = new URL(website).hostname;
+            rdapMap.set(domain, rdapResult.value);
+          }
+        }
+
+        // Build a minimal BusinessRaw-compatible stub from cached data
+        const bd = biz.businessData;
+        const bizRawStub: BusinessRaw = {
+          title: biz.name,
+          description: bd?.description ?? null,
+          address: biz.address,
+          address_info: null,
+          phone: biz.phone,
+          domain: (() => { try { return new URL(website).hostname; } catch { return null; } })(),
+          url: website,
+          rating: biz.rating != null ? { value: biz.rating, votes_count: biz.reviewCount } : null,
+          rating_distribution: bd?.ratingDistribution ?? null,
+          category: biz.category,
+          category_ids: null,
+          additional_categories: bd?.additionalCategories ?? null,
+          is_claimed: bd?.isClaimed ?? false,
+          price_level: bd?.priceLevel ?? null,
+          total_photos: bd?.totalPhotos ?? null,
+          attributes: null,
+          work_time: bd?.currentStatus ? { work_hours: { timetable: null, current_status: bd.currentStatus } } : null,
+          contact_info: (bd?.socialLinks ?? []).map((l) => ({ type: l.type, value: l.value, source: "cached" })),
+          people_also_search: null,
+          place_topics: bd?.placeTopics ?? null,
+          logo: bd?.logo ?? null,
+          main_image: bd?.mainImage ?? null,
+          last_updated_time: bd?.lastUpdatedTime ?? null,
+          first_seen: bd?.firstSeen ?? null,
+          check_url: bd?.checkUrl ?? null,
+          cid,
+          feature_id: null,
+          place_id: null,
+          latitude: bd?.latitude ?? null,
+          longitude: bd?.longitude ?? null,
+        };
+
+        const [scored] = scoreWithSignals([bizRawStub], signalsMap, rdapMap, lighthouseMap);
+        updatedBiz = scored;
+      }
+
+      // Overwrite cache
+      if (updatedBiz.cid) {
+        await db.collection(BUSINESSES_COLLECTION).doc(updatedBiz.cid).set(updatedBiz, { merge: false });
+        console.log(`[reevaluateBusiness] ${cid}: updated cache → label=${updatedBiz.label} score=${updatedBiz.score}`);
+      }
+
+      res.status(200).json({ result: updatedBiz });
+    });
+  });
 
 // ─── Recalculate full scores for cached businesses (no DFS/Lighthouse re-fetch) ─
 

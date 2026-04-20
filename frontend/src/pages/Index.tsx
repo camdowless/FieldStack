@@ -845,7 +845,7 @@ const Index = () => {
           </SheetHeader>
           <ScrollArea className="h-full">
             <div className="p-6">
-              {selectedBusiness && <LeadDetailPanel business={selectedBusiness} />}
+              {selectedBusiness && <LeadDetailPanel business={selectedBusiness} onUpdate={setSelectedBusiness} />}
             </div>
           </ScrollArea>
         </SheetContent>
