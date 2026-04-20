@@ -19,6 +19,7 @@ import {
   Wrench, Copy, CheckCircle2, XCircle, Mail, Server, Info, Pencil,
   StickyNote, Images, Loader2, RefreshCw,
 } from "lucide-react";
+import { ReportButton } from "@/components/ReportDialog";
 import { useState, useRef, useEffect } from "react";
 import { toast } from "@/hooks/use-toast";
 import { Textarea } from "@/components/ui/textarea";
@@ -27,6 +28,7 @@ import type { LeadStatus } from "@/data/mockBusinesses";
 import { fetchBusinessPhotos } from "@/lib/api";
 import { reevaluateBusiness } from "@/lib/api";
 import { normalizeBusiness } from "@/data/leadTypes";
+import { updateCachedBusiness } from "@/lib/businessCache";
 import JSZip from "jszip";
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -292,6 +294,9 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
       const { result } = await reevaluateBusiness(business.id);
       const updated = normalizeBusiness(result);
       onUpdate?.(updated);
+      // Propagate to in-memory search cache and saved lead doc
+      updateCachedBusiness(updated);
+      fbStore.updateScore(business.id, updated.leadScore, updated.label ?? null);
       toast({ title: "Re-evaluated", description: `Score updated to ${updated.leadScore} (${updated.label})` });
     } catch (err) {
       toast({ title: "Re-evaluation failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
@@ -394,7 +399,7 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
           )}
         </div>
 
-        <div>
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
             size="sm"
@@ -408,8 +413,8 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
               : <RefreshCw className="h-3.5 w-3.5" />}
             {isReevaluating ? "Re-evaluating..." : "Re-evaluate"}
           </Button>
+          <ReportButton cid={business.id} businessName={business.name} />
         </div>
-
         {/* Notes */}
         {isSaved && (
           <Card>

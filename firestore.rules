@@ -16,6 +16,11 @@ service cloud.firestore {
       }
     }
 
+    match /reports/{reportId} {
+      allow read: if false; // admin-only via Admin SDK
+      allow write: if false; // server-side only via Admin SDK
+    }
+
     match /users/{uid} {
       allow read: if request.auth != null && request.auth.uid == uid;
       allow write: if false; // server-side only via Admin SDK

@@ -188,6 +188,17 @@ export function useFirebaseLeadStore() {
     [user],
   );
 
+  const updateScore = useCallback(
+    async (cid: string, leadScore: number, label: string | null) => {
+      if (!user) return;
+      const ref = doc(firestore, "users", user.uid, "savedLeads", cid);
+      await updateDoc(ref, { leadScore, label }).catch(() => {
+        // Not saved — no-op
+      });
+    },
+    [user],
+  );
+
   return {
     savedLeads: leads,
     loading,
@@ -197,5 +208,6 @@ export function useFirebaseLeadStore() {
     removeLead,
     updateStatus,
     updateNotes,
+    updateScore,
   };
 }

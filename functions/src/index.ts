@@ -1464,3 +1464,57 @@ export const cleanupExpiredJobs = functions.pubsub
     console.log(`[cleanupExpiredJobs] Deleted ${expiredIds.length} expired jobs`);
   });
 
+
+// ─── Submit Report ────────────────────────────────────────────────────────────
+
+const VALID_REASONS = ["wrong_ranking", "wrong_signal", "incorrect_info", "other"] as const;
+
+export const submitReport = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+
+    let decodedToken: admin.auth.DecodedIdToken;
+    try {
+      decodedToken = await verifyAuth(req);
+    } catch {
+      res.status(401).json({ error: "Unauthorized. Please sign in." });
+      return;
+    }
+
+    const { cid, businessName, reason, details } = req.body ?? {};
+
+    if (!cid || typeof cid !== "string") {
+      res.status(400).json({ error: "Missing or invalid field: cid" });
+      return;
+    }
+    if (!businessName || typeof businessName !== "string") {
+      res.status(400).json({ error: "Missing or invalid field: businessName" });
+      return;
+    }
+    if (!VALID_REASONS.includes(reason)) {
+      res.status(400).json({ error: `Invalid reason. Must be one of: ${VALID_REASONS.join(", ")}` });
+      return;
+    }
+    if (details !== undefined && (typeof details !== "string" || details.length > 1000)) {
+      res.status(400).json({ error: "details must be a string under 1000 characters" });
+      return;
+    }
+
+    const reportRef = db.collection("reports").doc();
+    await reportRef.set({
+      cid,
+      businessName,
+      reason,
+      details: details ?? null,
+      uid: decodedToken.uid,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      status: "open",
+    });
+
+    console.log(`[submitReport] Report ${reportRef.id} created by uid=${decodedToken.uid} for cid=${cid}`);
+    res.status(200).json({ reportId: reportRef.id });
+  });
+});

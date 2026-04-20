@@ -41,6 +41,10 @@
         "function": "getBusinessPhotos"
       },
       {
+        "source": "/api/report",
+        "function": "submitReport"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

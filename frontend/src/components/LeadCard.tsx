@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { MapPin, Star, Globe, AlertTriangle, Bookmark, BookmarkCheck } from "lucide-react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
+import { ReportButton } from "./ReportDialog";
 
 interface LeadCardProps {
   business: Business;
@@ -65,6 +66,7 @@ export function LeadCard({ business, isSaved, onSave, index = 0 }: LeadCardProps
             >
               {isSaved ? <BookmarkCheck className="h-5 w-5 text-primary" /> : <Bookmark className="h-5 w-5" />}
             </Button>
+            <ReportButton cid={business.id} businessName={business.name} />
           </div>
 
           {flags.length > 0 && (
