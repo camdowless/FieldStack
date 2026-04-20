@@ -25,8 +25,8 @@
         "function": "getBusinessesByCids"
       },
       {
-        "source": "/api/recalculate-legitimacy",
-        "function": "recalculateLegitimacy"
+        "source": "/api/recalculate-business-rank",
+        "function": "recalculateBusinessRank"
       },
       {
         "source": "/api/ghost-businesses",

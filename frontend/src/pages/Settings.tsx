@@ -8,7 +8,7 @@ import { Slider } from "@/components/ui/slider";
 import { toast } from "@/hooks/use-toast";
 import { usePreferences } from "@/hooks/usePreferences";
 import { motion } from "framer-motion";
-import { recalculateLegitimacy, fetchGhostBusinesses } from "@/lib/api";
+import { recalculateBusinessRank, fetchGhostBusinesses } from "@/lib/api";
 import type { ApiBusiness } from "@/data/leadTypes";
 import { useState } from "react";
 
@@ -25,9 +25,9 @@ const Settings = () => {
   const handleRecalculate = async () => {
     setRecalculating(true);
     try {
-      const result = await recalculateLegitimacy();
+      const result = await recalculateBusinessRank();
       toast({
-        title: "Legitimacy scores recalculated",
+        title: "Business ranks recalculated",
         description: `Processed ${result.processed} businesses, updated ${result.updated}.`,
       });
     } catch (err) {
@@ -168,9 +168,9 @@ const Settings = () => {
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium">Recalculate Legitimacy Scores</p>
+                <p className="text-sm font-medium">Recalculate Business Ranks</p>
                 <p className="text-sm text-muted-foreground">
-                  Re-run the legitimacy algorithm on all cached businesses in Firestore.
+                  Re-run the full scoring algorithm on all cached businesses in Firestore.
                 </p>
               </div>
               <Button

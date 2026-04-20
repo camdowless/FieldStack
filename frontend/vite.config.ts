@@ -21,7 +21,7 @@ export default defineConfig(({ mode }) => ({
           if (path === "/api/search/cancel") return "/cancelSearchJob";
           if (path === "/api/search") return "/dataforseoBusinessSearch";
           if (path === "/api/businesses") return "/getBusinessesByCids";
-          if (path === "/api/recalculate-legitimacy") return "/recalculateLegitimacy";
+          if (path === "/api/recalculate-business-rank") return "/recalculateBusinessRank";
           if (path.startsWith("/api/ghost-businesses")) return path.replace("/api/ghost-businesses", "/getGhostBusinesses");
           return path;
         },

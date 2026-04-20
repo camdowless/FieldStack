@@ -34,7 +34,7 @@ export interface Business {
   googleRating: number;
   reviewCount: number;
   analysis: WebsiteAnalysis;
-  leadScore: number;
+  leadScore: number | null;
 
   // Extended (from real API)
   label?: string;

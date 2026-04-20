@@ -42,6 +42,7 @@ const LABEL_FILTER_OPTIONS = [
   { value: "parked", label: "Parked" },
   { value: "defunct", label: "Defunct" },
   { value: "disqualified", label: "Disqualified" },
+  { value: "permanently closed", label: "Permanently Closed" },
   { value: "third-party listing", label: "3rd Party" },
 ] as const;
 
@@ -134,8 +135,11 @@ const Index = () => {
 
   // Client-side filtering of API results (name filter + preferences)
   const filteredResults = useMemo(() => {
+    const DISQUALIFIED_LABELS = new Set(["disqualified", "defunct", "permanently closed"]);
     let results = searchJob.results.filter(
       (b) =>
+        !DISQUALIFIED_LABELS.has(b.label ?? "") &&
+        b.leadScore !== null &&
         (b.legitimacyScore ?? 100) >= prefs.legitimacyScoreMin &&
         (b.leadScore ?? 0) >= prefs.opportunityScoreMin,
     );

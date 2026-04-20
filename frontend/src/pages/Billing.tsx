@@ -3,8 +3,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
-import { CheckCircle2, CreditCard, Zap } from "lucide-react";
+import { CheckCircle2, CreditCard, Zap, Search } from "lucide-react";
 import { motion } from "framer-motion";
+import { useSearchHistory } from "@/hooks/useSearchHistory";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const plans = [
   { name: "Starter", price: 29, credits: 50, features: ["50 lead lookups/mo", "Basic analysis", "Email templates"] },
@@ -20,6 +22,17 @@ const invoices = [
 ];
 
 const Billing = () => {
+  const { searches, loading: searchesLoading } = useSearchHistory();
+
+  const totalSpend = searches.reduce((sum, s) => sum + (s.cost?.totalDfs ?? 0), 0);
+
+  function formatDate(ts: { seconds: number } | null) {
+    if (!ts) return "—";
+    return new Date(ts.seconds * 1000).toLocaleDateString("en-US", {
+      month: "short", day: "numeric", year: "numeric",
+    });
+  }
+
   return (
     <div className="p-6 max-w-4xl">
       <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}>
@@ -27,6 +40,58 @@ const Billing = () => {
       </motion.div>
 
       <div className="space-y-6">
+        {/* Search usage */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Search className="h-5 w-5 text-primary" /> Search Usage
+            </CardTitle>
+            <CardDescription>
+              API cost per search (DataForSEO).{" "}
+              {!searchesLoading && searches.length > 0 && (
+                <span>Total across {searches.length} search{searches.length !== 1 ? "es" : ""}: <strong>${totalSpend.toFixed(4)}</strong></span>
+              )}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {searchesLoading ? (
+              <div className="space-y-3">
+                {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
+              </div>
+            ) : searches.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No searches yet.</p>
+            ) : (
+              <div className="space-y-0">
+                {searches.map((s, i) => (
+                  <div key={s.id}>
+                    <div className="flex items-center justify-between py-3 gap-4">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{s.query} — {s.location}</p>
+                        <p className="text-xs text-muted-foreground">{formatDate(s.createdAt)} · {s.resultCount ?? 0} results</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        {s.cost?.totalDfs != null ? (
+                          <p className="text-sm font-medium">${s.cost.totalDfs.toFixed(4)}</p>
+                        ) : (
+                          <p className="text-sm text-muted-foreground">—</p>
+                        )}
+                        {s.cost && (
+                          <p className="text-xs text-muted-foreground">
+                            {s.cost.cachedBusinesses > 0 && `${s.cost.cachedBusinesses} cached`}
+                            {s.cost.cachedBusinesses > 0 && s.cost.freshBusinesses > 0 && " · "}
+                            {s.cost.freshBusinesses > 0 && `${s.cost.freshBusinesses} fresh`}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    {i < searches.length - 1 && <Separator />}
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         {/* Current usage */}
         <Card>
           <CardHeader>

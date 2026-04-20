@@ -22,7 +22,6 @@ export interface BusinessRaw {
   category_ids: string[] | null;
   additional_categories: string[] | null;
   is_claimed: boolean;
-  permanently_closed: boolean;
   price_level: string | null;
   total_photos: number | null;
   attributes: {
@@ -221,6 +220,7 @@ export type BusinessLabel =
   | "dead site"
   | "defunct"
   | "disqualified"
+  | "permanently closed"
   | "third-party listing"
   | "opportunity"
   | "low opportunity";

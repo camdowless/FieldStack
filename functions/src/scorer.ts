@@ -193,9 +193,15 @@ export function score(input: ScorerInput): ScoreResult {
   }
 
   // ─── 403 Forbidden: server alive but blocking crawler ────────────────
-  // Strip HTML signals so normal scoring runs on non-HTML data only.
-  if (input.htmlSignals !== null && input.htmlSignals.statusCode === 403) {
-    input = { ...input, htmlSignals: null };
+  // A true HTTP 403 means the site has bot protection / auth walls — the
+  // server is live and security-conscious. Disqualify: we can't scrape it
+  // and it's clearly not a neglected site.
+  if (input.htmlSignals !== null && input.htmlSignals.statusCode === 403 && !input.htmlSignals.fetchFailed) {
+    return {
+      score: null,
+      label: "disqualified",
+      scoring: buildBreakdown(0, ["Site returned HTTP 403 — bot protection or auth wall; server is live and secure"], input),
+    };
   }
 
   // ─── Error page detection (403/404 that returned 200 from DFS) ────────
@@ -206,6 +212,15 @@ export function score(input: ScorerInput): ScoreResult {
       score: 90,
       label: "dead site",
       scoring: buildBreakdown(90, reasons, input),
+    };
+  }
+
+  // ─── Permanently closed ───────────────────────────────────────────────
+  if (input.permanentlyClosed) {
+    return {
+      score: null,
+      label: "permanently closed",
+      scoring: buildBreakdown(0, ["Business is permanently closed"], input),
     };
   }
 

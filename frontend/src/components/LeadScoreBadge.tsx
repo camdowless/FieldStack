@@ -1,25 +1,31 @@
 import { cn } from "@/lib/utils";
 
 interface LeadScoreBadgeProps {
-  score: number;
+  score: number | null;
   label?: string;
   size?: "sm" | "md" | "lg";
   className?: string;
 }
 
 export function LeadScoreBadge({ score, label, size = "md", className }: LeadScoreBadgeProps) {
+  const DISQUALIFIED_LABELS = new Set(["disqualified", "defunct", "permanently closed"]);
+  const isDisqualified = label ? DISQUALIFIED_LABELS.has(label) : false;
+  const displayScore = isDisqualified ? 0 : (score ?? 0);
+
   const getColor = () => {
-    if (score >= 70) return "bg-green-500/15 text-green-600 border-green-500/30";
-    if (score >= 40) return "bg-yellow-500/15 text-yellow-600 border-yellow-500/30";
+    if (isDisqualified) return "bg-gray-500/15 text-gray-500 border-gray-500/30";
+    if (displayScore >= 70) return "bg-green-500/15 text-green-600 border-green-500/30";
+    if (displayScore >= 40) return "bg-yellow-500/15 text-yellow-600 border-yellow-500/30";
     return "bg-red-500/15 text-red-600 border-red-500/30";
   };
 
   const getLabel = () => {
-    // Hot Lead override: high score on a no-website business is a top opportunity
-    if (score >= 80 && label && label.toLowerCase() === "no website") return "Hot Lead";
-    if (label) return label;
-    if (score >= 70) return "Hot Lead";
-    if (score >= 40) return "Warm";
+    if (label) {
+      if (displayScore >= 80 && label.toLowerCase() === "no website") return "Hot Lead";
+      return label;
+    }
+    if (displayScore >= 70) return "Hot Lead";
+    if (displayScore >= 40) return "Warm";
     return "Cool";
   };
 
@@ -38,7 +44,7 @@ export function LeadScoreBadge({ score, label, size = "md", className }: LeadSco
         className
       )}
     >
-      <span className="font-bold">{score}</span>
+      <span className="font-bold">{displayScore}</span>
       <span className="opacity-70">•</span>
       <span>{getLabel()}</span>
     </span>

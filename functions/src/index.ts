@@ -78,7 +78,7 @@ async function ensureUserProfile(uid: string): Promise<void> {
 // Exported for Job_Processor (Task 3.1)
 export function saveSearchToUser(
   uid: string,
-  search: { query: string; location: string; category: string; radius: number; cids: string[] },
+  search: { query: string; location: string; category: string; radius: number; cids: string[]; cost?: CostBreakdown | null },
 ): void {
   const ref = db
     .collection(USERS_COLLECTION)
@@ -229,7 +229,7 @@ export function buildScorerInput(
     phone: b.phone,
     isClaimed: b.is_claimed,
     currentStatus: b.work_time?.work_hours?.current_status ?? null,
-    permanentlyClosed: b.permanently_closed,
+    permanentlyClosed: b.work_time?.work_hours?.current_status === "closed_forever",
     reviewCount: b.rating?.votes_count ?? null,
     rating: b.rating?.value ?? null,
     ratingDistribution: b.rating_distribution,
@@ -651,6 +651,7 @@ export const processSearchJob = functions
           category: keyword,
           radius: radiusMiles,
           cids: allCidsForSearch,
+          cost,
         });
 
         console.log(`[Job_Processor] Job ${jobId} completed with ${totalResultsWritten} results`);
@@ -798,6 +799,7 @@ export const processSearchJob = functions
         category: keyword,
         radius: radiusMiles,
         cids: allResultCids,
+        cost,
       });
 
       console.log(`[Job_Processor] Job ${jobId} completed with ${totalResultsWritten} results`);
@@ -878,7 +880,7 @@ export const cancelSearchJob = functions.https.onRequest((req, res) => {
 
 
 // ─── Reconstruct ScorerInput from a cached ScoredBusiness ─────────────────────
-// Used by recalculateLegitimacy to re-score existing businesses without
+// Used by recalculateBusinessRank to re-score existing businesses without
 // re-fetching from DataForSEO. Fields only available on BusinessRaw
 // (hasBusinessHours, hasAttributes, permanentlyClosed, hasPeopleAlsoSearch)
 // are approximated from what's stored.
@@ -888,9 +890,51 @@ function scorerInputFromCached(biz: ScoredBusiness): ScorerInput {
   const sc = biz.scoring;
   const socialLinks = bd?.socialLinks ?? [];
 
+  // Prefer full websiteData; fall back to reconstructing a minimal HtmlSignals
+  // stub from the scoring breakdown (statusCode/fetchFailed are stored there too).
+  let htmlSignals: ScorerInput["htmlSignals"] = biz.websiteData ?? null;
+  // Correct stale data: old records stored 403s with fetchFailed=true before the
+  // dfsClient fix. A 403 means the server responded — it is never a fetch failure.
+  if (htmlSignals !== null && htmlSignals.statusCode === 403 && htmlSignals.fetchFailed) {
+    htmlSignals = { ...htmlSignals, fetchFailed: false };
+  }
+  if (htmlSignals === null && sc !== null && sc.statusCode !== null) {
+    htmlSignals = {
+      statusCode: sc.statusCode,
+      fetchFailed: sc.statusCode === 403 ? false : (sc.fetchFailed ?? true),
+      onpageScore: sc.onpageScore ?? null,
+      totalDomSize: null,
+      pageSize: null,
+      encodedSize: null,
+      server: null,
+      contentEncoding: null,
+      mediaType: null,
+      finalUrl: null,
+      isHttps: sc.isHttps ?? (biz.website?.startsWith("https://") ?? false),
+      redirectedToHttps: false,
+      wordCount: sc.wordCount ?? 0,
+      hasMetaDescription: sc.hasMetaDescription ?? false,
+      hasFavicon: sc.hasFavicon ?? false,
+      deprecatedTagCount: 0,
+      copyrightYear: null,
+      headerText: "",
+      footerText: "",
+      hasAdPixel: false,
+      hasAgencyFooter: false,
+      hasBrokenResources: false,
+      hasBrokenLinks: false,
+      lastModifiedHeader: null,
+      lastModifiedSitemap: null,
+      lastModifiedMetaTag: null,
+      pageTiming: null,
+      pageMeta: null,
+      pageChecks: null,
+    };
+  }
+
   return {
     website: biz.website,
-    htmlSignals: biz.websiteData ?? null,
+    htmlSignals,
     lighthousePerformance: sc?.lighthousePerformance ?? null,
     lighthouseSeo: sc?.lighthouseSeo ?? null,
     domainAgeYears: sc?.domainAgeYears ?? null,
@@ -919,9 +963,9 @@ function scorerInputFromCached(biz: ScoredBusiness): ScorerInput {
   };
 }
 
-// ─── Recalculate Legitimacy Scores for cached businesses ──────────────────────
+// ─── Recalculate full scores for cached businesses (no DFS/Lighthouse re-fetch) ─
 
-export const recalculateLegitimacy = functions
+export const recalculateBusinessRank = functions
   .runWith({ timeoutSeconds: 300 })
   .https.onRequest((req, res) => {
     corsHandler(req, res, async () => {
@@ -941,12 +985,31 @@ export const recalculateLegitimacy = functions
       const cids = req.body?.cids;
       const hasSpecificCids = Array.isArray(cids) && cids.length > 0;
 
+      /** Re-score a business using cached signals and return the updated fields. */
+      function rescore(biz: ScoredBusiness) {
+        const input = scorerInputFromCached(biz);
+        const { score: newScore, label, scoring } = score(input);
+        const { legitimacyScore, legitimacyBreakdown } = computeLegitimacy(input);
+        if (biz.label !== label || biz.score !== newScore) {
+          console.log(`[rescore] ${biz.name} (${biz.website}): ${biz.label}/${biz.score} → ${label}/${newScore} | statusCode=${input.htmlSignals?.statusCode} fetchFailed=${input.htmlSignals?.fetchFailed}`);
+        }
+        return { score: newScore, label, scoring, legitimacyScore, legitimacyBreakdown };
+      }
+
+      /** Returns true if any scored field changed. */
+      function hasChanged(biz: ScoredBusiness, updated: ReturnType<typeof rescore>) {
+        return (
+          updated.score !== biz.score ||
+          updated.label !== biz.label ||
+          updated.legitimacyScore !== biz.legitimacyScore
+        );
+      }
+
       try {
         let updated = 0;
         let processed = 0;
 
         if (hasSpecificCids) {
-          // Recalculate specific businesses by CID
           const safeCids = cids
             .slice(0, 500)
             .filter((c: unknown): c is string => typeof c === "string" && c.length > 0);
@@ -954,13 +1017,10 @@ export const recalculateLegitimacy = functions
 
           const batch = db.batch();
           for (const [cid, biz] of cached) {
-            const input = scorerInputFromCached(biz);
-            const { legitimacyScore, legitimacyBreakdown } = computeLegitimacy(input);
+            const rescored = rescore(biz);
             processed++;
-
-            if (legitimacyScore !== biz.legitimacyScore) {
-              const ref = db.collection(BUSINESSES_COLLECTION).doc(cid);
-              batch.update(ref, { legitimacyScore, legitimacyBreakdown });
+            if (hasChanged(biz, rescored)) {
+              batch.update(db.collection(BUSINESSES_COLLECTION).doc(cid), rescored);
               updated++;
             }
           }
@@ -978,46 +1038,36 @@ export const recalculateLegitimacy = functions
               .orderBy("__name__")
               .limit(PAGE_SIZE);
 
-            if (lastDoc) {
-              query = query.startAfter(lastDoc);
-            }
+            if (lastDoc) query = query.startAfter(lastDoc);
 
             const snapshot = await query.get();
-            if (snapshot.empty || snapshot.docs.length === 0) {
-              hasMore = false;
-              break;
-            }
+            if (snapshot.empty || snapshot.docs.length === 0) { hasMore = false; break; }
 
             const batch = db.batch();
             let batchUpdates = 0;
 
             for (const doc of snapshot.docs) {
               const biz = doc.data() as ScoredBusiness;
-              const input = scorerInputFromCached(biz);
-              const { legitimacyScore, legitimacyBreakdown } = computeLegitimacy(input);
+              const rescored = rescore(biz);
               processed++;
-
-              // Only write if the score actually changed
-              const oldScore = biz.legitimacyScore ?? -1;
-              if (legitimacyScore !== oldScore) {
-                batch.update(doc.ref, { legitimacyScore, legitimacyBreakdown });
+              if (hasChanged(biz, rescored)) {
+                batch.update(doc.ref, rescored);
                 batchUpdates++;
                 updated++;
               }
             }
 
             if (batchUpdates > 0) await batch.commit();
-
             lastDoc = snapshot.docs[snapshot.docs.length - 1];
             if (snapshot.docs.length < PAGE_SIZE) hasMore = false;
           }
         }
 
-        console.log(`[recalculateLegitimacy] processed=${processed} updated=${updated}`);
+        console.log(`[recalculateBusinessRank] processed=${processed} updated=${updated}`);
         res.status(200).json({ processed, updated });
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Internal server error";
-        console.error("[recalculateLegitimacy] error:", msg);
+        console.error("[recalculateBusinessRank] error:", msg);
         res.status(500).json({ error: "An unexpected error occurred. Please try again." });
       }
     });
