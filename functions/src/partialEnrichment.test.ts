@@ -239,7 +239,7 @@ describe("Property 8: Partial enrichment failure produces null values, not abort
           // Label must be one of the valid labels
           const validLabels = [
             "no website", "parked", "dead site", "defunct",
-            "disqualified", "third-party listing", "opportunity", "low opportunity",
+            "disqualified", "permanently closed", "third-party listing", "scored",
           ];
           expect(validLabels).toContain(result.label);
         }

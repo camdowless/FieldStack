@@ -29,6 +29,7 @@ const Settings = () => {
       toast({
         title: "Business ranks recalculated",
         description: `Processed ${result.processed} businesses, updated ${result.updated}.`,
+        duration: Infinity,
       });
     } catch (err) {
       toast({

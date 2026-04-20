@@ -222,8 +222,7 @@ export type BusinessLabel =
   | "disqualified"
   | "permanently closed"
   | "third-party listing"
-  | "opportunity"
-  | "low opportunity";
+  | "scored";
 
 export interface ScoreBreakdown {
   total: number;

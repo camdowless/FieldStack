@@ -1,5 +1,11 @@
 import { cn } from "@/lib/utils";
 
+/** Labels that represent disqualified/filtered-out businesses */
+const DISQUALIFIED_LABELS = new Set(["disqualified", "defunct", "permanently closed"]);
+
+/** Labels that represent a factual site/business status (shown as text) */
+const STATUS_LABELS = new Set(["no website", "dead site", "parked", "third-party listing"]);
+
 interface LeadScoreBadgeProps {
   score: number | null;
   label?: string;
@@ -8,8 +14,8 @@ interface LeadScoreBadgeProps {
 }
 
 export function LeadScoreBadge({ score, label, size = "md", className }: LeadScoreBadgeProps) {
-  const DISQUALIFIED_LABELS = new Set(["disqualified", "defunct", "permanently closed"]);
   const isDisqualified = label ? DISQUALIFIED_LABELS.has(label) : false;
+  const isStatus = label ? STATUS_LABELS.has(label) : false;
   const displayScore = isDisqualified ? 0 : (score ?? 0);
 
   const getColor = () => {
@@ -17,16 +23,6 @@ export function LeadScoreBadge({ score, label, size = "md", className }: LeadSco
     if (displayScore >= 70) return "bg-green-500/15 text-green-600 border-green-500/30";
     if (displayScore >= 40) return "bg-yellow-500/15 text-yellow-600 border-yellow-500/30";
     return "bg-red-500/15 text-red-600 border-red-500/30";
-  };
-
-  const getLabel = () => {
-    if (label) {
-      if (displayScore >= 80 && label.toLowerCase() === "no website") return "Hot Lead";
-      return label;
-    }
-    if (displayScore >= 70) return "Hot Lead";
-    if (displayScore >= 40) return "Warm";
-    return "Cool";
   };
 
   const sizeClasses = {
@@ -45,8 +41,12 @@ export function LeadScoreBadge({ score, label, size = "md", className }: LeadSco
       )}
     >
       <span className="font-bold">{displayScore}</span>
-      <span className="opacity-70">•</span>
-      <span>{getLabel()}</span>
+      {isStatus && label && (
+        <>
+          <span className="opacity-70">•</span>
+          <span>{label}</span>
+        </>
+      )}
     </span>
   );
 }

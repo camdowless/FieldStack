@@ -35,11 +35,10 @@ const MAX_RADIUS_INDEX = RADIUS_STEPS.indexOf(MAX_RADIUS);
 const RESULT_LIMIT_OPTIONS = [25, 50, 100, 200] as const;
 
 const LABEL_FILTER_OPTIONS = [
-  { value: "opportunity", label: "Opportunity" },
-  { value: "low opportunity", label: "Low Opportunity" },
   { value: "no website", label: "No Website" },
   { value: "dead site", label: "Dead Site" },
   { value: "parked", label: "Parked" },
+  { value: "scored", label: "Scored" },
   { value: "defunct", label: "Defunct" },
   { value: "disqualified", label: "Disqualified" },
   { value: "permanently closed", label: "Permanently Closed" },

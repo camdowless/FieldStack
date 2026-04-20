@@ -297,7 +297,7 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
       // Propagate to in-memory search cache and saved lead doc
       updateCachedBusiness(updated);
       fbStore.updateScore(business.id, updated.leadScore, updated.label ?? null);
-      toast({ title: "Re-evaluated", description: `Score updated to ${updated.leadScore} (${updated.label})` });
+      toast({ title: "Re-evaluated", description: `Score updated to ${updated.leadScore}` });
     } catch (err) {
       toast({ title: "Re-evaluation failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     } finally {

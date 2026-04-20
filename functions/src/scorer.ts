@@ -155,66 +155,6 @@ function isNationalChain(input: ScorerInput): { chain: boolean; reason: string }
 }
 
 export function score(input: ScorerInput): ScoreResult {
-  // ─── No website → always 100 / "no website" ──────────────────────────
-  if (input.website === null) {
-    const reasons: string[] = ["No website found (+100)"];
-    let raw = 100;
-
-    // isClaimed boost: claimed = owner is engaged, better prospect
-    if (input.isClaimed) {
-      raw += 5;
-      reasons.push("Google listing claimed — owner is digitally engaged (+5)");
-    }
-
-    const clamped = Math.min(100, Math.max(0, raw));
-    return {
-      score: clamped,
-      label: "no website",
-      scoring: buildBreakdown(clamped, reasons, input),
-    };
-  }
-
-  // ─── Dead site: fetch failed or non-200 ───────────────────────────────
-  if (input.htmlSignals !== null && input.htmlSignals.fetchFailed) {
-    const reasons: string[] = [];
-    const statusCode = input.htmlSignals.statusCode;
-
-    if (statusCode !== null) {
-      reasons.push(`Site returned HTTP ${statusCode} (+90)`);
-    } else {
-      reasons.push("Site unreachable — DNS failure, timeout, or SSL error (+90)");
-    }
-
-    return {
-      score: 90,
-      label: "dead site",
-      scoring: buildBreakdown(90, reasons, input),
-    };
-  }
-
-  // ─── 403 Forbidden: server alive but blocking crawler ────────────────
-  // A true HTTP 403 means the site has bot protection / auth walls — the
-  // server is live and security-conscious. Disqualify: we can't scrape it
-  // and it's clearly not a neglected site.
-  if (input.htmlSignals !== null && input.htmlSignals.statusCode === 403 && !input.htmlSignals.fetchFailed) {
-    return {
-      score: null,
-      label: "disqualified",
-      scoring: buildBreakdown(0, ["Site returned HTTP 403 — bot protection or auth wall; server is live and secure"], input),
-    };
-  }
-
-  // ─── Error page detection (403/404 that returned 200 from DFS) ────────
-  if (isErrorPage(input)) {
-    const title = input.htmlSignals?.pageMeta?.title ?? "error page";
-    const reasons = [`Site serves error page: "${title}" — effectively dead (+90)`];
-    return {
-      score: 90,
-      label: "dead site",
-      scoring: buildBreakdown(90, reasons, input),
-    };
-  }
-
   // ─── Permanently closed ───────────────────────────────────────────────
   if (input.permanentlyClosed) {
     return {
@@ -244,6 +184,84 @@ export function score(input: ScorerInput): ScoreResult {
     };
   }
 
+  // ─── 403 Forbidden: server alive but blocking crawler ────────────────
+  if (input.htmlSignals !== null && input.htmlSignals.statusCode === 403 && !input.htmlSignals.fetchFailed) {
+    return {
+      score: null,
+      label: "disqualified",
+      scoring: buildBreakdown(0, ["Site returned HTTP 403 — bot protection or auth wall; server is live and secure"], input),
+    };
+  }
+
+  // ─── Compute legitimacy for the multiplier ────────────────────────────
+  // Piecewise: 70–100 legitimacy → 0.90–1.0 (gentle), 0–70 → 0.0–0.90 (real penalty)
+  const { legitimacyScore } = computeLegitimacy(input);
+  const legitimacyMultiplier = legitimacyScore >= 70
+    ? 0.9 + ((legitimacyScore - 70) / 30) * 0.1
+    : (legitimacyScore / 70) * 0.9;
+
+  // ─── No website → status label, base 100 ──────────────────────────────
+  if (input.website === null) {
+    const reasons: string[] = ["No website found (+100)"];
+    let raw = 100;
+
+    if (input.isClaimed) {
+      raw += 5;
+      reasons.push("Google listing claimed — owner is digitally engaged (+5)");
+    }
+
+    const beforeLegitimacy = Math.min(100, Math.max(0, raw));
+    const final = Math.round(beforeLegitimacy * legitimacyMultiplier);
+    if (legitimacyMultiplier < 1) {
+      reasons.push(`Legitimacy adjustment ×${legitimacyMultiplier.toFixed(2)} (legitimacy ${legitimacyScore}/100)`);
+    }
+    return {
+      score: Math.min(100, Math.max(0, final)),
+      label: "no website",
+      scoring: buildBreakdown(Math.min(100, Math.max(0, final)), reasons, input),
+    };
+  }
+
+  // ─── Dead site: fetch failed or non-200 ───────────────────────────────
+  if (input.htmlSignals !== null && input.htmlSignals.fetchFailed) {
+    const reasons: string[] = [];
+    const statusCode = input.htmlSignals.statusCode;
+
+    if (statusCode !== null) {
+      reasons.push(`Site returned HTTP ${statusCode} (+90)`);
+    } else {
+      reasons.push("Site unreachable — DNS failure, timeout, or SSL error (+90)");
+    }
+
+    const raw = 90;
+    const final = Math.round(raw * legitimacyMultiplier);
+    if (legitimacyMultiplier < 1) {
+      reasons.push(`Legitimacy adjustment ×${legitimacyMultiplier.toFixed(2)} (legitimacy ${legitimacyScore}/100)`);
+    }
+    return {
+      score: Math.min(100, Math.max(0, final)),
+      label: "dead site",
+      scoring: buildBreakdown(Math.min(100, Math.max(0, final)), reasons, input),
+    };
+  }
+
+  // ─── Error page detection (403/404 that returned 200 from DFS) ────────
+  if (isErrorPage(input)) {
+    const title = input.htmlSignals?.pageMeta?.title ?? "error page";
+    const reasons = [`Site serves error page: "${title}" — effectively dead (+90)`];
+
+    const raw = 90;
+    const final = Math.round(raw * legitimacyMultiplier);
+    if (legitimacyMultiplier < 1) {
+      reasons.push(`Legitimacy adjustment ×${legitimacyMultiplier.toFixed(2)} (legitimacy ${legitimacyScore}/100)`);
+    }
+    return {
+      score: Math.min(100, Math.max(0, final)),
+      label: "dead site",
+      scoring: buildBreakdown(Math.min(100, Math.max(0, final)), reasons, input),
+    };
+  }
+
   // ─── Normal scoring ───────────────────────────────────────────────────
   let raw = 0;
   const reasons: string[] = [];
@@ -252,9 +270,10 @@ export function score(input: ScorerInput): ScoreResult {
   if (input.htmlSignals !== null) {
     const s = input.htmlSignals;
 
+    // HTTPS — still a strong signal of neglect in 2026
     if (!s.isHttps) {
-      raw += 30;
-      reasons.push("Not using HTTPS (+30)");
+      raw += 25;
+      reasons.push("Not using HTTPS (+25)");
     }
     if (!s.hasMetaDescription) {
       raw += 20;
@@ -283,6 +302,30 @@ export function score(input: ScorerInput): ScoreResult {
     if (s.hasAgencyFooter) {
       raw -= 15;
       reasons.push("Has agency footer credit (-15)");
+    }
+
+    // onpageScore from DataForSEO (0–100, higher = better site)
+    // Use as supplementary signal to avoid double-counting with individual checks
+    if (s.onpageScore !== null && s.onpageScore < 40) {
+      const pts = s.onpageScore < 20 ? 10 : 5;
+      raw += pts;
+      reasons.push(`DFS on-page score ${s.onpageScore}/100 (+${pts})`);
+    }
+
+    // Page timing signals — only penalize when data is present AND bad
+    if (s.pageTiming) {
+      const tti = s.pageTiming.timeToInteractive;
+      if (tti !== null && tti !== undefined && tti > 5000) {
+        const pts = tti > 8000 ? 8 : 5;
+        raw += pts;
+        reasons.push(`Slow time-to-interactive: ${(tti / 1000).toFixed(1)}s (+${pts})`);
+      }
+      const lcp = s.pageTiming.largestContentfulPaint;
+      if (lcp !== null && lcp !== undefined && lcp > 4000) {
+        const pts = lcp > 7000 ? 8 : 5;
+        raw += pts;
+        reasons.push(`Slow largest contentful paint: ${(lcp / 1000).toFixed(1)}s (+${pts})`);
+      }
     }
 
     // pageChecks-based signals
@@ -335,21 +378,32 @@ export function score(input: ScorerInput): ScoreResult {
     reasons.push("Domain registration expired (+25)");
   }
 
-  // ─── Business activity signals ──────────────────────────────────────
+  // ─── Business activity signals (increased weight) ─────────────────────
 
-  // isClaimed modifier
+  // isClaimed modifier — stronger weight
   if (!input.isClaimed) {
-    raw += 5;
-    reasons.push("Google listing unclaimed — less digitally engaged (+5)");
+    raw += 12;
+    reasons.push("Google listing unclaimed — less digitally engaged (+12)");
   } else {
-    raw -= 3;
-    reasons.push("Google listing claimed — owner is engaged (-3)");
+    raw -= 5;
+    reasons.push("Google listing claimed — owner is engaged (-5)");
   }
 
   // currentStatus: "close"
   if (input.currentStatus === "close") {
     raw += 5;
     reasons.push("Business currently listed as closed (+5)");
+  }
+
+  // Low review count — business may not be investing in reputation
+  if (input.reviewCount !== null) {
+    if (input.reviewCount === 0) {
+      raw += 8;
+      reasons.push("Zero reviews — no online reputation management (+8)");
+    } else if (input.reviewCount < 5) {
+      raw += 4;
+      reasons.push(`Only ${input.reviewCount} review(s) — minimal online presence (+4)`);
+    }
   }
 
   // New business risk: firstSeen within last 30 days + low reviews
@@ -394,6 +448,9 @@ export function score(input: ScorerInput): ScoreResult {
     if (gen.includes("weebly") || gen.includes("jimdo") || gen.includes("site123")) {
       raw += 8;
       reasons.push(`Built on outdated builder: ${input.htmlSignals.pageMeta.generator} (+8)`);
+    } else if (gen.includes("godaddy")) {
+      raw += 6;
+      reasons.push(`Built on GoDaddy Website Builder (+6)`);
     } else if (gen.includes("wix") || gen.includes("squarespace") || gen.includes("duda")) {
       raw -= 5;
       reasons.push(`Built on modern builder: ${input.htmlSignals.pageMeta.generator} (-5)`);
@@ -406,14 +463,25 @@ export function score(input: ScorerInput): ScoreResult {
       raw += 8;
       reasons.push("Weebly builder detected via footer scripts (+8)");
     }
+    // GoDaddy builder detection via footer
+    if (footer.includes("godaddy.com") || footer.includes("secureserver.net")) {
+      raw += 6;
+      reasons.push("GoDaddy builder detected via footer (+6)");
+    }
   }
 
-  const clamped = Math.min(100, Math.max(0, raw));
-  const label: BusinessLabel = clamped >= 60 ? "opportunity" : "low opportunity";
+  // ─── Apply legitimacy multiplier ──────────────────────────────────────
+  const clampedRaw = Math.min(100, Math.max(0, raw));
+  const final = Math.round(clampedRaw * legitimacyMultiplier);
+  if (legitimacyMultiplier < 1) {
+    reasons.push(`Legitimacy adjustment ×${legitimacyMultiplier.toFixed(2)} (legitimacy ${legitimacyScore}/100)`);
+  }
+
+  const clamped = Math.min(100, Math.max(0, final));
 
   return {
     score: clamped,
-    label,
+    label: "scored",
     scoring: buildBreakdown(clamped, reasons, input),
   };
 }
