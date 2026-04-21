@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Loader2 } from "lucide-react";
 import { getBusinessById } from "@/lib/businessCache";
 import { fetchBusinessesByCids } from "@/lib/api";
 import { normalizeBusiness } from "@/data/leadTypes";
 import type { Business } from "@/data/mockBusinesses";
 import { LeadDetailPanel } from "@/components/LeadDetailPanel";
+import { ResizableSheet } from "@/components/ResizableSheet";
 
 interface LeadDetailSheetProps {
   cid: string | null;
@@ -56,24 +55,21 @@ export function LeadDetailSheet({ cid, onClose }: LeadDetailSheetProps) {
   }, [cid]);
 
   return (
-    <Sheet open={!!cid} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <SheetContent className="w-full sm:max-w-2xl p-0">
-        <SheetHeader className="sr-only">
-          <SheetTitle>{business?.name ?? "Lead Details"}</SheetTitle>
-          <SheetDescription>Detailed view of the selected lead</SheetDescription>
-        </SheetHeader>
-        <ScrollArea className="h-full p-6">
-          {loading && (
-            <div className="flex items-center justify-center py-20">
-              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-            </div>
-          )}
-          {error && (
-            <div className="text-center py-20 text-muted-foreground">{error}</div>
-          )}
-          {business && !loading && <LeadDetailPanel business={business} onUpdate={setBusiness} />}
-        </ScrollArea>
-      </SheetContent>
-    </Sheet>
+    <ResizableSheet
+      open={!!cid}
+      onOpenChange={(open) => { if (!open) onClose(); }}
+      title={business?.name ?? "Lead Details"}
+      description="Detailed view of the selected lead"
+    >
+      {loading && (
+        <div className="flex items-center justify-center py-20">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      )}
+      {error && (
+        <div className="text-center py-20 text-muted-foreground">{error}</div>
+      )}
+      {business && !loading && <LeadDetailPanel business={business} onUpdate={setBusiness} />}
+    </ResizableSheet>
   );
 }

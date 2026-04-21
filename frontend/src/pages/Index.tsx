@@ -11,8 +11,7 @@ import { usePreferences } from "@/hooks/usePreferences";
 import { ResultsTable } from "@/components/ResultsTable";
 import { LeadDetailPanel } from "@/components/LeadDetailPanel";
 import { CategoryCombobox } from "@/components/CategoryCombobox";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { ResizableSheet } from "@/components/ResizableSheet";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -526,19 +525,14 @@ const Index = () => {
       </div>
 
       {/* Lead detail slide-over */}
-      <Sheet open={!!selectedBusiness} onOpenChange={(open) => { if (!open) setSelectedBusiness(null); }}>
-        <SheetContent side="right" className="p-0 sm:max-w-3xl w-full">
-          <SheetHeader className="sr-only">
-            <SheetTitle>{selectedBusiness?.name ?? "Lead Detail"}</SheetTitle>
-            <SheetDescription>Detailed analysis for this business lead</SheetDescription>
-          </SheetHeader>
-          <ScrollArea className="h-full">
-            <div className="p-6">
-              {selectedBusiness && <LeadDetailPanel business={selectedBusiness} onUpdate={setSelectedBusiness} />}
-            </div>
-          </ScrollArea>
-        </SheetContent>
-      </Sheet>
+      <ResizableSheet
+        open={!!selectedBusiness}
+        onOpenChange={(open) => { if (!open) setSelectedBusiness(null); }}
+        title={selectedBusiness?.name ?? "Lead Detail"}
+        description="Detailed analysis for this business lead"
+      >
+        {selectedBusiness && <LeadDetailPanel business={selectedBusiness} onUpdate={setSelectedBusiness} />}
+      </ResizableSheet>
     </div>
   );
 };

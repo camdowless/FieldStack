@@ -189,10 +189,17 @@ export function useFirebaseLeadStore() {
   );
 
   const updateScore = useCallback(
-    async (cid: string, leadScore: number, label: string | null) => {
+    async (cid: string, leadScore: number, label: string | null, signals?: {
+      legitimacyScore?: number;
+      hasWebsite?: boolean;
+      hasHttps?: boolean;
+      mobileFriendly?: boolean;
+      hasOnlineAds?: boolean;
+      seoScore?: number;
+    }) => {
       if (!user) return;
       const ref = doc(firestore, "users", user.uid, "savedLeads", cid);
-      await updateDoc(ref, { leadScore, label }).catch(() => {
+      await updateDoc(ref, { leadScore, label, ...signals }).catch(() => {
         // Not saved — no-op
       });
     },

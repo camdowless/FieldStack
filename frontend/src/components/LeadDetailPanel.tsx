@@ -50,6 +50,48 @@ function StatusRow({ icon: Icon, label, value, status }: { icon: any; label: str
   );
 }
 
+// Legitimacy score label thresholds
+function getLegitimacyLabel(score: number): string {
+  if (score >= 71) return "Likely Legitimate";
+  if (score >= 41) return "Moderate";
+  return "Iffy";
+}
+
+// Web gap tile component
+function WebGapTile({
+  icon: Icon,
+  label,
+  value,
+  status,
+  badge,
+}: {
+  icon: any;
+  label: string;
+  value: string;
+  status: "good" | "bad" | "neutral";
+  badge?: string;
+}) {
+  const dotColor =
+    status === "bad" ? "bg-red-500" : status === "good" ? "bg-green-500" : "bg-muted-foreground/40";
+  return (
+    <div className="flex flex-col gap-1.5 rounded-lg border bg-card p-3">
+      <div className="flex items-center justify-between">
+        <Icon className="h-4 w-4 text-muted-foreground" />
+        <span className={cn("h-2 w-2 rounded-full shrink-0", dotColor)} />
+      </div>
+      <div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-xs font-medium">{label}</span>
+          {badge && (
+            <span className="text-[10px] bg-muted text-muted-foreground rounded px-1.5 py-0.5 leading-none">{badge}</span>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground mt-0.5">{value}</p>
+      </div>
+    </div>
+  );
+}
+
 function ScoreGauge({ label, score, max = 100 }: { label: string; score: number | null; max?: number }) {
   if (score == null) {
     return (
@@ -296,7 +338,14 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
       onUpdate?.(updated);
       // Propagate to in-memory search cache and saved lead doc
       updateCachedBusiness(updated);
-      fbStore.updateScore(business.id, updated.leadScore, updated.label ?? null);
+      fbStore.updateScore(business.id, updated.leadScore, updated.label ?? null, {
+        legitimacyScore: updated.legitimacyScore,
+        hasWebsite: updated.analysis.hasWebsite,
+        hasHttps: updated.analysis.hasHttps,
+        mobileFriendly: updated.analysis.mobileFriendly,
+        hasOnlineAds: updated.analysis.hasOnlineAds,
+        seoScore: updated.analysis.seoScore,
+      });
       toast({ title: "Re-evaluated", description: `Score updated to ${updated.leadScore}` });
     } catch (err) {
       toast({ title: "Re-evaluation failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
@@ -468,25 +517,148 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
             </Card>
           )}
 
-          {business.reasons && business.reasons.length > 0 && (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base flex items-center gap-2"><Sparkles className="h-4 w-4" /> Why this opportunity score</CardTitle>
-                <CardDescription>What contributed to the {business.leadScore}/100 opportunity score</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ul className="space-y-2">
-                  {business.reasons.map((r, i) => (
+          {/* 1. Legitimacy Score — top, with confidence meter */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Shield className="h-4 w-4" /> Legitimacy Score
+              </CardTitle>
+              <CardDescription>How likely this is a real, operating business</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center gap-4">
+                <div className={cn(
+                  "text-3xl font-bold tabular-nums shrink-0",
+                  (business.legitimacyScore ?? 0) >= 71 ? "text-green-500" :
+                  (business.legitimacyScore ?? 0) >= 41 ? "text-yellow-500" : "text-red-500"
+                )}>
+                  {business.legitimacyScore ?? 0}
+                </div>
+                <div className="flex-1 space-y-1.5">
+                  {/* Pill-shaped gradient progress bar */}
+                  <div className="relative h-3 w-full rounded-full overflow-hidden bg-muted">
+                    <div
+                      className="absolute inset-y-0 left-0 rounded-full transition-all"
+                      style={{
+                        width: `${business.legitimacyScore ?? 0}%`,
+                        background: (() => {
+                          const s = business.legitimacyScore ?? 0;
+                          if (s >= 71) return "#22c55e";
+                          if (s >= 41) return "#eab308";
+                          return "#ef4444";
+                        })(),
+                      }}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {getLegitimacyLabel(business.legitimacyScore ?? 0)}
+                  </p>
+                </div>
+              </div>
+              {business.legitimacyReasons && business.legitimacyReasons.length > 0 && (
+                <ul className="space-y-1.5">
+                  {business.legitimacyReasons.map((r, i) => (
                     <li key={i} className="flex items-start gap-2 text-sm">
-                      <span className="mt-1 h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
-                      <span>{r}</span>
+                      <span className={cn(
+                        "mt-1.5 h-1.5 w-1.5 rounded-full shrink-0",
+                        r.startsWith("-") || r.includes("(-") ? "bg-red-500" : "bg-green-500"
+                      )} />
+                      <span className="text-muted-foreground">{r}</span>
                     </li>
                   ))}
                 </ul>
-              </CardContent>
-            </Card>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* 2. Marketing agency warning banner (conditional) */}
+          {a.hasMarketingAgency && (
+            <div className="flex items-start gap-3 rounded-lg border border-yellow-400/40 bg-yellow-50 dark:bg-yellow-950/30 px-4 py-3 text-sm text-yellow-800 dark:text-yellow-300">
+              <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-yellow-500" />
+              <span>Marketing agency detected — this business may already have representation</span>
+            </div>
           )}
 
+          {/* 3. Web Gaps grid */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Web Gaps</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {(() => {
+                const domainAgeBadge = a.websiteAge ? `~${a.websiteAge}yr` : undefined;
+                const tiles: Array<{ icon: any; label: string; value: string; status: "good" | "bad" | "neutral"; badge?: string; order: number }> = [
+                  {
+                    icon: Globe,
+                    label: "Has Website",
+                    value: a.hasWebsite ? (a.websiteUrl ?? "Yes") : "No website",
+                    status: a.hasWebsite ? "good" : "bad",
+                    badge: a.hasWebsite ? domainAgeBadge : undefined,
+                    order: a.hasWebsite ? 1 : 0,
+                  },
+                  {
+                    icon: a.hasHttps ? Shield : ShieldOff,
+                    label: "HTTPS",
+                    value: !a.hasWebsite ? "N/A" : a.hasHttps ? "Secure" : "Not Secure",
+                    status: !a.hasWebsite ? "neutral" : a.hasHttps ? "good" : "bad",
+                    order: !a.hasWebsite ? 2 : a.hasHttps ? 1 : 0,
+                  },
+                  {
+                    icon: Gauge,
+                    label: "Mobile Friendly",
+                    value: !a.hasWebsite ? "N/A" : a.mobileFriendly ? "Yes" : "No",
+                    status: !a.hasWebsite ? "neutral" : a.mobileFriendly ? "good" : "bad",
+                    order: !a.hasWebsite ? 2 : a.mobileFriendly ? 1 : 0,
+                  },
+                  {
+                    icon: Code,
+                    label: "Deprecated HTML",
+                    value: !a.hasWebsite ? "N/A" : a.deprecatedHtmlTags > 0 ? `${a.deprecatedHtmlTags} tags` : "None",
+                    status: !a.hasWebsite ? "neutral" : a.deprecatedHtmlTags > 3 ? "bad" : "good",
+                    order: !a.hasWebsite ? 2 : a.deprecatedHtmlTags > 3 ? 0 : 1,
+                  },
+                  {
+                    icon: TrendingDown,
+                    label: "Ad Pixel",
+                    value: !a.hasWebsite ? "N/A" : a.hasOnlineAds ? "Detected" : "Not found",
+                    status: !a.hasWebsite ? "neutral" : a.hasOnlineAds ? "good" : "bad",
+                    order: !a.hasWebsite ? 2 : a.hasOnlineAds ? 1 : 0,
+                  },
+                  {
+                    icon: SearchIcon,
+                    label: "Lighthouse SEO",
+                    value: seoGauge != null ? `${seoGauge}/100` : "N/A",
+                    status: seoGauge == null ? "neutral" : seoGauge < 50 ? "bad" : "good",
+                    order: seoGauge == null ? 2 : seoGauge < 50 ? 0 : 1,
+                  },
+                  {
+                    icon: Gauge,
+                    label: "Lighthouse Perf",
+                    value: designGauge != null ? `${designGauge}/100` : "N/A",
+                    status: designGauge == null ? "neutral" : designGauge < 50 ? "bad" : "good",
+                    order: designGauge == null ? 2 : designGauge < 50 ? 0 : 1,
+                  },
+                  {
+                    icon: Clock,
+                    label: "Time to Interactive",
+                    value: !a.hasWebsite || a.loadTimeMs === 0 ? "N/A" : `${(a.loadTimeMs / 1000).toFixed(1)}s`,
+                    status: !a.hasWebsite || a.loadTimeMs === 0 ? "neutral" : a.loadTimeMs > 5000 ? "bad" : "good",
+                    order: !a.hasWebsite || a.loadTimeMs === 0 ? 2 : a.loadTimeMs > 5000 ? 0 : 1,
+                  },
+                ];
+                const sorted = [...tiles].sort((a, b) => a.order - b.order);
+                return (
+                  <div className="grid grid-cols-2 gap-2">
+                    {sorted.map((t) => (
+                      <WebGapTile key={t.label} icon={t.icon} label={t.label} value={t.value} status={t.status} badge={t.badge} />
+                    ))}
+                  </div>
+                );
+              })()}
+            </CardContent>
+          </Card>
+
+          {/* 4. Opportunity Score */}
           <Card>
             <CardHeader className="pb-1">
               <CardTitle>Opportunity Score</CardTitle>
@@ -515,87 +687,30 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Website & Security</CardTitle>
-            </CardHeader>
-            <CardContent className="divide-y divide-border">
-              {a.hasWebsite ? (
-                <div className="flex items-center justify-between py-2.5 px-1">
-                  <div className="flex items-center gap-3">
-                    <Globe className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm">Has Website</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {a.websiteUrl ? (
-                      <a href={a.websiteUrl.startsWith("http") ? a.websiteUrl : `https://${a.websiteUrl}`} target="_blank" rel="noreferrer" className="text-sm text-primary hover:underline">{a.websiteUrl}</a>
-                    ) : (
-                      <span className="text-sm text-muted-foreground">Yes</span>
-                    )}
-                    <CheckCircle2 className="h-4 w-4 text-green-500" />
-                  </div>
-                </div>
-              ) : (
-                <StatusRow icon={Globe} label="Has Website" value="No website" status="critical" />
-              )}
-              {a.hasWebsite ? (
-                <StatusRow icon={a.hasHttps ? Shield : ShieldOff} label="HTTPS" value={a.hasHttps ? "Secure" : "Not Secure"} status={a.hasHttps ? "good" : "critical"} />
-              ) : (
-                <StatusRow icon={Shield} label="HTTPS" value="—" status="neutral" />
-              )}
-              {business.fetchFailed && (
-                <StatusRow icon={XCircle} label="Site reachable" value={business.statusCode ? `HTTP ${business.statusCode}` : "Unreachable"} status="critical" />
-              )}
-              {a.hasWebsite ? (
-                <StatusRow icon={Code} label="Deprecated HTML" value={`${a.deprecatedHtmlTags} tags`} status={a.deprecatedHtmlTags > 3 ? "warning" : "good"} />
-              ) : (
-                <StatusRow icon={Code} label="Deprecated HTML" value="—" status="neutral" />
-              )}
-              {a.isExpiredDomain && <StatusRow icon={AlertTriangle} label="Expired Domain" value="Domain expired" status="critical" />}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Performance & SEO</CardTitle>
-            </CardHeader>
-            <CardContent className="divide-y divide-border">
-              <StatusRow icon={Gauge} label="Time to Interactive" value={!a.hasWebsite || a.loadTimeMs === 0 ? "—" : `${(a.loadTimeMs / 1000).toFixed(1)}s`} status={a.loadTimeMs > 5000 ? "critical" : a.loadTimeMs > 3000 ? "warning" : "good"} />
-              <StatusRow icon={SearchIcon} label="Lighthouse SEO" value={seoGauge != null ? `${seoGauge}/100` : "—"} status={seoGauge == null ? "warning" : seoGauge < 40 ? "critical" : seoGauge < 70 ? "warning" : "good"} />
-              <StatusRow icon={Gauge} label="Lighthouse Perf" value={designGauge != null ? `${designGauge}/100` : "—"} status={designGauge == null ? "warning" : designGauge < 40 ? "critical" : designGauge < 70 ? "warning" : "good"} />
-              <StatusRow icon={Clock} label="Domain Age" value={a.websiteAge ? `~${a.websiteAge}yr${a.copyrightYear ? ` (©${a.copyrightYear})` : ""}` : "—"} status={a.copyrightYear && a.copyrightYear < 2022 ? "warning" : "good"} />
-            </CardContent>
-          </Card>
-
-          {(business.server || business.mediaType || business.pageSize) && (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base flex items-center gap-2"><Server className="h-4 w-4" /> Tech Stack</CardTitle>
-              </CardHeader>
-              <CardContent className="divide-y divide-border">
-                <StatusRow icon={Server} label="Server" value={business.server || "—"} status="neutral" />
-                <StatusRow icon={Code} label="Media Type" value={business.mediaType || "—"} status="neutral" />
-                <StatusRow icon={Gauge} label="Page Size" value={formatBytes(business.pageSize)} status="neutral" />
-              </CardContent>
-            </Card>
-          )}
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Marketing & Activity</CardTitle>
-            </CardHeader>
-            <CardContent className="divide-y divide-border">
-              <StatusRow icon={TrendingDown} label="Ad Pixel Detected" value={a.hasOnlineAds ? "Yes" : "No"} status={a.hasOnlineAds ? "good" : "warning"} />
-              <StatusRow icon={ExternalLink} label="Marketing Agency Footer" value={a.hasMarketingAgency ? "Detected" : "None"} status={a.hasMarketingAgency ? "good" : "warning"} />
-              <StatusRow icon={Star} label="Has Reviews" value={a.recentGoogleReviews ? `${business.reviewCount} reviews` : "None"} status={a.recentGoogleReviews ? "good" : "warning"} />
-              <StatusRow icon={CheckCircle2} label="Listing Claimed" value={business.isClaimed ? "Yes" : "No"} status={business.isClaimed ? "good" : "warning"} />
-            </CardContent>
-          </Card>
-
+          {/* 5. Rating & Reviews */}
           {(business.googleRating > 0 || (ratingDist && ratingTotal > 0)) && (
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-base">Rating Breakdown</CardTitle>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base">Reviews</CardTitle>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-0.5">
+                      {[1, 2, 3, 4, 5].map((s) => (
+                        <Star
+                          key={s}
+                          className={cn(
+                            "h-4 w-4",
+                            s <= Math.round(business.googleRating)
+                              ? "fill-yellow-400 text-yellow-400"
+                              : "fill-muted text-muted-foreground/30"
+                          )}
+                        />
+                      ))}
+                    </div>
+                    <span className="text-sm font-medium">{business.googleRating || "—"}</span>
+                    <span className="text-sm text-muted-foreground">({business.reviewCount} reviews)</span>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent className="space-y-2">
                 {business.reviewCount >= 5 && ratingDist && ratingTotal > 0 ? (
@@ -613,17 +728,27 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
                     );
                   })
                 ) : (
-                  <div>
-                    <p className="text-sm flex items-center gap-1.5">
-                      <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                      <span className="font-medium">{business.googleRating || "—"}</span>
-                      <span className="text-muted-foreground">— {business.reviewCount} review{business.reviewCount === 1 ? "" : "s"}</span>
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-1">Breakdown available at 5+ reviews</p>
-                  </div>
+                  <p className="text-xs text-muted-foreground">Breakdown available at 5+ reviews</p>
                 )}
+                <div className="pt-2 divide-y divide-border">
+                  <StatusRow icon={Star} label="Has Reviews" value={a.recentGoogleReviews ? `${business.reviewCount} reviews` : "None"} status={a.recentGoogleReviews ? "good" : "warning"} />
+                  <StatusRow icon={CheckCircle2} label="Listing Claimed" value={business.isClaimed ? "Yes" : "No"} status={business.isClaimed ? "good" : "warning"} />
+                </div>
               </CardContent>
             </Card>
+          )}
+
+          {/* 6. Business Hours — simplified */}
+          {business.currentStatus && (
+            <div className="flex items-center gap-2 text-sm px-1">
+              <span className={cn(
+                "h-2 w-2 rounded-full shrink-0",
+                business.currentStatus === "open" ? "bg-green-500" : "bg-muted-foreground/50"
+              )} />
+              <span className={business.currentStatus === "open" ? "text-green-600 dark:text-green-400 font-medium" : "text-muted-foreground"}>
+                {business.currentStatus === "open" ? "Open now" : "Closed now"}
+              </span>
+            </div>
           )}
 
           {business.emails && business.emails.length > 0 && (
@@ -643,47 +768,37 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
             </Card>
           )}
 
-          {/* Legitimacy Score */}
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Shield className="h-4 w-4" /> Legitimacy Score
-              </CardTitle>
-              <CardDescription>How likely this is a real, operating business</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center gap-4">
-                <div className={cn(
-                  "text-3xl font-bold tabular-nums",
-                  (business.legitimacyScore ?? 0) >= 50 ? "text-green-500" :
-                  (business.legitimacyScore ?? 0) >= 25 ? "text-yellow-500" : "text-red-500"
-                )}>
-                  {business.legitimacyScore ?? 0}
-                </div>
-                <div className="flex-1">
-                  <Progress value={business.legitimacyScore ?? 0} className="h-2" />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {(business.legitimacyScore ?? 0) >= 50 ? "Likely legitimate" :
-                     (business.legitimacyScore ?? 0) >= 25 ? "Uncertain — verify manually" :
-                     "Likely ghost business"}
-                  </p>
-                </div>
-              </div>
-              {business.legitimacyReasons && business.legitimacyReasons.length > 0 && (
-                <ul className="space-y-1.5">
-                  {business.legitimacyReasons.map((r, i) => (
+          {(business.server || business.mediaType || business.pageSize) && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2"><Server className="h-4 w-4" /> Tech Stack</CardTitle>
+              </CardHeader>
+              <CardContent className="divide-y divide-border">
+                <StatusRow icon={Server} label="Server" value={business.server || "—"} status="neutral" />
+                <StatusRow icon={Code} label="Media Type" value={business.mediaType || "—"} status="neutral" />
+                <StatusRow icon={Gauge} label="Page Size" value={formatBytes(business.pageSize)} status="neutral" />
+              </CardContent>
+            </Card>
+          )}
+
+          {business.reasons && business.reasons.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2"><Sparkles className="h-4 w-4" /> Why this opportunity score</CardTitle>
+                <CardDescription>What contributed to the {business.leadScore}/100 opportunity score</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ul className="space-y-2">
+                  {business.reasons.map((r, i) => (
                     <li key={i} className="flex items-start gap-2 text-sm">
-                      <span className={cn(
-                        "mt-1.5 h-1.5 w-1.5 rounded-full shrink-0",
-                        r.startsWith("-") || r.includes("(-") ? "bg-red-500" : "bg-green-500"
-                      )} />
-                      <span className="text-muted-foreground">{r}</span>
+                      <span className="mt-1 h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
+                      <span>{r}</span>
                     </li>
                   ))}
                 </ul>
-              )}
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         <TabsContent value="actions" className="space-y-4">
