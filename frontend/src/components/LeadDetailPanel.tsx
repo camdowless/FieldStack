@@ -466,7 +466,7 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
               {isReevaluating ? "Re-evaluating..." : "Re-evaluate"}
             </Button>
           )}
-          <ReportButton cid={business.id} businessName={business.name} />
+          <ReportButton cid={business.id} businessName={business.name} websiteUrl={business.analysis.websiteUrl} />
         </div>
         {/* Notes */}
         {isSaved && (

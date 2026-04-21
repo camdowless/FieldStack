@@ -34,6 +34,11 @@ export function usePreferences() {
           opportunityScoreMin: typeof data.opportunityScoreMin === "number" ? data.opportunityScoreMin : DEFAULTS.opportunityScoreMin,
           legitimacyScoreMin: typeof data.legitimacyScoreMin === "number" ? data.legitimacyScoreMin : DEFAULTS.legitimacyScoreMin,
         });
+      } else {
+        // New user — persist defaults so they're locked in
+        setDoc(ref, DEFAULTS).catch((err) => {
+          console.error("[preferences] failed to save defaults:", err);
+        });
       }
       setLoaded(true);
     }).catch(() => {

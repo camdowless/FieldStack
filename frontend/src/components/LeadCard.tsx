@@ -66,7 +66,7 @@ export function LeadCard({ business, isSaved, onSave, index = 0 }: LeadCardProps
             >
               {isSaved ? <BookmarkCheck className="h-5 w-5 text-primary" /> : <Bookmark className="h-5 w-5" />}
             </Button>
-            <ReportButton cid={business.id} businessName={business.name} />
+            <ReportButton cid={business.id} businessName={business.name} websiteUrl={business.analysis.websiteUrl} />
           </div>
 
           {flags.length > 0 && (

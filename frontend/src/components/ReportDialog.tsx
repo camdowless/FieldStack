@@ -24,6 +24,7 @@ import { useToast } from "@/hooks/use-toast";
 interface ReportDialogProps {
   cid: string;
   businessName: string;
+  websiteUrl?: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
@@ -35,7 +36,7 @@ const REASONS: { value: ReportReason; label: string }[] = [
   { value: "other", label: "Other" },
 ];
 
-export function ReportDialog({ cid, businessName, open, onOpenChange }: ReportDialogProps) {
+export function ReportDialog({ cid, businessName, websiteUrl, open, onOpenChange }: ReportDialogProps) {
   const [reason, setReason] = useState<ReportReason | "">("");
   const [details, setDetails] = useState("");
   const [loading, setLoading] = useState(false);
@@ -45,7 +46,7 @@ export function ReportDialog({ cid, businessName, open, onOpenChange }: ReportDi
     if (!reason) return;
     setLoading(true);
     try {
-      await submitReport({ cid, businessName, reason, details: details.trim() || undefined });
+      await submitReport({ cid, businessName, websiteUrl: websiteUrl ?? undefined, reason, details: details.trim() || undefined });
       toast({ title: "Report submitted", description: "Thanks for the feedback." });
       onOpenChange(false);
       setReason("");
@@ -106,7 +107,7 @@ export function ReportDialog({ cid, businessName, open, onOpenChange }: ReportDi
   );
 }
 
-export function ReportButton({ cid, businessName }: { cid: string; businessName: string }) {
+export function ReportButton({ cid, businessName, websiteUrl }: { cid: string; businessName: string; websiteUrl?: string | null }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -119,7 +120,7 @@ export function ReportButton({ cid, businessName }: { cid: string; businessName:
       >
         <Flag className="h-4 w-4" />
       </Button>
-      <ReportDialog cid={cid} businessName={businessName} open={open} onOpenChange={setOpen} />
+      <ReportDialog cid={cid} businessName={businessName} websiteUrl={websiteUrl} open={open} onOpenChange={setOpen} />
     </>
   );
 }
