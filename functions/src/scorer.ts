@@ -193,6 +193,17 @@ export function score(input: ScorerInput): ScoreResult {
     };
   }
 
+  // ─── Uncrawlable: DFS task succeeded (20000) but returned no content ──
+  // Server is reachable but DFS can't parse it (Cloudflare, JS-heavy SPA, etc.)
+  // Treat as live — do not mark dead.
+  if (input.htmlSignals !== null && !input.htmlSignals.fetchFailed && input.htmlSignals.statusCode === null && input.htmlSignals.totalDomSize === null) {
+    return {
+      score: null,
+      label: "disqualified",
+      scoring: buildBreakdown(0, ["Site is live but could not be crawled — likely bot protection or heavy JS"], input),
+    };
+  }
+
   // ─── Compute legitimacy for the multiplier ────────────────────────────
   // Piecewise: 70–100 legitimacy → 0.90–1.0 (gentle), 0–70 → 0.0–0.90 (real penalty)
   const { legitimacyScore } = computeLegitimacy(input);

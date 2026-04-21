@@ -303,6 +303,46 @@ export function extractHtmlSignals(
   };
 }
 
+/**
+ * Build a signal stub for sites DFS can reach (task 20000) but can't crawl —
+ * bot protection, JS-heavy SPA, Cloudflare challenge, etc.
+ * fetchFailed=false so the scorer treats it as a live-but-uncrawlable site
+ * rather than a dead one.
+ */
+export function uncrawlableSignals(url: string): HtmlSignals {
+  return {
+    statusCode: null,
+    fetchFailed: false,
+    onpageScore: null,
+    totalDomSize: null,
+    pageSize: null,
+    encodedSize: null,
+    server: null,
+    contentEncoding: null,
+    mediaType: null,
+    finalUrl: null,
+    isHttps: url.startsWith("https://"),
+    redirectedToHttps: false,
+    wordCount: 0,
+    hasMetaDescription: false,
+    hasFavicon: false,
+    deprecatedTagCount: 0,
+    copyrightYear: null,
+    headerText: "",
+    footerText: "",
+    hasAdPixel: false,
+    hasAgencyFooter: false,
+    hasBrokenResources: false,
+    hasBrokenLinks: false,
+    lastModifiedHeader: null,
+    lastModifiedSitemap: null,
+    lastModifiedMetaTag: null,
+    pageTiming: null,
+    pageMeta: null,
+    pageChecks: null,
+  };
+}
+
 /** Build a dead-site HtmlSignals stub for URLs that failed to fetch. */
 export function deadSiteSignals(url: string, statusCode: number | null): HtmlSignals {
   return {
@@ -486,6 +526,10 @@ interface FetchOnePageResult {
   cost: number;
 }
 
+// Per-request timeout for DFS instant_pages calls. Keeps total reevaluateBusiness
+// execution well under the 120s Cloud Function limit even with 3 passes.
+const FETCH_ONE_PAGE_TIMEOUT_MS = 25_000;
+
 /** Fire a single instant_pages request. Returns the page item, task-level status code, and cost. */
 async function fetchOnePage(
   url: string,
@@ -493,24 +537,32 @@ async function fetchOnePage(
   opts: { switchPool?: boolean; returnDespiteTimeout?: boolean } = {}
 ): Promise<FetchOnePageResult> {
   try {
-    const response = await fetch(`${DFS_BASE}/on_page/instant_pages`, {
-      method: "POST",
-      headers: {
-        Authorization: authHeader,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify([
-        {
-          url,
-          custom_js: CUSTOM_JS,
-          load_resources: true,
-          enable_javascript: true,
-          disable_cookie_popup: true,
-          return_despite_timeout: opts.returnDespiteTimeout ?? true,
-          switch_pool: opts.switchPool ?? false,
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_ONE_PAGE_TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await fetch(`${DFS_BASE}/on_page/instant_pages`, {
+        method: "POST",
+        signal: controller.signal,
+        headers: {
+          Authorization: authHeader,
+          "Content-Type": "application/json",
         },
-      ]),
-    });
+        body: JSON.stringify([
+          {
+            url,
+            custom_js: CUSTOM_JS,
+            load_resources: true,
+            enable_javascript: true,
+            disable_cookie_popup: true,
+            return_despite_timeout: opts.returnDespiteTimeout ?? true,
+            switch_pool: opts.switchPool ?? false,
+          },
+        ]),
+      });
+    } finally {
+      clearTimeout(timer);
+    }
 
     if (!response.ok) return { page: undefined, taskStatusCode: null, cost: 0 };
 
@@ -527,7 +579,10 @@ async function fetchOnePage(
     }
 
     return { page: items?.[0], taskStatusCode, cost };
-  } catch {
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      console.log(`[fetchOnePage] ${url} → timed out after ${FETCH_ONE_PAGE_TIMEOUT_MS}ms`);
+    }
     return { page: undefined, taskStatusCode: null, cost: 0 };
   }
 }
@@ -626,9 +681,13 @@ export async function fetchInstantPages(
       }
 
       const signal = parseInstantPageItem(urls[i], retryResults[j].page);
-      results[i] = signal ?? deadSiteSignals(urls[i], null);
       if (signal === null) {
-        console.log(`[fetchInstantPages] ${crawlUrls[i]} still unreachable after retry (taskCode=${retryResults[j].taskStatusCode})`);
+        // task 20000 = DFS reached the server but couldn't parse content → live but uncrawlable
+        const isTaskSuccess = retryResults[j].taskStatusCode === 20000;
+        results[i] = isTaskSuccess ? uncrawlableSignals(urls[i]) : deadSiteSignals(urls[i], null);
+        console.log(`[fetchInstantPages] ${crawlUrls[i]} ${isTaskSuccess ? "uncrawlable (task 20000, live)" : "dead"} after retry (taskCode=${retryResults[j].taskStatusCode})`);
+      } else {
+        results[i] = signal;
       }
     }
 
@@ -646,9 +705,13 @@ export async function fetchInstantPages(
         const i = redirectIndices[k];
         totalCost += redirectResults[k].cost;
         const signal = parseInstantPageItem(urls[i], redirectResults[k].page);
-        results[i] = signal ?? deadSiteSignals(urls[i], null);
         if (signal === null) {
-          console.log(`[fetchInstantPages] ${resolvedUrls[k]} still unreachable after redirect resolution`);
+          // task 20000 after redirect resolution = server is live, DFS just can't crawl it
+          const isTaskSuccess = redirectResults[k].taskStatusCode === 20000;
+          results[i] = isTaskSuccess ? uncrawlableSignals(urls[i]) : deadSiteSignals(urls[i], null);
+          console.log(`[fetchInstantPages] ${resolvedUrls[k]} ${isTaskSuccess ? "uncrawlable (task 20000, live)" : "dead"} after redirect resolution`);
+        } else {
+          results[i] = signal;
         }
       }
     }
