@@ -9,6 +9,7 @@ import { AppLayout } from "@/components/AppLayout";
 import { useEffect } from "react";
 import { toast } from "sonner";
 import Login from "./pages/Login";
+import { ProtectedAdminRoute } from "@/components/ProtectedAdminRoute";
 
 // One-time migration: clear saved leads/searches that use the old `biz-XXX`
 // id format so they don't break with the new CID-based schema.
@@ -68,7 +69,7 @@ function AuthGate() {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/billing" element={<Billing />} />
-        <Route path="/admin" element={<SystemAdmin />} />
+        <Route path="/admin" element={<ProtectedAdminRoute element={<SystemAdmin />} />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </AppLayout>

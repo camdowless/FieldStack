@@ -39,7 +39,7 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const { theme, toggleTheme } = useTheme();
-  const { logout, user } = useAuth();
+  const { logout, user, role } = useAuth();
   const { remaining, max } = useCredits();
   const displayName = user?.displayName ?? user?.email?.split("@")[0] ?? "User";
   const pct = max > 0 ? (remaining / max) * 100 : 0;
@@ -85,7 +85,7 @@ export function AppSidebar() {
           <SidebarGroupLabel>Account</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {accountItems.map((item) => (
+              {accountItems.filter(item => item.title !== "System Admin" || role === "admin").map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton asChild>
                     <NavLink to={item.url} end className="hover:bg-muted/50" activeClassName="bg-muted text-primary font-medium">

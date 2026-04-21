@@ -5,6 +5,7 @@ import {
 } from "@/data/actionItems";
 import { useFirebaseLeadStore, LEAD_STATUSES } from "@/hooks/useFirebaseLeadStore";
 import { useLeadStore } from "@/hooks/useLeadStore";
+import { useAuth } from "@/contexts/AuthContext";
 import { LeadScoreBadge } from "@/components/LeadScoreBadge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -236,6 +237,7 @@ interface LeadDetailPanelProps {
 export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
   const fbStore = useFirebaseLeadStore();
   const store = useLeadStore();
+  const { role } = useAuth();
   const [showPricing, setShowPricing] = useState(true);
   const [isEditingEmail, setIsEditingEmail] = useState(false);
   const [localCompleted, setLocalCompleted] = useState<string[]>([]);
@@ -449,19 +451,21 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-1"
-            onClick={handleReevaluate}
-            disabled={isReevaluating}
-            title="Re-fetch website data and recalculate score"
-          >
-            {isReevaluating
-              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              : <RefreshCw className="h-3.5 w-3.5" />}
-            {isReevaluating ? "Re-evaluating..." : "Re-evaluate"}
-          </Button>
+          {role === "admin" && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1"
+              onClick={handleReevaluate}
+              disabled={isReevaluating}
+              title="Re-fetch website data and recalculate score"
+            >
+              {isReevaluating
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : <RefreshCw className="h-3.5 w-3.5" />}
+              {isReevaluating ? "Re-evaluating..." : "Re-evaluate"}
+            </Button>
+          )}
           <ReportButton cid={business.id} businessName={business.name} />
         </div>
         {/* Notes */}

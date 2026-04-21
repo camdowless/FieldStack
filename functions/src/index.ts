@@ -16,6 +16,7 @@ import { ScoredBusiness, CostBreakdown, BusinessRaw, ScorerInput, JobDocument } 
 import { geocodeLocation, milesToKm, buildLocationCoordinate } from "./geocode";
 import { computeJobId, deleteResultsSubcollection, createOrReuseJob, isJobCancelled, cancelJob, identifyStuckJobs, identifyExpiredJobs } from "./jobHelpers";
 import { Timestamp } from "firebase-admin/firestore";
+import { checkUserRole, checkAdminRole } from "./authHelpers";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -31,12 +32,34 @@ const corsHandler = cors({ origin: ALLOWED_ORIGINS });
 
 // ─── Auth Helper ──────────────────────────────────────────────────────────────
 
-async function verifyAuth(req: functions.https.Request): Promise<admin.auth.DecodedIdToken> {
+/**
+ * Verifies the request token and checks that the caller has the "user" or "admin" role.
+ * Treats a missing `role` claim as "user" for backward compatibility.
+ * Throws FORBIDDEN for any unrecognized role value.
+ */
+async function verifyUserRole(req: functions.https.Request): Promise<admin.auth.DecodedIdToken> {
   const header = req.headers.authorization;
   if (!header?.startsWith("Bearer ")) {
     throw new Error("UNAUTHENTICATED");
   }
-  return admin.auth().verifyIdToken(header.split("Bearer ")[1]);
+  const decoded = await admin.auth().verifyIdToken(header.split("Bearer ")[1], true /* checkRevoked */);
+  checkUserRole(decoded);
+  return decoded;
+}
+
+/**
+ * Verifies the request token with revocation check and asserts the caller has the "admin" role.
+ * Logs uid + function name on rejection (Req 4.3).
+ * Throws FORBIDDEN if role !== "admin".
+ */
+async function verifyAdmin(req: functions.https.Request, functionName?: string): Promise<admin.auth.DecodedIdToken> {
+  const header = req.headers.authorization;
+  if (!header?.startsWith("Bearer ")) {
+    throw new Error("UNAUTHENTICATED");
+  }
+  const decoded = await admin.auth().verifyIdToken(header.split("Bearer ")[1], true /* checkRevoked */);
+  checkAdminRole(decoded, decoded.uid, functionName);
+  return decoded;
 }
 
 // ─── User Profile Helper ─────────────────────────────────────────────────────
@@ -272,6 +295,13 @@ export function buildScorerInput(
   };
 }
 
+// ─── Auth Trigger: Assign default role on account creation ──────────────────
+
+export const onUserCreate = functions.auth.user().onCreate(async (user) => {
+  await admin.auth().setCustomUserClaims(user.uid, { role: "user" });
+  await admin.auth().revokeRefreshTokens(user.uid);
+});
+
 export const dataforseoBusinessSearch = functions
   .runWith({ timeoutSeconds: 300 })
   .https.onRequest((req, res) => {
@@ -285,7 +315,7 @@ export const dataforseoBusinessSearch = functions
       // ── Auth check ──
       let decodedToken: admin.auth.DecodedIdToken;
       try {
-        decodedToken = await verifyAuth(req);
+        decodedToken = await verifyUserRole(req);
       } catch {
         res.status(401).json({ error: "Unauthorized. Please sign in." });
         return;
@@ -850,7 +880,7 @@ export const cancelSearchJob = functions.https.onRequest((req, res) => {
     // ── Auth check ──
     let decodedToken: admin.auth.DecodedIdToken;
     try {
-      decodedToken = await verifyAuth(req);
+      decodedToken = await verifyUserRole(req);
     } catch {
       res.status(401).json({ error: "Unauthorized. Please sign in." });
       return;
@@ -994,9 +1024,14 @@ export const reevaluateBusiness = functions
       }
 
       try {
-        await verifyAuth(req);
-      } catch {
-        res.status(401).json({ error: "Unauthorized. Please sign in." });
+        await verifyAdmin(req, "reevaluateBusiness");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "";
+        if (msg === "UNAUTHENTICATED") {
+          res.status(401).json({ error: "Unauthorized. Please sign in." });
+        } else {
+          res.status(403).json({ error: "Forbidden. Admin role required." });
+        }
         return;
       }
 
@@ -1124,9 +1159,14 @@ export const recalculateBusinessRank = functions
       }
 
       try {
-        await verifyAuth(req);
-      } catch {
-        res.status(401).json({ error: "Unauthorized. Please sign in." });
+        await verifyAdmin(req, "recalculateBusinessRank");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "";
+        if (msg === "UNAUTHENTICATED") {
+          res.status(401).json({ error: "Unauthorized. Please sign in." });
+        } else {
+          res.status(403).json({ error: "Forbidden. Admin role required." });
+        }
         return;
       }
 
@@ -1232,9 +1272,14 @@ export const getGhostBusinesses = functions.https.onRequest((req, res) => {
     }
 
     try {
-      await verifyAuth(req);
-    } catch {
-      res.status(401).json({ error: "Unauthorized. Please sign in." });
+      await verifyAdmin(req, "getGhostBusinesses");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg === "UNAUTHENTICATED") {
+        res.status(401).json({ error: "Unauthorized. Please sign in." });
+      } else {
+        res.status(403).json({ error: "Forbidden. Admin role required." });
+      }
       return;
     }
 
@@ -1271,7 +1316,7 @@ export const getBusinessesByCids = functions.https.onRequest((req, res) => {
     }
 
     try {
-      await verifyAuth(req);
+      await verifyUserRole(req);
     } catch {
       res.status(401).json({ error: "Unauthorized. Please sign in." });
       return;
@@ -1324,7 +1369,7 @@ export const getBusinessPhotos = functions.https.onRequest((req, res) => {
     }
 
     try {
-      await verifyAuth(req);
+      await verifyUserRole(req);
     } catch {
       res.status(401).json({ error: "Unauthorized. Please sign in." });
       return;
@@ -1496,7 +1541,7 @@ export const submitReport = functions.https.onRequest((req, res) => {
 
     let decodedToken: admin.auth.DecodedIdToken;
     try {
-      decodedToken = await verifyAuth(req);
+      decodedToken = await verifyUserRole(req);
     } catch {
       res.status(401).json({ error: "Unauthorized. Please sign in." });
       return;
@@ -1537,6 +1582,45 @@ export const submitReport = functions.https.onRequest((req, res) => {
   });
 });
 
+// ─── Set User Role: admin-only endpoint to assign roles ──────────────────────
+
+export const setUserRole = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    // ── Method check ──
+    if (req.method !== "POST") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+
+    // ── Admin auth check ──
+    try {
+      await verifyAdmin(req, "setUserRole");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg === "UNAUTHENTICATED") {
+        res.status(401).json({ error: "Unauthorized. Please sign in." });
+      } else {
+        res.status(403).json({ error: "Forbidden. Admin role required." });
+      }
+      return;
+    }
+
+    // ── Validate role ──
+    const { uid, role } = req.body ?? {};
+    if (role !== "user" && role !== "admin") {
+      res.status(400).json({ error: 'Invalid role value. Must be "user" or "admin".' });
+      return;
+    }
+
+    // ── Set custom claim and revoke tokens ──
+    await admin.auth().setCustomUserClaims(uid, { role });
+    await admin.auth().revokeRefreshTokens(uid);
+
+    console.log(`[setUserRole] uid=${uid} role=${role}`);
+    res.status(200).json({ success: true, uid, role });
+  });
+});
+
 // ─── Admin Stats: aggregate search + business data across all users ───────────
 
 export const getAdminStats = functions.https.onRequest((req, res) => {
@@ -1547,9 +1631,14 @@ export const getAdminStats = functions.https.onRequest((req, res) => {
     }
 
     try {
-      await verifyAuth(req);
-    } catch {
-      res.status(401).json({ error: "Unauthorized. Please sign in." });
+      await verifyAdmin(req, "getAdminStats");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      if (msg === "UNAUTHENTICATED") {
+        res.status(401).json({ error: "Unauthorized. Please sign in." });
+      } else {
+        res.status(403).json({ error: "Forbidden. Admin role required." });
+      }
       return;
     }
 
