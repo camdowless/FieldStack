@@ -97,6 +97,24 @@ export function saveSearchToUser(
       console.error("[user] failed to save search:", err);
     });
 
+  // Increment running totals on the admin stats doc (fire-and-forget)
+  if (search.cost) {
+    const statsRef = db.collection("admin").doc("stats");
+    statsRef.set({
+      totalSearches: admin.firestore.FieldValue.increment(1),
+      totalResultCount: admin.firestore.FieldValue.increment(search.cids.length),
+      totalDfsCost: admin.firestore.FieldValue.increment(search.cost.totalDfs ?? 0),
+      totalBusinessSearch: admin.firestore.FieldValue.increment(search.cost.businessSearch ?? 0),
+      totalInstantPages: admin.firestore.FieldValue.increment(search.cost.instantPages ?? 0),
+      totalLighthouse: admin.firestore.FieldValue.increment(search.cost.lighthouse ?? 0),
+      totalCachedBusinesses: admin.firestore.FieldValue.increment(search.cost.cachedBusinesses ?? 0),
+      totalFreshBusinesses: admin.firestore.FieldValue.increment(search.cost.freshBusinesses ?? 0),
+      lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true }).catch((err) => {
+      console.error("[admin] failed to update stats:", err);
+    });
+  }
+
   console.log(`[user] saving search for ${uid} with ${search.cids.length} CIDs`);
 }
 
@@ -1516,5 +1534,60 @@ export const submitReport = functions.https.onRequest((req, res) => {
 
     console.log(`[submitReport] Report ${reportRef.id} created by uid=${decodedToken.uid} for cid=${cid}`);
     res.status(200).json({ reportId: reportRef.id });
+  });
+});
+
+// ─── Admin Stats: aggregate search + business data across all users ───────────
+
+export const getAdminStats = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== "GET") {
+      res.status(405).json({ error: "Method not allowed" });
+      return;
+    }
+
+    try {
+      await verifyAuth(req);
+    } catch {
+      res.status(401).json({ error: "Unauthorized. Please sign in." });
+      return;
+    }
+
+    try {
+      const [statsSnap, bizCount] = await Promise.all([
+        db.collection("admin").doc("stats").get(),
+        db.collection(BUSINESSES_COLLECTION).count().get(),
+      ]);
+
+      const stats = statsSnap.data() ?? {};
+      const totalSearches = stats.totalSearches ?? 0;
+      const totalResultCount = stats.totalResultCount ?? 0;
+      const totalDfsCost = stats.totalDfsCost ?? 0;
+      const totalBusinessesIndexed = bizCount.data().count;
+
+      const avgCostPerSearch = totalSearches > 0 ? totalDfsCost / totalSearches : 0;
+      const avgResultsPerSearch = totalSearches > 0 ? totalResultCount / totalSearches : 0;
+
+      res.status(200).json({
+        totalSearches,
+        totalResultCount,
+        totalDfsCost,
+        totalBusinessesIndexed,
+        avgCostPerSearch,
+        avgResultsPerSearch,
+        breakdown: {
+          totalBusinessSearch: stats.totalBusinessSearch ?? 0,
+          totalInstantPages: stats.totalInstantPages ?? 0,
+          totalLighthouse: stats.totalLighthouse ?? 0,
+          totalCachedBusinesses: stats.totalCachedBusinesses ?? 0,
+          totalFreshBusinesses: stats.totalFreshBusinesses ?? 0,
+        },
+        lastUpdated: stats.lastUpdated ?? null,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Internal server error";
+      console.error("[getAdminStats] error:", msg);
+      res.status(500).json({ error: msg });
+    }
   });
 });

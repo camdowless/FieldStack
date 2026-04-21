@@ -1,4 +1,4 @@
-import { Search, LayoutDashboard, Settings, LogOut, Sun, Sparkles, CreditCard, HelpCircle, History } from "lucide-react";
+import { Search, LayoutDashboard, Settings, LogOut, Sun, Sparkles, CreditCard, HelpCircle, History, ShieldAlert } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -32,6 +32,7 @@ const accountItems = [
   { title: "Settings", url: "/settings", icon: Settings },
   { title: "Billing", url: "/billing", icon: CreditCard },
   { title: "Help", url: "/help", icon: HelpCircle },
+  { title: "System Admin", url: "/admin", icon: ShieldAlert },
 ];
 
 export function AppSidebar() {
@@ -40,6 +41,7 @@ export function AppSidebar() {
   const { theme, toggleTheme } = useTheme();
   const { logout, user } = useAuth();
   const { remaining, max } = useCredits();
+  const displayName = user?.displayName ?? user?.email?.split("@")[0] ?? "User";
   const pct = max > 0 ? (remaining / max) * 100 : 0;
   const barColor = pct > 50 ? "bg-green-500" : pct >= 20 ? "bg-amber-500" : "bg-red-500";
 
@@ -103,12 +105,12 @@ export function AppSidebar() {
         <div className="flex items-center gap-3 px-2 mb-3 overflow-hidden">
           <Avatar className="h-9 w-9 shrink-0">
             <AvatarFallback className="gradient-bg text-white text-sm font-semibold">
-              {user?.email?.[0]?.toUpperCase() ?? "?"}
+              {displayName[0]?.toUpperCase() ?? "?"}
             </AvatarFallback>
           </Avatar>
           {!collapsed && (
             <div className="min-w-0">
-              <p className="text-sm font-semibold truncate">{user?.email ?? "User"}</p>
+              <p className="text-sm font-semibold truncate">{displayName}</p>
             </div>
           )}
         </div>

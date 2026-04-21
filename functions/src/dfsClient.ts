@@ -608,6 +608,28 @@ function shouldRetry(result: FetchOnePageResult): boolean {
   return false;
 }
 
+const HEAD_CHECK_TIMEOUT_MS = 7_000;
+
+/**
+ * Quick liveness check via HEAD request. Returns false if the server is
+ * unreachable (DNS failure, connection refused, SSL error, or timeout).
+ * A non-200 status still counts as "alive" — the server responded.
+ */
+async function isServerAlive(url: string): Promise<boolean> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), HEAD_CHECK_TIMEOUT_MS);
+    try {
+      await fetch(url, { method: "HEAD", signal: controller.signal, redirect: "follow" });
+      return true; // any response = server is up
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch {
+    return false; // timeout, DNS failure, SSL error, etc.
+  }
+}
+
 /** Resolve the final URL after redirects (e.g. no-www → www). Returns the original if it fails. */
 async function resolveRedirect(url: string): Promise<string> {
   try {
@@ -636,24 +658,42 @@ export async function fetchInstantPages(
     url.startsWith("http://") ? url.replace("http://", "https://") : url
   );
 
+  // HEAD pre-check: fast liveness test before spending DFS credits.
+  // Run all checks in parallel — each caps at HEAD_CHECK_TIMEOUT_MS.
+  const aliveFlags = await Promise.all(crawlUrls.map((url) => isServerAlive(url)));
+
+  // Pre-populate results for confirmed-dead servers so we skip DFS entirely.
+  const results: (HtmlSignals | null)[] = urls.map((url, i) => {
+    if (!aliveFlags[i]) {
+      console.log(`[fetchInstantPages] ${crawlUrls[i]} failed HEAD check — skipping DFS`);
+      return deadSiteSignals(url, null);
+    }
+    return null;
+  });
+
+  // Only crawl URLs that passed the HEAD check.
+  const crawlIndices = urls.map((_, i) => i).filter((i) => aliveFlags[i]);
+  if (crawlIndices.length === 0) {
+    return { signals: results as HtmlSignals[], cost: 0 };
+  }
+
   // First pass: fetch all URLs in parallel with return_despite_timeout enabled.
   const firstPass = await Promise.all(
-    crawlUrls.map((url) => fetchOnePage(url, authHeader, { returnDespiteTimeout: true }))
+    crawlIndices.map((i) => fetchOnePage(crawlUrls[i], authHeader, { returnDespiteTimeout: true }))
   );
 
   let totalCost = 0;
-  const results: (HtmlSignals | null)[] = [];
   const retryIndices: number[] = [];
 
-  for (let i = 0; i < firstPass.length; i++) {
-    totalCost += firstPass[i].cost;
-    if (shouldRetry(firstPass[i])) {
+  for (let j = 0; j < firstPass.length; j++) {
+    const i = crawlIndices[j];
+    totalCost += firstPass[j].cost;
+    if (shouldRetry(firstPass[j])) {
       retryIndices.push(i);
-      results.push(null);
     } else {
       // Pass the original url (not crawlUrl) so HtmlSignals.isHttps reflects
       // the stored URL, but the actual crawl used the normalized https version.
-      results.push(parseInstantPageItem(urls[i], firstPass[i].page));
+      results[i] = parseInstantPageItem(urls[i], firstPass[j].page);
     }
   }
 

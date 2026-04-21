@@ -37,13 +37,29 @@ const ERROR_PAGE_TITLE_PATTERNS = [
   /500/i, /502/i, /503/i, /service unavailable/i,
 ];
 
+// Titles that unambiguously mean "this domain has no real site" regardless of DOM size.
+// Kept tight to avoid false positives on legitimate pages that mention these phrases.
+const UNPUBLISHED_SITE_PATTERNS = [
+  /^site not found$/i,
+  /^page not found$/i,
+  /not published/i,
+  /domain not configured/i,
+  /no site (is )?associated/i,
+  /coming soon/i,
+  /under construction/i,
+];
+
 function isErrorPage(input: ScorerInput): boolean {
   const signals = input.htmlSignals;
   if (!signals) return false;
 
+  const title = signals.pageMeta?.title ?? "";
+
+  // Unambiguous "no site here" titles — catch regardless of DOM size
+  if (UNPUBLISHED_SITE_PATTERNS.some((p) => p.test(title))) return true;
+
   // Tiny DOM size is a strong signal of an error/stub page
   if (signals.totalDomSize !== null && signals.totalDomSize < 500) {
-    const title = signals.pageMeta?.title ?? "";
     if (ERROR_PAGE_TITLE_PATTERNS.some((p) => p.test(title))) return true;
   }
 

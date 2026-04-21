@@ -23,6 +23,7 @@ export default defineConfig(({ mode }) => ({
           if (path === "/api/businesses") return "/getBusinessesByCids";
           if (path === "/api/recalculate-business-rank") return "/recalculateBusinessRank";
           if (path.startsWith("/api/ghost-businesses")) return path.replace("/api/ghost-businesses", "/getGhostBusinesses");
+          if (path.startsWith("/api/admin-stats")) return path.replace("/api/admin-stats", "/getAdminStats");
           return path;
         },
       },

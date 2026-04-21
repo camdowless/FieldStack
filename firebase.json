@@ -45,6 +45,10 @@
         "function": "submitReport"
       },
       {
+        "source": "/api/admin-stats",
+        "function": "getAdminStats"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

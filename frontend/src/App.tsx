@@ -42,6 +42,7 @@ import Dashboard from "./pages/Dashboard.tsx";
 import SearchHistory from "./pages/SearchHistory.tsx";
 import Settings from "./pages/Settings.tsx";
 import Billing from "./pages/Billing.tsx";
+import SystemAdmin from "./pages/SystemAdmin.tsx";
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -67,6 +68,7 @@ function AuthGate() {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="/billing" element={<Billing />} />
+        <Route path="/admin" element={<SystemAdmin />} />
         <Route path="*" element={<NotFound />} />
       </Routes>
     </AppLayout>
