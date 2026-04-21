@@ -323,7 +323,7 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2 mb-1">
               <Badge variant="secondary">{business.category.split("/")[0].trim()}</Badge>
-              <LeadScoreBadge score={business.leadScore} label={business.label} size="lg" />
+              <LeadScoreBadge score={business.leadScore} size="lg" />
               {business.currentStatus && (
                 <Badge variant={business.currentStatus === "open" ? "default" : "outline"} className="text-xs">
                   {business.currentStatus === "open" ? "Open now" : "Closed"}

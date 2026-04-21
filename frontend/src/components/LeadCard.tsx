@@ -37,7 +37,7 @@ export function LeadCard({ business, isSaved, onSave, index = 0 }: LeadCardProps
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 mb-1 flex-wrap">
                 <Badge variant="secondary" className="text-xs shrink-0">{business.category.split("/")[0].trim()}</Badge>
-                <LeadScoreBadge score={business.leadScore} label={business.label} size="sm" />
+                <LeadScoreBadge score={business.leadScore} size="sm" />
               </div>
               <Link to={`/lead/${business.id}`}>
                 <h3 className="font-semibold text-lg truncate hover:text-primary transition-colors">
