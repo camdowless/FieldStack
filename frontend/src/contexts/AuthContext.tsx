@@ -27,6 +27,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (u) => {
       if (u) {
+        // Uses cached token (up to 1hr stale). Role changes won't reflect in
+        // the UI until the token refreshes naturally or the user reloads.
+        // Backend enforces roles correctly regardless — this is UI-only lag.
+        // TODO: if non-developer client admins are added, switch to
+        // u.getIdTokenResult(true) to force-refresh on every auth state change,
+        // so promotions/demotions are reflected immediately without a reload.
         const tokenResult = await u.getIdTokenResult();
         setRole((tokenResult.claims.role as "user" | "admin") ?? null);
       } else {

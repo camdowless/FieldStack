@@ -918,7 +918,7 @@ export const cancelSearchJob = functions.https.onRequest((req, res) => {
 
     // ── Read jobId from request body ──
     const jobId = req.body?.jobId;
-    if (!jobId || typeof jobId !== "string") {
+    if (!jobId || typeof jobId !== "string" || jobId.length > 128) {
       res.status(400).json({ error: "Missing jobId" });
       return;
     }
@@ -1064,7 +1064,7 @@ export const reevaluateBusiness = functions
       }
 
       const cid = req.body?.cid;
-      if (!cid || typeof cid !== "string") {
+      if (!cid || typeof cid !== "string" || cid.length > 50) {
         res.status(400).json({ error: "Missing required field: cid" });
         return;
       }
@@ -1361,7 +1361,7 @@ export const getBusinessesByCids = functions.https.onRequest((req, res) => {
     }
 
     // Cap at 500 to prevent abuse
-    const safeCids = cids.slice(0, 500).filter((c): c is string => typeof c === "string" && c.length > 0);
+    const safeCids = cids.slice(0, 500).filter((c): c is string => typeof c === "string" && c.length > 0 && c.length <= 50);
     if (safeCids.length === 0) {
       res.status(400).json({ error: "No valid CIDs provided" });
       return;
@@ -1588,12 +1588,12 @@ export const submitReport = functions.https.onRequest((req, res) => {
 
     const { cid, businessName, websiteUrl, reason, details } = req.body ?? {};
 
-    if (!cid || typeof cid !== "string") {
-      res.status(400).json({ error: "Missing or invalid field: cid" });
+    if (!cid || typeof cid !== "string" || cid.length > 50) {
+      res.status(400).json({ error: "Missing or invalid field: cid (max 50 chars)" });
       return;
     }
-    if (!businessName || typeof businessName !== "string") {
-      res.status(400).json({ error: "Missing or invalid field: businessName" });
+    if (!businessName || typeof businessName !== "string" || businessName.length > 200) {
+      res.status(400).json({ error: "Missing or invalid field: businessName (max 200 chars)" });
       return;
     }
     if (!VALID_REASONS.includes(reason)) {
@@ -1605,8 +1605,8 @@ export const submitReport = functions.https.onRequest((req, res) => {
       return;
     }
 
-    if (websiteUrl !== undefined && websiteUrl !== null && typeof websiteUrl !== "string") {
-      res.status(400).json({ error: "websiteUrl must be a string" });
+    if (websiteUrl !== undefined && websiteUrl !== null && (typeof websiteUrl !== "string" || websiteUrl.length > 500)) {
+      res.status(400).json({ error: "websiteUrl must be a string under 500 characters" });
       return;
     }
 
@@ -1624,6 +1624,131 @@ export const submitReport = functions.https.onRequest((req, res) => {
 
     console.log(`[submitReport] Report ${reportRef.id} created by uid=${decodedToken.uid} for cid=${cid}`);
     res.status(200).json({ reportId: reportRef.id });
+  });
+});
+
+// ─── Admin: List Reports (grouped by business) ───────────────────────────────
+
+export const getAdminReports = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== "GET") { res.status(405).json({ error: "Method not allowed" }); return; }
+
+    try {
+      await verifyAdmin(req, "getAdminReports");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      res.status(msg === "UNAUTHENTICATED" ? 401 : 403).json({ error: msg === "UNAUTHENTICATED" ? "Unauthorized." : "Forbidden. Admin role required." });
+      return;
+    }
+
+    try {
+      const statusFilter = typeof req.query.status === "string" ? req.query.status : "all";
+      let query: admin.firestore.Query = db.collection("reports").orderBy("createdAt", "desc");
+      if (statusFilter === "open" || statusFilter === "closed") {
+        query = query.where("status", "==", statusFilter);
+      }
+
+      const snap = await query.limit(500).get();
+
+      // Group by cid
+      const grouped: Record<string, {
+        cid: string;
+        businessName: string;
+        websiteUrl: string | null;
+        reportCount: number;
+        openCount: number;
+        reasons: Record<string, number>;
+        reports: Array<{
+          id: string;
+          reason: string;
+          details: string | null;
+          uid: string;
+          status: string;
+          createdAt: number | null;
+        }>;
+        latestAt: number | null;
+      }> = {};
+
+      // Collect unique uids to resolve emails
+      const uids = new Set<string>();
+      snap.docs.forEach((doc) => {
+        const d = doc.data();
+        if (d.uid) uids.add(d.uid);
+      });
+
+      // Batch-fetch user emails from Auth
+      const emailMap: Record<string, string> = {};
+      const uidArr = Array.from(uids);
+      for (let i = 0; i < uidArr.length; i += 100) {
+        const batch = uidArr.slice(i, i + 100).map((uid) => ({ uid }));
+        const result = await admin.auth().getUsers(batch);
+        result.users.forEach((u) => { emailMap[u.uid] = u.email ?? u.uid; });
+      }
+
+      snap.docs.forEach((doc) => {
+        const d = doc.data();
+        const cid: string = d.cid;
+        const ts = d.createdAt as admin.firestore.Timestamp | null;
+        const createdAtMs = ts ? ts.toMillis() : null;
+
+        if (!grouped[cid]) {
+          grouped[cid] = {
+            cid,
+            businessName: d.businessName,
+            websiteUrl: d.websiteUrl ?? null,
+            reportCount: 0,
+            openCount: 0,
+            reasons: {},
+            reports: [],
+            latestAt: null,
+          };
+        }
+
+        const g = grouped[cid];
+        g.reportCount++;
+        if (d.status === "open") g.openCount++;
+        g.reasons[d.reason] = (g.reasons[d.reason] ?? 0) + 1;
+        if (createdAtMs && (g.latestAt === null || createdAtMs > g.latestAt)) g.latestAt = createdAtMs;
+
+        g.reports.push({
+          id: doc.id,
+          reason: d.reason,
+          details: d.details ?? null,
+          uid: emailMap[d.uid] ?? d.uid,
+          status: d.status,
+          createdAt: createdAtMs,
+        });
+      });
+
+      res.status(200).json({ groups: Object.values(grouped).sort((a, b) => (b.latestAt ?? 0) - (a.latestAt ?? 0)) });
+    } catch (err) {
+      console.error("[getAdminReports] error:", err);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  });
+});
+
+// ─── Admin: Update Report Status ─────────────────────────────────────────────
+
+export const updateReportStatus = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
+
+    try {
+      await verifyAdmin(req, "updateReportStatus");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      res.status(msg === "UNAUTHENTICATED" ? 401 : 403).json({ error: msg === "UNAUTHENTICATED" ? "Unauthorized." : "Forbidden. Admin role required." });
+      return;
+    }
+
+    const { reportId, status } = req.body ?? {};
+    if (!reportId || typeof reportId !== "string") { res.status(400).json({ error: "Missing reportId" }); return; }
+    if (status !== "open" && status !== "closed") { res.status(400).json({ error: 'status must be "open" or "closed"' }); return; }
+
+    await db.collection("reports").doc(reportId).update({ status });
+    console.log(`[updateReportStatus] reportId=${reportId} status=${status}`);
+    res.status(200).json({ success: true });
   });
 });
 
@@ -1652,6 +1777,10 @@ export const setUserRole = functions.https.onRequest((req, res) => {
 
     // ── Validate role ──
     const { uid, role } = req.body ?? {};
+    if (!uid || typeof uid !== "string" || uid.length > 128) {
+      res.status(400).json({ error: "Missing or invalid field: uid" });
+      return;
+    }
     if (role !== "user" && role !== "admin") {
       res.status(400).json({ error: 'Invalid role value. Must be "user" or "admin".' });
       return;

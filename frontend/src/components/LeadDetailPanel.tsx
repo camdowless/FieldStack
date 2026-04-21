@@ -489,6 +489,7 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
                 value={localNotes}
                 onChange={(e) => handleNotesChange(e.target.value)}
                 className="min-h-[100px] resize-y"
+                maxLength={2000}
               />
             </CardContent>
           </Card>

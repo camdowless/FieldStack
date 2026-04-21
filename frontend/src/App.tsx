@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import Login from "./pages/Login";
 import { ProtectedAdminRoute } from "@/components/ProtectedAdminRoute";
 import { DevRateLimitTester } from "@/components/DevRateLimitTester";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 // One-time migration: clear saved leads/searches that use the old `biz-XXX`
 // id format so they don't break with the new CID-based schema.
@@ -39,12 +40,13 @@ function useSavedLeadsMigration() {
     }
   }, []);
 }
+import { lazy, Suspense } from "react";
 import Index from "./pages/Index.tsx";
 import Dashboard from "./pages/Dashboard.tsx";
 import SearchHistory from "./pages/SearchHistory.tsx";
 import Settings from "./pages/Settings.tsx";
 import Billing from "./pages/Billing.tsx";
-import SystemAdmin from "./pages/SystemAdmin.tsx";
+const SystemAdmin = lazy(() => import("./pages/SystemAdmin.tsx"));
 import NotFound from "./pages/NotFound.tsx";
 
 const queryClient = new QueryClient();
@@ -64,15 +66,17 @@ function AuthGate() {
 
   return (
     <AppLayout>
-      <Routes>
-        <Route path="/" element={<Index />} />
-        <Route path="/search-history" element={<SearchHistory />} />
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/settings" element={<Settings />} />
-        <Route path="/billing" element={<Billing />} />
-        <Route path="/admin" element={<ProtectedAdminRoute element={<SystemAdmin />} />} />
-        <Route path="*" element={<NotFound />} />
-      </Routes>
+      <ErrorBoundary>
+        <Routes>
+          <Route path="/" element={<Index />} />
+          <Route path="/search-history" element={<SearchHistory />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/billing" element={<Billing />} />
+          <Route path="/admin" element={<ProtectedAdminRoute element={<Suspense fallback={null}><SystemAdmin /></Suspense>} />} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </ErrorBoundary>
     </AppLayout>
   );
 }

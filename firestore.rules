@@ -50,7 +50,19 @@ service cloud.firestore {
       }
 
       match /savedLeads/{cid} {
-        allow read, write: if hasUserRole() && request.auth.uid == uid;
+        allow read: if hasUserRole() && request.auth.uid == uid;
+        allow delete: if hasUserRole() && request.auth.uid == uid;
+
+        function validLeadData() {
+          let d = request.resource.data;
+          return d.notes is string && d.notes.size() <= 2000
+            && d.status in ["saved", "reached-out", "in-conversation", "proposal-sent", "won", "not-interested"]
+            && d.businessName is string && d.businessName.size() <= 200
+            && d.cid is string && d.cid.size() <= 50;
+        }
+
+        allow create: if hasUserRole() && request.auth.uid == uid && validLeadData();
+        allow update: if hasUserRole() && request.auth.uid == uid && validLeadData();
       }
     }
   }

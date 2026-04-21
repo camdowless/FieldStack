@@ -37,6 +37,24 @@ async function hitReport(token: string): Promise<{ status: number; body: string 
   return { status: res.status, body: JSON.stringify(await res.json().catch(() => ({}))) };
 }
 
+async function hitReportOversizedCid(token: string): Promise<{ status: number; body: string }> {
+  const res = await fetch("/api/report", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ cid: "x".repeat(51), businessName: "Test Biz", reason: "other" }),
+  });
+  return { status: res.status, body: JSON.stringify(await res.json().catch(() => ({}))) };
+}
+
+async function hitReportOversizedName(token: string): Promise<{ status: number; body: string }> {
+  const res = await fetch("/api/report", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ cid: "valid-cid", businessName: "x".repeat(201), reason: "other" }),
+  });
+  return { status: res.status, body: JSON.stringify(await res.json().catch(() => ({}))) };
+}
+
 async function hitBusinesses(token: string): Promise<{ status: number; body: string }> {
   const res = await fetch("/api/businesses", {
     method: "POST",
@@ -57,6 +75,8 @@ const TESTS: TestConfig[] = [
   { label: "Search", description: "limit: 3/min — fires 5 requests, expect 3 × 200 then 2 × 429", count: 5, fn: hitSearch },
   { label: "Submit Report", description: "limit: 10/min — fires 12 requests, expect 10 × 200 then 2 × 429", count: 12, fn: hitReport },
   { label: "Get Businesses by CIDs", description: "limit: 30/min — fires 32 requests, expect 30 × 200 then 2 × 429", count: 32, fn: hitBusinesses },
+  { label: "Report: oversized cid (51 chars)", description: "cid > 50 chars — expect 400", count: 1, fn: hitReportOversizedCid },
+  { label: "Report: oversized businessName (201 chars)", description: "businessName > 200 chars — expect 400", count: 1, fn: hitReportOversizedName },
 ];
 
 function StatusBadge({ status }: { status: number }) {

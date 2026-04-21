@@ -49,6 +49,14 @@
         "function": "getAdminStats"
       },
       {
+        "source": "/api/admin-reports",
+        "function": "getAdminReports"
+      },
+      {
+        "source": "/api/update-report-status",
+        "function": "updateReportStatus"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }
