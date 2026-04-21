@@ -11,6 +11,7 @@ import { recalculateBusinessRank, fetchGhostBusinesses } from "@/lib/api";
 import { useAdminStats } from "@/hooks/useAdminStats";
 import type { ApiBusiness } from "@/data/leadTypes";
 import { ShieldAlert, Database, Search, DollarSign, RefreshCw, Ghost, TrendingUp, Layers } from "lucide-react";
+import { DevRateLimitTester } from "@/components/DevRateLimitTester";
 
 function StatCard({ icon: Icon, label, value, sub }: { icon: React.ElementType; label: string; value: string; sub?: string }) {
   return (
@@ -141,6 +142,7 @@ export default function SystemAdmin() {
       {/* ── Dev Tools ───────────────────────────────────────────────────── */}
       <section>
         <h2 className="text-base font-semibold mb-3">Dev Tools</h2>
+        <div className="space-y-4">
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Admin Operations</CardTitle>
@@ -218,6 +220,8 @@ export default function SystemAdmin() {
             </div>
           </CardContent>
         </Card>
+        <DevRateLimitTester />
+        </div>
       </section>
     </div>
   );

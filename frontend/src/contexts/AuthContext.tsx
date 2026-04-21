@@ -44,6 +44,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signUp = async (email: string, password: string) => {
     await createUserWithEmailAndPassword(auth, email, password);
+    // Immediately sign out after account creation — the user should verify
+    // their email and then sign in explicitly. This also ensures onUserCreate
+    // has time to set the role claim before their first authenticated session.
+    await signOut(auth);
   };
 
   const logout = async () => {

@@ -31,7 +31,7 @@ const MAX_RADIUS: Radius = 50;
 const MAX_RADIUS_INDEX = RADIUS_STEPS.indexOf(MAX_RADIUS);
 const RESULT_LIMIT_OPTIONS = [25, 50, 100, 200] as const;
 
-type ViewState = "empty" | "loading" | "results" | "error";
+type ViewState = "empty" | "loading" | "results" | "error" | "rate_limited";
 
 function relativeTime(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
@@ -84,6 +84,7 @@ const Index = () => {
       case "running": return "loading";
       case "completed": return "results";
       case "failed": return "error";
+      case "rate_limited": return "rate_limited";
       case "cancelled": return "results";
       default: return "empty";
     }
@@ -173,6 +174,27 @@ const Index = () => {
     // Clear URL params (e.g. ?restore=...) and reset state
     setSearchParams({}, { replace: true });
   }, [setSearchParams, searchJob.reset]);
+
+  // Countdown timer for rate limit cooldown
+  const [countdown, setCountdown] = useState<number | null>(null);
+  useEffect(() => {
+    if (searchJob.status !== "rate_limited" || searchJob.retryAfter == null) {
+      setCountdown(null);
+      return;
+    }
+    setCountdown(searchJob.retryAfter);
+    const interval = setInterval(() => {
+      setCountdown((c) => {
+        if (c == null || c <= 1) {
+          clearInterval(interval);
+          searchJob.reset();
+          return null;
+        }
+        return c - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [searchJob.status, searchJob.retryAfter]);
 
   const recentSearches = firestoreSearches.slice(0, 5);
   const savedLeadsCount = fbStore.savedLeads.length;
@@ -369,6 +391,30 @@ const Index = () => {
             {progressMessage}
           </p>
           <Button variant="ghost" size="sm" className="mt-4" onClick={() => searchJob.cancelSearch()}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── RATE LIMITED STATE ──
+  if (viewState === "rate_limited") {
+    return (
+      <div className="p-6 flex items-center justify-center min-h-[80vh]">
+        <div className="w-full max-w-sm text-center">
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-amber-500/10 mx-auto mb-6">
+            <Clock className="h-8 w-8 text-amber-500" />
+          </div>
+          <h2 className="text-xl font-bold mb-2">Slow down a little</h2>
+          <p className="text-sm text-muted-foreground mb-6">
+            You've hit the search limit. Searches are expensive to run, so we cap them at 3 per minute.
+          </p>
+          <div className="text-4xl font-mono font-bold tabular-nums mb-2">
+            {countdown != null ? countdown : "—"}
+          </div>
+          <p className="text-xs text-muted-foreground mb-6">seconds until you can search again</p>
+          <Button variant="outline" size="sm" onClick={handleNewSearch}>
             Cancel
           </Button>
         </div>

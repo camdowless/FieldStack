@@ -23,10 +23,17 @@ const db = admin.firestore();
 db.settings({ ignoreUndefinedProperties: true });
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────
-// In production, lock this down to your Firebase Hosting domain.
-const ALLOWED_ORIGINS = process.env.CORS_ORIGIN
+// Set CORS_ORIGIN (comma-separated) in your Firebase environment before deploying:
+//   firebase functions:config:set app.cors_origin="https://your-app.web.app"
+// Omitting it in production will log a warning and deny all cross-origin requests.
+const ALLOWED_ORIGINS: string[] | false = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim())
-  : true; // `true` = allow all (dev convenience; override via env var in prod)
+  : (() => {
+      if (process.env.NODE_ENV === "production") {
+        console.warn("[CORS] CORS_ORIGIN is not set — all cross-origin requests will be blocked.");
+      }
+      return [];
+    })();
 
 const corsHandler = cors({ origin: ALLOWED_ORIGINS });
 
@@ -207,30 +214,50 @@ export function saveBusinessesToCache(businesses: ScoredBusiness[]): void {
   console.log(`[cache] saving ${toSave.length} businesses to Firestore`);
 }
 
-// ─── Rate Limiting (simple per-IP, in-memory) ────────────────────────────────
+// ─── Rate Limiting (Firestore-backed, per-user) ───────────────────────────────
+// Keyed by uid so limits are consistent across all function instances.
+// Each counter doc lives at: rateLimits/{uid}_{fn} and expires after the window.
 
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
 const RATE_LIMIT_WINDOW_MS = 60_000; // 1 minute
-const RATE_LIMIT_MAX = 10; // max requests per window per IP
 
-function isRateLimited(ip: string): boolean {
+/**
+ * Returns null if the request is allowed, or the resetAt timestamp (ms) if
+ * the user has exceeded `maxRequests` calls to `fnName` within the window.
+ */
+async function checkRateLimit(uid: string, fnName: string, maxRequests: number): Promise<number | null> {
+  const key = `${uid}_${fnName}`;
+  const ref = db.collection("rateLimits").doc(key);
   const now = Date.now();
-  const entry = rateLimitMap.get(ip);
-  if (!entry || now > entry.resetAt) {
-    rateLimitMap.set(ip, { count: 1, resetAt: now + RATE_LIMIT_WINDOW_MS });
-    return false;
+
+  try {
+    const resetAtMs = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists || snap.data()!.resetAt.toMillis() <= now) {
+        tx.set(ref, {
+          count: 1,
+          resetAt: Timestamp.fromMillis(now + RATE_LIMIT_WINDOW_MS),
+        });
+        return null;
+      }
+      const count: number = snap.data()!.count;
+      const resetAt: number = snap.data()!.resetAt.toMillis();
+      if (count >= maxRequests) return resetAt;
+      tx.update(ref, { count: count + 1 });
+      return null;
+    });
+    return resetAtMs;
+  } catch (err) {
+    console.error(`[rateLimit] Firestore error for uid=${uid} fn=${fnName}:`, err);
+    return null; // fail open
   }
-  entry.count++;
-  return entry.count > RATE_LIMIT_MAX;
 }
 
-// Periodically clean up stale entries to prevent memory leak
-setInterval(() => {
-  const now = Date.now();
-  for (const [ip, entry] of rateLimitMap) {
-    if (now > entry.resetAt) rateLimitMap.delete(ip);
-  }
-}, RATE_LIMIT_WINDOW_MS * 2);
+/** Send a 429 with Retry-After header and retryAfter seconds in the body. */
+function replyRateLimited(res: functions.Response, resetAtMs: number): void {
+  const retryAfter = Math.max(1, Math.ceil((resetAtMs - Date.now()) / 1000));
+  res.set("Retry-After", String(retryAfter));
+  res.status(429).json({ error: "Too many requests. Please wait a moment.", retryAfter });
+}
 
 // ─── DataForSEO Business Search ───────────────────────────────────────────────
 
@@ -299,7 +326,8 @@ export function buildScorerInput(
 
 export const onUserCreate = functions.auth.user().onCreate(async (user) => {
   await admin.auth().setCustomUserClaims(user.uid, { role: "user" });
-  await admin.auth().revokeRefreshTokens(user.uid);
+  // Do NOT revoke tokens here — the claim will be picked up on next natural
+  // token refresh. Revoking immediately after signup breaks the new user's session.
 });
 
 export const dataforseoBusinessSearch = functions
@@ -329,9 +357,9 @@ export const dataforseoBusinessSearch = functions
       });
 
       // ── Rate limiting ──
-      const clientIp = req.ip || req.headers["x-forwarded-for"] || "unknown";
-      if (isRateLimited(String(clientIp))) {
-        res.status(429).json({ error: "Too many requests. Please wait a moment." });
+      const rateLimitReset = await checkRateLimit(uid, "search", 3);
+      if (rateLimitReset !== null) {
+        replyRateLimited(res, rateLimitReset);
         return;
       }
 
@@ -1315,12 +1343,16 @@ export const getBusinessesByCids = functions.https.onRequest((req, res) => {
       return;
     }
 
+    let decodedToken: admin.auth.DecodedIdToken;
     try {
-      await verifyUserRole(req);
+      decodedToken = await verifyUserRole(req);
     } catch {
       res.status(401).json({ error: "Unauthorized. Please sign in." });
       return;
     }
+
+    const rlReset = await checkRateLimit(decodedToken.uid, "getBusinessesByCids", 30);
+    if (rlReset !== null) { replyRateLimited(res, rlReset); return; }
 
     const cids = req.body?.cids;
     if (!Array.isArray(cids) || cids.length === 0) {
@@ -1368,12 +1400,16 @@ export const getBusinessPhotos = functions.https.onRequest((req, res) => {
       return;
     }
 
+    let decodedToken: admin.auth.DecodedIdToken;
     try {
-      await verifyUserRole(req);
+      decodedToken = await verifyUserRole(req);
     } catch {
       res.status(401).json({ error: "Unauthorized. Please sign in." });
       return;
     }
+
+    const rlReset = await checkRateLimit(decodedToken.uid, "getBusinessPhotos", 60);
+    if (rlReset !== null) { replyRateLimited(res, rlReset); return; }
 
     const cid = req.query.cid as string | undefined;
     if (!cid || typeof cid !== "string") {
@@ -1547,7 +1583,10 @@ export const submitReport = functions.https.onRequest((req, res) => {
       return;
     }
 
-    const { cid, businessName, reason, details } = req.body ?? {};
+    const rlReset = await checkRateLimit(decodedToken.uid, "submitReport", 10);
+    if (rlReset !== null) { replyRateLimited(res, rlReset); return; }
+
+    const { cid, businessName, websiteUrl, reason, details } = req.body ?? {};
 
     if (!cid || typeof cid !== "string") {
       res.status(400).json({ error: "Missing or invalid field: cid" });
@@ -1566,10 +1605,16 @@ export const submitReport = functions.https.onRequest((req, res) => {
       return;
     }
 
+    if (websiteUrl !== undefined && websiteUrl !== null && typeof websiteUrl !== "string") {
+      res.status(400).json({ error: "websiteUrl must be a string" });
+      return;
+    }
+
     const reportRef = db.collection("reports").doc();
     await reportRef.set({
       cid,
       businessName,
+      websiteUrl: websiteUrl ?? null,
       reason,
       details: details ?? null,
       uid: decodedToken.uid,

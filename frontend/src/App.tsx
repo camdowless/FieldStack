@@ -10,6 +10,7 @@ import { useEffect } from "react";
 import { toast } from "sonner";
 import Login from "./pages/Login";
 import { ProtectedAdminRoute } from "@/components/ProtectedAdminRoute";
+import { DevRateLimitTester } from "@/components/DevRateLimitTester";
 
 // One-time migration: clear saved leads/searches that use the old `biz-XXX`
 // id format so they don't break with the new CID-based schema.

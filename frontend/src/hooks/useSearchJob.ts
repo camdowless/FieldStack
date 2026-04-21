@@ -13,7 +13,7 @@ import type { Business } from "@/data/mockBusinesses";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type JobStatus = "idle" | "creating" | "running" | "completed" | "failed" | "cancelled";
+export type JobStatus = "idle" | "creating" | "running" | "completed" | "failed" | "cancelled" | "rate_limited";
 
 export interface SearchJobProgress {
   analyzed: number;
@@ -27,6 +27,7 @@ export interface SearchJobState {
   results: Business[];
   error: string | null;
   cost: Record<string, number> | null;
+  retryAfter: number | null; // seconds until rate limit resets
 }
 
 export interface UseSearchJobReturn extends SearchJobState {
@@ -95,6 +96,7 @@ export function useSearchJob(): UseSearchJobReturn {
     results: [],
     error: null,
     cost: null,
+    retryAfter: null,
   });
 
   // Track listener unsubscribers
@@ -142,6 +144,7 @@ export function useSearchJob(): UseSearchJobReturn {
         results: [],
         error: null,
         cost: null,
+        retryAfter: null,
       });
 
       // Get auth token
@@ -165,6 +168,11 @@ export function useSearchJob(): UseSearchJobReturn {
 
         if (!res.ok) {
           const body = await res.json().catch(() => ({ error: res.statusText }));
+          if (res.status === 429) {
+            const retryAfter = typeof body?.retryAfter === "number" ? body.retryAfter : 60;
+            setState((s) => ({ ...s, status: "rate_limited", retryAfter }));
+            return;
+          }
           const msg = typeof body?.error === "string" ? body.error : `Search failed (${res.status})`;
           setState((s) => ({ ...s, status: "failed", error: msg }));
           return;
@@ -309,6 +317,7 @@ export function useSearchJob(): UseSearchJobReturn {
       results: [],
       error: null,
       cost: null,
+      retryAfter: null,
     });
   }, [teardown]);
 
