@@ -1,15 +1,46 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import {
   doc,
+  getDoc,
   collection,
   onSnapshot,
   query,
   where,
   type Unsubscribe,
 } from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
 import { firestore, auth } from "@/lib/firebase";
 import { normalizeBusiness, type ApiBusiness } from "@/data/leadTypes";
 import type { Business } from "@/data/mockBusinesses";
+
+// ─── Job persistence ───────────────────────────────────────────────────────────
+
+interface PersistedJob {
+  jobId: string;
+  keyword: string;
+  location: string;
+}
+
+const STORAGE_KEY = (uid: string) => `searchJob:${uid}`;
+
+function saveActiveJob(uid: string, data: PersistedJob) {
+  try { localStorage.setItem(STORAGE_KEY(uid), JSON.stringify(data)); } catch { /* storage unavailable */ }
+}
+
+function clearActiveJob(uid: string) {
+  try { localStorage.removeItem(STORAGE_KEY(uid)); } catch { /* storage unavailable */ }
+}
+
+function loadActiveJob(uid: string): PersistedJob | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY(uid));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    // Support legacy format where only a jobId string was stored
+    if (typeof parsed === "string") return { jobId: parsed, keyword: "", location: "" };
+    return parsed as PersistedJob;
+  } catch { return null; }
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -34,6 +65,8 @@ export interface UseSearchJobReturn extends SearchJobState {
   startSearch: (params: { keyword: string; location: string; radius?: number; limit?: number }) => Promise<void>;
   cancelSearch: () => Promise<void>;
   reset: () => void;
+  /** The params used for the active/rehydrated search, so the UI can restore labels. */
+  activeParams: { keyword: string; location: string } | null;
 }
 
 // ─── Pure helpers (exported for testing) ──────────────────────────────────────
@@ -99,6 +132,8 @@ export function useSearchJob(): UseSearchJobReturn {
     retryAfter: null,
   });
 
+  const [activeParams, setActiveParams] = useState<{ keyword: string; location: string } | null>(null);
+
   // Track listener unsubscribers
   const unsubJobRef = useRef<Unsubscribe | null>(null);
   const unsubResultsRef = useRef<Unsubscribe | null>(null);
@@ -109,7 +144,7 @@ export function useSearchJob(): UseSearchJobReturn {
   const localCountRef = useRef<number>(0);
   const completedRef = useRef(false);
 
-  const teardown = useCallback(() => {
+  const teardown = useCallback((uid?: string) => {
     unsubJobRef.current?.();
     unsubResultsRef.current?.();
     unsubJobRef.current = null;
@@ -117,20 +152,130 @@ export function useSearchJob(): UseSearchJobReturn {
     expectedCountRef.current = null;
     localCountRef.current = 0;
     completedRef.current = false;
+    if (uid) clearActiveJob(uid);
+    setActiveParams(null);
   }, []);
 
   // Teardown on unmount
-  useEffect(() => teardown, [teardown]);
+  useEffect(() => () => teardown(), [teardown]);
 
-  const maybeFinalize = useCallback(() => {
+  const maybeFinalize = useCallback((uid?: string) => {
     if (
       completedRef.current &&
       expectedCountRef.current != null &&
       localCountRef.current >= expectedCountRef.current
     ) {
-      teardown();
+      teardown(uid);
     }
   }, [teardown]);
+
+  // ── Attach Firestore listeners for a known jobId ──────────────────────────
+  const attachListeners = useCallback((jobId: string, uid: string) => {
+    // job doc listener
+    const jobDocRef = doc(firestore, "jobs", jobId);
+    unsubJobRef.current = onSnapshot(
+      jobDocRef,
+      (snap) => {
+        if (!snap.exists()) return;
+        const d = snap.data();
+        const jobStatus = d.status as "running" | "completed" | "failed" | "cancelled";
+        const progress = d.progress
+          ? { analyzed: d.progress.analyzed ?? 0, total: d.progress.total ?? 0 }
+          : null;
+
+        console.log(`[useSearchJob] Job status: ${jobStatus}, progress:`, progress, `resultCount: ${d.resultCount}`);
+
+        if (jobStatus === "completed") {
+          const resultCount = typeof d.resultCount === "number" ? d.resultCount : 0;
+          const cost = d.cost ?? null;
+          expectedCountRef.current = resultCount;
+          completedRef.current = true;
+          setState((s) => ({ ...s, status: "completed", progress, cost }));
+          maybeFinalize(uid);
+        } else if (jobStatus === "failed") {
+          setState((s) => ({ ...s, status: "failed", progress, error: d.error || "An unexpected error occurred." }));
+          teardown(uid);
+        } else if (jobStatus === "cancelled") {
+          setState((s) => ({ ...s, status: "cancelled", progress }));
+          teardown(uid);
+        } else {
+          setState((s) => ({ ...s, status: "running", progress }));
+        }
+      },
+      (err) => {
+        console.error("[useSearchJob] Job doc listener error:", err);
+        setState((s) => ({ ...s, status: "failed", error: "Lost connection to search job. Please try again." }));
+        teardown(uid);
+      },
+    );
+
+    // results subcollection listener
+    const resultsColRef = collection(firestore, "jobs", jobId, "results");
+    const resultsQuery = query(resultsColRef, where("uid", "==", uid));
+    unsubResultsRef.current = onSnapshot(
+      resultsQuery,
+      (snap) => {
+        const businesses: Business[] = [];
+        snap.forEach((docSnap) => {
+          businesses.push(normalizeBusiness(docSnap.data() as ApiBusiness));
+        });
+        const sorted = sortByScoreDesc(businesses);
+        localCountRef.current = sorted.length;
+        console.log(`[useSearchJob] Results snapshot: ${sorted.length} businesses received`);
+        setState((s) => ({ ...s, results: sorted }));
+        maybeFinalize(uid);
+      },
+      (err) => {
+        console.error("[useSearchJob] Results listener error:", err);
+        setState((s) => ({ ...s, status: "failed", error: "Lost connection to search results. Please try again." }));
+        teardown(uid);
+      },
+    );
+  }, [teardown, maybeFinalize]);
+
+  // ── Rehydrate in-progress job after page refresh ──────────────────────────
+  useEffect(() => {
+    // Wait for Firebase auth to resolve, then check localStorage for a saved job
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (!user) return;
+      const saved = loadActiveJob(user.uid);
+      if (!saved) return;
+
+      // Force-refresh the token so role claims are present before the Firestore read
+      try {
+        await user.getIdToken();
+      } catch (err) {
+        console.warn("[useSearchJob] Token refresh failed, skipping rehydration:", err);
+        return;
+      }
+
+      // Peek at the job doc to decide what to do
+      try {
+        const snap = await getDoc(doc(firestore, "jobs", saved.jobId));
+        if (!snap.exists()) {
+          clearActiveJob(user.uid);
+          return;
+        }
+        const d = snap.data();
+        const jobStatus = d.status as string;
+
+        if (jobStatus === "running") {
+          // Job is still going — reattach listeners and restore UI state
+          console.log(`[useSearchJob] Rehydrating in-progress job: ${saved.jobId}`);
+          setState((s) => ({ ...s, jobId: saved.jobId, status: "running" }));
+          setActiveParams({ keyword: saved.keyword, location: saved.location });
+          attachListeners(saved.jobId, user.uid);
+        } else {
+          // Job already finished while we were away — just clear storage
+          clearActiveJob(user.uid);
+        }
+      } catch (err) {
+        console.warn("[useSearchJob] Rehydration check failed:", err);
+        clearActiveJob(user.uid);
+      }
+    });
+    return unsub;
+  }, [attachListeners]);
 
   const startSearch = useCallback(
     async (params: { keyword: string; location: string; radius?: number; limit?: number }) => {
@@ -193,99 +338,20 @@ export function useSearchJob(): UseSearchJobReturn {
 
       console.log(`[useSearchJob] Job created: ${jobId}, setting up listeners`);
 
-      // ── Set up job doc listener ──
-      const jobDocRef = doc(firestore, "jobs", jobId);
-      unsubJobRef.current = onSnapshot(
-        jobDocRef,
-        (snap) => {
-          if (!snap.exists()) return;
-          const d = snap.data();
-          const jobStatus = d.status as "running" | "completed" | "failed" | "cancelled";
-          const progress = d.progress
-            ? { analyzed: d.progress.analyzed ?? 0, total: d.progress.total ?? 0 }
-            : null;
-
-          console.log(`[useSearchJob] Job status: ${jobStatus}, progress:`, progress, `resultCount: ${d.resultCount}`);
-
-          if (jobStatus === "completed") {
-            const resultCount = typeof d.resultCount === "number" ? d.resultCount : 0;
-            const cost = d.cost ?? null;
-            expectedCountRef.current = resultCount;
-            completedRef.current = true;
-
-            setState((s) => ({
-              ...s,
-              status: "completed",
-              progress,
-              cost,
-            }));
-
-            // Check if results already caught up
-            maybeFinalize();
-          } else if (jobStatus === "failed") {
-            setState((s) => ({
-              ...s,
-              status: "failed",
-              progress,
-              error: d.error || "An unexpected error occurred.",
-            }));
-            teardown();
-          } else if (jobStatus === "cancelled") {
-            setState((s) => ({ ...s, status: "cancelled", progress }));
-            teardown();
-          } else {
-            // still running
-            setState((s) => ({ ...s, status: "running", progress }));
-          }
-        },
-        (err) => {
-          console.error("[useSearchJob] Job doc listener error:", err);
-          setState((s) => ({
-            ...s,
-            status: "failed",
-            error: "Lost connection to search job. Please try again.",
-          }));
-          teardown();
-        },
-      );
-
-      // ── Set up results subcollection listener ──
-      const resultsColRef = collection(firestore, "jobs", jobId, "results");
       const uid = auth.currentUser?.uid;
-      const resultsQuery = uid
-        ? query(resultsColRef, where("uid", "==", uid))
-        : resultsColRef;
-      unsubResultsRef.current = onSnapshot(
-        resultsQuery,
-        (snap) => {
-          const businesses: Business[] = [];
-          snap.forEach((docSnap) => {
-            const data = docSnap.data() as ApiBusiness;
-            businesses.push(normalizeBusiness(data));
-          });
+      if (!uid) {
+        setState((s) => ({ ...s, status: "failed", error: "Authentication lost. Please sign in and try again." }));
+        teardown();
+        return;
+      }
 
-          const sorted = sortByScoreDesc(businesses);
-          localCountRef.current = sorted.length;
+      // Persist so a refresh can rehydrate
+      saveActiveJob(uid, { jobId, keyword: params.keyword, location: params.location });
+      setActiveParams({ keyword: params.keyword, location: params.location });
 
-          console.log(`[useSearchJob] Results snapshot: ${sorted.length} businesses received`);
-
-          setState((s) => ({ ...s, results: sorted }));
-
-          // If job already completed, check convergence
-          maybeFinalize();
-        },
-        (err) => {
-          console.error("[useSearchJob] Results listener error:", err);
-          setState((s) => ({
-            ...s,
-            status: "failed",
-            error: "Lost connection to search results. Please try again.",
-          }));
-          teardown();
-        },
-      );
+      attachListeners(jobId, uid);
     },
-    [teardown, maybeFinalize],
+    [teardown, attachListeners],
   );
 
   const cancelSearch = useCallback(async () => {
@@ -309,7 +375,9 @@ export function useSearchJob(): UseSearchJobReturn {
   }, [state.jobId]);
 
   const reset = useCallback(() => {
-    teardown();
+    const uid = auth.currentUser?.uid;
+    teardown(uid ?? undefined);
+    setActiveParams(null);
     setState({
       jobId: null,
       status: "idle",
@@ -323,6 +391,7 @@ export function useSearchJob(): UseSearchJobReturn {
 
   return {
     ...state,
+    activeParams,
     startSearch,
     cancelSearch,
     reset,

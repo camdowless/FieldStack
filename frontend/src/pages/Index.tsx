@@ -144,7 +144,18 @@ const Index = () => {
     setForceEmpty(false);
   }, [selectedCategory, location, radius, resultLimit, searchJob.startSearch]);
 
-  // Reset all search state when navigating to this page without a restore param
+  // When the hook rehydrates a job (page refresh), mirror params into local
+  // form state and clear forceEmpty so the results view is shown.
+  const prevActiveParamsRef = useRef(searchJob.activeParams);
+  useEffect(() => {
+    if (searchJob.activeParams && !prevActiveParamsRef.current) {
+      const { keyword, location: loc } = searchJob.activeParams;
+      setSelectedCategory(keyword === "businesses" ? "all" : keyword);
+      setLocation(loc);
+      setForceEmpty(false);
+    }
+    prevActiveParamsRef.current = searchJob.activeParams;
+  }, [searchJob.activeParams]);
   // (e.g. clicking "Lead Search" in sidebar or after logout/login)
   const prevRestoreRef = useRef(searchParams.get("restore"));
   useEffect(() => {

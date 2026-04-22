@@ -11,31 +11,28 @@ import { toast } from "@/hooks/use-toast";
 import { recalculateBusinessRank, fetchGhostBusinesses } from "@/lib/api";
 import { useAdminStats } from "@/hooks/useAdminStats";
 import type { ApiBusiness } from "@/data/leadTypes";
-import { ShieldAlert, Database, Search, DollarSign, RefreshCw, Ghost, TrendingUp, Layers, Flag } from "lucide-react";
+import { ShieldAlert, RefreshCw, Ghost, Flag } from "lucide-react";
 import { DevRateLimitTester } from "@/components/DevRateLimitTester";
 import { ReportReviewTab } from "@/components/ReportReviewTab";
 
-function StatCard({ icon: Icon, label, value, sub }: { icon: React.ElementType; label: string; value: string; sub?: string }) {
-  return (
-    <Card>
-      <CardContent className="pt-6">
-        <div className="flex items-start gap-3">
-          <div className="p-2 rounded-lg bg-primary/10">
-            <Icon className="h-5 w-5 text-primary" />
-          </div>
-          <div>
-            <p className="text-sm text-muted-foreground">{label}</p>
-            <p className="text-2xl font-bold tabular-nums">{value}</p>
-            {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
+// Default filter thresholds (mirrors usePreferences DEFAULTS)
+const DEFAULT_LEGITIMACY_MIN = 35;
+const DEFAULT_OPPORTUNITY_MIN = 25;
 
 function fmt$(n: number) { return n === 0 ? "$0.0000" : `$${n.toFixed(4)}`; }
 function fmtN(n: number) { return n.toLocaleString(); }
+
+function StatRow({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <div className="flex items-baseline justify-between py-2.5 border-b last:border-0">
+      <div className="flex items-baseline gap-2">
+        <span className="text-sm">{label}</span>
+        {sub && <span className="text-xs text-muted-foreground">{sub}</span>}
+      </div>
+      <span className="font-mono text-sm font-medium tabular-nums">{value}</span>
+    </div>
+  );
+}
 
 export default function SystemAdmin() {
   const {
@@ -56,7 +53,8 @@ export default function SystemAdmin() {
     } catch (err) {
       toast({ title: "Recalculation failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
     } finally {
-      setRecalculating(false); }
+      setRecalculating(false);
+    }
   };
 
   const handleLoadGhosts = async () => {
@@ -73,13 +71,27 @@ export default function SystemAdmin() {
 
   const lastUpdatedStr = lastUpdated
     ? (() => {
-        // Firestore timestamp can come back as { seconds } or { _seconds } or an ISO string
         const ts = lastUpdated as unknown as { seconds?: number; _seconds?: number } | string;
         const secs = typeof ts === "string" ? Date.parse(ts) / 1000 : (ts.seconds ?? ts._seconds ?? 0);
         const d = new Date(secs * 1000);
         return isNaN(d.getTime()) ? null : d.toLocaleString();
       })()
     : null;
+
+  // Derived cost metrics
+  const freshCount = breakdown.totalFreshBusinesses;
+  const avgCostPerFreshBusiness = freshCount > 0
+    ? (breakdown.totalBusinessSearch + breakdown.totalInstantPages + breakdown.totalLighthouse) / freshCount
+    : 0;
+
+  // Avg cost per qualifying lead (businesses passing default legitimacy + opportunity filters)
+  // We don't have per-business filter data server-side, so we approximate:
+  // avgResultsPerSearch already reflects all returned businesses; we use the ratio of
+  // fresh businesses to total results as a proxy for fresh-fetch rate, then apply
+  // the filter pass-rate assumption. Since we can't filter server-side here, we surface
+  // the raw avg cost per fresh business and note the filter thresholds used.
+  const totalFreshCost = breakdown.totalBusinessSearch + breakdown.totalInstantPages + breakdown.totalLighthouse;
+  const avgCostPerLead = totalResultCount > 0 ? totalFreshCost / totalResultCount : 0;
 
   return (
     <div className="p-6 max-w-5xl space-y-6">
@@ -102,52 +114,76 @@ export default function SystemAdmin() {
         </TabsList>
 
         {/* ── Overview tab ─────────────────────────────────────────────── */}
-        <TabsContent value="overview" className="space-y-8 mt-6">
+        <TabsContent value="overview" className="space-y-6 mt-6">
           <section>
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-4">
               <h2 className="text-base font-semibold">Pricing Tracker</h2>
               {lastUpdatedStr && <span className="text-xs text-muted-foreground">Last updated {lastUpdatedStr}</span>}
             </div>
 
             {loading ? (
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                {Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-28 rounded-xl" />)}
+              <div className="space-y-2">
+                {Array.from({ length: 10 }).map((_, i) => <Skeleton key={i} className="h-9 rounded-md" />)}
               </div>
             ) : error ? (
               <p className="text-sm text-destructive">Failed to load stats: {error}</p>
             ) : (
-              <>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
-                  <StatCard icon={Search} label="Total Searches" value={fmtN(totalSearches)} sub="all users, all time" />
-                  <StatCard icon={Layers} label="Total Results" value={fmtN(totalResultCount)} sub="businesses analyzed" />
-                  <StatCard icon={Database} label="Businesses Indexed" value={fmtN(totalBusinessesIndexed)} sub="in Firestore cache" />
-                  <StatCard icon={DollarSign} label="Total DFS Cost" value={fmt$(totalDfsCost)} sub="all time" />
-                  <StatCard icon={TrendingUp} label="Avg Cost / Search" value={fmt$(avgCostPerSearch)} sub="DataForSEO API" />
-                  <StatCard icon={TrendingUp} label="Avg Results / Search" value={avgResultsPerSearch > 0 ? avgResultsPerSearch.toFixed(1) : "—"} sub="businesses per search" />
+              <div className="space-y-6">
+                {/* Volume */}
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Volume</p>
+                  <div className="rounded-lg border px-4">
+                    <StatRow label="Total searches" value={fmtN(totalSearches)} sub="all users, all time" />
+                    <StatRow label="Total results" value={fmtN(totalResultCount)} sub="businesses analyzed" />
+                    <StatRow label="Businesses indexed" value={fmtN(totalBusinessesIndexed)} sub="in Firestore cache" />
+                    <StatRow label="Fresh fetches" value={fmtN(freshCount)} sub="not from cache" />
+                    <StatRow label="Cached hits" value={fmtN(breakdown.totalCachedBusinesses)} />
+                    <StatRow label="Avg results / search" value={avgResultsPerSearch > 0 ? avgResultsPerSearch.toFixed(1) : "—"} />
+                  </div>
                 </div>
 
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-sm font-medium">Cost Breakdown</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
-                      {[
-                        { label: "Business Search", value: fmt$(breakdown.totalBusinessSearch) },
-                        { label: "Instant Pages", value: fmt$(breakdown.totalInstantPages) },
-                        { label: "Lighthouse", value: fmt$(breakdown.totalLighthouse) },
-                        { label: "Cached Hits", value: fmtN(breakdown.totalCachedBusinesses) },
-                        { label: "Fresh Fetches", value: fmtN(breakdown.totalFreshBusinesses) },
-                      ].map(({ label, value }) => (
-                        <div key={label}>
-                          <p className="text-muted-foreground text-xs">{label}</p>
-                          <p className="font-mono font-medium tabular-nums">{value}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              </>
+                {/* API Costs */}
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">API Costs (DataForSEO)</p>
+                  <div className="rounded-lg border px-4">
+                    <StatRow label="Total spend" value={fmt$(totalDfsCost)} sub="all time" />
+                    <StatRow label="Business search" value={fmt$(breakdown.totalBusinessSearch)} />
+                    <StatRow label="Instant pages" value={fmt$(breakdown.totalInstantPages)} />
+                    <StatRow label="Lighthouse" value={fmt$(breakdown.totalLighthouse)} />
+                    <StatRow label="Avg cost / search" value={fmt$(avgCostPerSearch)} />
+                  </div>
+                </div>
+
+                {/* Unit Economics */}
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1">Unit Economics</p>
+                  <div className="rounded-lg border px-4">
+                    <StatRow
+                      label="Avg cost / fresh business"
+                      value={fmt$(avgCostPerFreshBusiness)}
+                      sub="business search + instant pages + lighthouse"
+                    />
+                    <StatRow
+                      label="Avg cost / result (all)"
+                      value={fmt$(avgCostPerLead)}
+                      sub="total fresh API cost ÷ total results"
+                    />
+                    <StatRow
+                      label="Avg cost / qualifying lead"
+                      value={avgCostPerLead > 0 && avgResultsPerSearch > 0
+                        ? (() => {
+                            // Estimate: assume ~50% of results pass default filters
+                            // (legitimacy ≥ 35, opportunity ≥ 25). This is a rough baseline.
+                            const estimatedPassRate = 0.5;
+                            return fmt$(avgCostPerLead / estimatedPassRate);
+                          })()
+                        : "—"
+                      }
+                      sub={`legitimacy ≥ ${DEFAULT_LEGITIMACY_MIN}, opportunity ≥ ${DEFAULT_OPPORTUNITY_MIN} (est. 50% pass rate)`}
+                    />
+                  </div>
+                </div>
+              </div>
             )}
           </section>
         </TabsContent>
