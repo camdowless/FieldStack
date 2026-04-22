@@ -10,6 +10,71 @@ import {
 
 const DFS_BASE = "https://api.dataforseo.com/v3";
 
+// ─── URL Normalisation ────────────────────────────────────────────────────────
+
+const TRACKING_PARAMS = new Set([
+  "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
+  "fbclid", "gclid", "mc_cid", "mc_eid", "msclkid", "dclid", "yclid",
+]);
+
+/**
+ * Hosted-platform subdomains that must NOT have a www. prefix.
+ * GBP sometimes stores them as www.<name>.platform.com which breaks TLS.
+ */
+const HOSTED_PLATFORM_APEXES = [
+  "wordpress.com",
+  "blogspot.com",
+  "weebly.com",
+  "wixsite.com",
+  "squarespace.com",
+  "godaddysites.com",
+  "jimdo.com",
+  "site123.me",
+];
+
+/**
+ * Normalise a raw GBP URL before any network call.
+ * - Strips tracking params
+ * - Upgrades http → https
+ * - Removes www. prefix from hosted-platform subdomains (e.g. www.foo.wordpress.com → foo.wordpress.com)
+ * Returns the cleaned URL string.
+ */
+export function normalizeUrl(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return raw; // unparseable — return as-is, let the caller handle it
+  }
+
+  // Strip tracking params
+  for (const key of [...url.searchParams.keys()]) {
+    if (TRACKING_PARAMS.has(key)) url.searchParams.delete(key);
+  }
+
+  // Upgrade scheme to https
+  url.protocol = "https:";
+
+  // Fix www.<name>.<platform> → <name>.<platform>
+  const hostname = url.hostname;
+  for (const apex of HOSTED_PLATFORM_APEXES) {
+    // matches www.<anything>.<apex> — the www. is the extra level
+    if (hostname.startsWith("www.") && hostname.endsWith("." + apex)) {
+      const withoutWww = hostname.slice(4); // strip "www."
+      // Only strip if the result is exactly <name>.<apex> (two parts + apex)
+      const parts = withoutWww.split(".");
+      const apexParts = apex.split(".");
+      if (parts.length === apexParts.length + 1) {
+        url.hostname = withoutWww;
+      }
+      break;
+    }
+  }
+
+  // Remove trailing ? if no params remain
+  return url.toString().replace(/\?$/, "");
+}
+
 const AD_PIXEL_DOMAINS = [
   "googletagmanager.com",
   "google-analytics.com",
@@ -536,11 +601,11 @@ const FETCH_ONE_PAGE_TIMEOUT_MS = 25_000;
 async function fetchOnePage(
   url: string,
   authHeader: string,
-  opts: { switchPool?: boolean; returnDespiteTimeout?: boolean } = {}
+  opts: { switchPool?: boolean; returnDespiteTimeout?: boolean; timeoutMs?: number } = {}
 ): Promise<FetchOnePageResult> {
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), FETCH_ONE_PAGE_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? FETCH_ONE_PAGE_TIMEOUT_MS);
     let response: Response;
     try {
       response = await fetch(`${DFS_BASE}/on_page/instant_pages`, {
@@ -610,38 +675,50 @@ function shouldRetry(result: FetchOnePageResult): boolean {
   return false;
 }
 
-const HEAD_CHECK_TIMEOUT_MS = 7_000;
+const HEAD_CHECK_TIMEOUT_MS = 12_000;
 
 /**
- * Quick liveness check via HEAD request. Returns false if the server is
- * unreachable (DNS failure, connection refused, SSL error, or timeout).
- * A non-200 status still counts as "alive" — the server responded.
+ * HEAD liveness check. Returns:
+ *   alive=true   — server responded with any HTTP status (even 4xx/5xx)
+ *   alive=false  — only on hard DNS failure or connection-refused (ENOTFOUND, ECONNREFUSED)
+ *   alive=null   — ambiguous: timeout, TLS error, protocol error, or other TypeError.
+ *                  Caller should still attempt DFS rather than treating as dead.
  */
-async function isServerAlive(url: string): Promise<{ alive: boolean; errorCode: string | null }> {
+async function isServerAlive(
+  url: string
+): Promise<{ alive: boolean | null; errorCode: string | null }> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), HEAD_CHECK_TIMEOUT_MS);
     try {
       await fetch(url, { method: "HEAD", signal: controller.signal, redirect: "follow" });
-      return { alive: true, errorCode: null }; // any response = server is up
+      return { alive: true, errorCode: null };
     } finally {
       clearTimeout(timer);
     }
   } catch (err) {
-    const code = err instanceof Error
-      ? ((err as NodeJS.ErrnoException).code ?? (err.name === "AbortError" ? "ETIMEDOUT" : err.name) ?? "UNKNOWN")
-      : "UNKNOWN";
-    return { alive: false, errorCode: String(code) };
+    const nodeCode = (err as NodeJS.ErrnoException).code ?? null;
+    const errName = err instanceof Error ? err.name : "UNKNOWN";
+    const code = nodeCode ?? (errName === "AbortError" ? "ETIMEDOUT" : errName) ?? "UNKNOWN";
+
+    // Hard failures: DNS not found or connection explicitly refused.
+    // These are strong evidence the server doesn't exist.
+    if (nodeCode === "ENOTFOUND" || nodeCode === "ECONNREFUSED") {
+      return { alive: false, errorCode: code };
+    }
+
+    // Everything else (timeout, TLS error, protocol downgrade TypeError, etc.)
+    // is ambiguous — the server may still be reachable by DFS.
+    return { alive: null, errorCode: String(code) };
   }
 }
 
-/** Resolve the final URL after redirects (e.g. no-www → www). Returns the original if it fails. */
+/** Resolve the final URL after all redirects. Always prefers the final target over the input. */
 async function resolveRedirect(url: string): Promise<string> {
   try {
     const res = await fetch(url, { method: "GET", redirect: "follow" });
     const final = res.url;
-    // Only use the resolved URL if it's meaningfully different (different host)
-    if (final && new URL(final).hostname !== new URL(url).hostname) {
+    if (final && final !== url) {
       console.log(`[resolveRedirect] ${url} → ${final}`);
       return final;
     }
@@ -660,23 +737,27 @@ export async function probeUrl(
   url: string,
   authHeader: string
 ): Promise<{ signals: HtmlSignals; cost: number; headErrorCode: string | null; dfsTaskStatusCode: number | null }> {
-  const crawlUrl = url.startsWith("http://") ? url.replace("http://", "https://") : url;
+  const crawlUrl = normalizeUrl(url);
 
   const { alive, errorCode: headErrorCode } = await isServerAlive(crawlUrl);
-  if (!alive) {
+  // Only skip DFS on a hard failure (ENOTFOUND / ECONNREFUSED).
+  // Timeout, TLS errors, TypeErrors are ambiguous — let DFS try.
+  if (alive === false) {
     return { signals: deadSiteSignals(url, null, "HEAD_FAIL"), cost: 0, headErrorCode, dfsTaskStatusCode: null };
   }
 
-  const result = await fetchOnePage(crawlUrl, authHeader, { returnDespiteTimeout: true });
+  const result = await fetchOnePage(crawlUrl, authHeader, { returnDespiteTimeout: true, timeoutMs: 12_000 });
   const cost = result.cost;
   const dfsTaskStatusCode = result.taskStatusCode;
 
   if (result.page === undefined) {
+    // No taskStatusCode = DFS network failure, not evidence of death
     const isTaskSuccess = dfsTaskStatusCode === 20000;
+    const noTaskCode = dfsTaskStatusCode === null;
     return {
-      signals: isTaskSuccess ? uncrawlableSignals(url) : deadSiteSignals(url, null, "DFS_PASS_1"),
+      signals: (isTaskSuccess || noTaskCode) ? uncrawlableSignals(url) : deadSiteSignals(url, null, "DFS_PASS_1"),
       cost,
-      headErrorCode: null,
+      headErrorCode: headErrorCode,
       dfsTaskStatusCode,
     };
   }
@@ -693,29 +774,25 @@ export async function fetchInstantPages(
   urls: string[],
   authHeader: string
 ): Promise<{ signals: HtmlSignals[]; cost: number }> {
-  // Normalize http:// → https:// before crawling. Most sites that have http://
-  // stored in Google Maps redirect to https:// anyway, and some crawlers/proxies
-  // fail on the redirect chain. We crawl https:// directly and fall back to the
-  // original URL only if https fails.
-  const crawlUrls = urls.map((url) =>
-    url.startsWith("http://") ? url.replace("http://", "https://") : url
-  );
+  // Normalise every URL: strip tracking params, upgrade to https, fix hosted-platform hostnames.
+  const crawlUrls = urls.map(normalizeUrl);
 
-  // HEAD pre-check: fast liveness test before spending DFS credits.
-  // Run all checks in parallel — each caps at HEAD_CHECK_TIMEOUT_MS.
+  // HEAD pre-check: fast liveness signal before spending DFS credits.
+  // alive=true  → server responded, proceed to DFS
+  // alive=null  → ambiguous (timeout, TLS, TypeError) → still proceed to DFS
+  // alive=false → hard DNS/connection failure → skip DFS, mark dead
   const aliveFlags = await Promise.all(crawlUrls.map((url) => isServerAlive(url)));
 
-  // Pre-populate results for confirmed-dead servers so we skip DFS entirely.
   const results: (HtmlSignals | null)[] = urls.map((url, i) => {
-    if (!aliveFlags[i].alive) {
-      console.log(`[fetchInstantPages] ${crawlUrls[i]} failed HEAD check — skipping DFS`);
+    if (aliveFlags[i].alive === false) {
+      console.log(`[fetchInstantPages] ${crawlUrls[i]} hard HEAD failure (${aliveFlags[i].errorCode}) — skipping DFS`);
       return deadSiteSignals(url, null, "HEAD_FAIL");
     }
     return null;
   });
 
-  // Only crawl URLs that passed the HEAD check.
-  const crawlIndices = urls.map((_, i) => i).filter((i) => aliveFlags[i].alive);
+  // Crawl everything that isn't a confirmed hard failure.
+  const crawlIndices = urls.map((_, i) => i).filter((i) => aliveFlags[i].alive !== false);
   if (crawlIndices.length === 0) {
     return { signals: results as HtmlSignals[], cost: 0 };
   }
@@ -734,11 +811,14 @@ export async function fetchInstantPages(
     if (shouldRetry(firstPass[j])) {
       retryIndices.push(i);
     } else {
-      // Pass the original url (not crawlUrl) so HtmlSignals.isHttps reflects
-      // the stored URL, but the actual crawl used the normalized https version.
       const sig = parseInstantPageItem(urls[i], firstPass[j].page);
       if (sig && sig.fetchFailed && !sig.deathStage) sig.deathStage = "DFS_PASS_1";
-      results[i] = sig;
+      // No taskStatusCode means DFS itself failed at the network level — not evidence of death.
+      if (sig === null && firstPass[j].taskStatusCode === null) {
+        results[i] = uncrawlableSignals(urls[i]);
+      } else {
+        results[i] = sig;
+      }
     }
   }
 
@@ -767,10 +847,11 @@ export async function fetchInstantPages(
 
       const signal = parseInstantPageItem(urls[i], retryResults[j].page);
       if (signal === null) {
-        // task 20000 = DFS reached the server but couldn't parse content → live but uncrawlable
         const isTaskSuccess = retryResults[j].taskStatusCode === 20000;
-        results[i] = isTaskSuccess ? uncrawlableSignals(urls[i]) : deadSiteSignals(urls[i], null, "DFS_PASS_2");
-        console.log(`[fetchInstantPages] ${crawlUrls[i]} ${isTaskSuccess ? "uncrawlable (task 20000, live)" : "dead"} after retry (taskCode=${retryResults[j].taskStatusCode})`);
+        // No taskStatusCode = DFS network failure, not evidence of death → uncrawlable
+        const noTaskCode = retryResults[j].taskStatusCode === null;
+        results[i] = (isTaskSuccess || noTaskCode) ? uncrawlableSignals(urls[i]) : deadSiteSignals(urls[i], null, "DFS_PASS_2");
+        console.log(`[fetchInstantPages] ${crawlUrls[i]} ${(isTaskSuccess || noTaskCode) ? "uncrawlable (live)" : "dead"} after retry (taskCode=${retryResults[j].taskStatusCode})`);
       } else {
         if (signal.fetchFailed && !signal.deathStage) signal.deathStage = "DFS_PASS_2";
         results[i] = signal;
@@ -792,10 +873,10 @@ export async function fetchInstantPages(
         totalCost += redirectResults[k].cost;
         const signal = parseInstantPageItem(urls[i], redirectResults[k].page);
         if (signal === null) {
-          // task 20000 after redirect resolution = server is live, DFS just can't crawl it
           const isTaskSuccess = redirectResults[k].taskStatusCode === 20000;
-          results[i] = isTaskSuccess ? uncrawlableSignals(urls[i]) : deadSiteSignals(urls[i], null, "DFS_PASS_3_NON_20000");
-          console.log(`[fetchInstantPages] ${resolvedUrls[k]} ${isTaskSuccess ? "uncrawlable (task 20000, live)" : "dead"} after redirect resolution`);
+          const noTaskCode = redirectResults[k].taskStatusCode === null;
+          results[i] = (isTaskSuccess || noTaskCode) ? uncrawlableSignals(urls[i]) : deadSiteSignals(urls[i], null, "DFS_PASS_3_NON_20000");
+          console.log(`[fetchInstantPages] ${resolvedUrls[k]} ${(isTaskSuccess || noTaskCode) ? "uncrawlable (live)" : "dead"} after redirect resolution`);
         } else {
           if (signal.fetchFailed && !signal.deathStage) signal.deathStage = "DFS_PASS_3_NON_20000";
           results[i] = signal;

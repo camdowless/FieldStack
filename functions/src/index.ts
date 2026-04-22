@@ -1904,10 +1904,10 @@ export const auditDeadSites = functions
 
       const urls = entries.map((e) => e.url);
 
-      // Run probeUrl (HEAD + single DFS pass, no retries) with concurrency=5.
-      // Each probe is at most 7s HEAD + 25s DFS = ~32s. At concurrency 5,
-      // ceil(11/5)=3 rounds × 32s = ~96s worst-case — well within the 300s limit.
-      const CONCURRENCY = 5;
+      // Run probeUrl (HEAD + single DFS pass, no retries) with concurrency=8.
+      // Each probe: 12s HEAD + 12s DFS = ~24s max. At concurrency 8,
+      // ceil(11/8)=2 rounds × 24s = ~48s worst-case — within Firebase's 60s proxy limit.
+      const CONCURRENCY = 8;
       const probeResults: Array<{ signals: import("./types").HtmlSignals; cost: number; headErrorCode: string | null; dfsTaskStatusCode: number | null }> = new Array(urls.length);
       let totalCost = 0;
 
