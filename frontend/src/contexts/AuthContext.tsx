@@ -3,17 +3,23 @@ import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  signInWithPopup,
+  sendEmailVerification,
+  sendPasswordResetEmail,
   signOut,
   type User,
 } from "firebase/auth";
-import { auth } from "@/lib/firebase";
+import { auth, googleProvider } from "@/lib/firebase";
 
 interface AuthContextValue {
   user: User | null;
   role: "user" | "admin" | null;
   loading: boolean;
-  signIn: (email: string, password: string) => Promise<void>;
+  signIn: (email: string, password: string) => Promise<{ needsVerification?: boolean }>;
   signUp: (email: string, password: string) => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
+  sendPasswordReset: (email: string) => Promise<void>;
+  resendVerificationEmail: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -30,9 +36,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Uses cached token (up to 1hr stale). Role changes won't reflect in
         // the UI until the token refreshes naturally or the user reloads.
         // Backend enforces roles correctly regardless — this is UI-only lag.
-        // TODO: if non-developer client admins are added, switch to
-        // u.getIdTokenResult(true) to force-refresh on every auth state change,
-        // so promotions/demotions are reflected immediately without a reload.
         const tokenResult = await u.getIdTokenResult();
         setRole((tokenResult.claims.role as "user" | "admin") ?? null);
       } else {
@@ -44,26 +47,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return unsub;
   }, []);
 
-  const signIn = async (email: string, password: string) => {
+  const signIn = async (email: string, password: string): Promise<{ needsVerification?: boolean }> => {
     await signInWithEmailAndPassword(auth, email, password);
+    // EMAIL VERIFICATION DISABLED — re-enable by uncommenting the block below
+    // when you're ready to enforce verified emails on sign-in.
+    // if (!cred.user.emailVerified) {
+    //   return { needsVerification: true };
+    // }
+    return {};
+  };
+
+  const resendVerificationEmail = async () => {
+    // EMAIL VERIFICATION DISABLED — re-enable alongside the signIn check above
+    // if (auth.currentUser) {
+    //   await sendEmailVerification(auth.currentUser);
+    // }
   };
 
   const signUp = async (email: string, password: string) => {
     await createUserWithEmailAndPassword(auth, email, password);
-    // Immediately sign out after account creation — the user should verify
-    // their email and then sign in explicitly. This also ensures onUserCreate
-    // has time to set the role claim before their first authenticated session.
-    await signOut(auth);
+    // EMAIL VERIFICATION DISABLED — re-enable the lines below to send a
+    // verification email and force sign-out until the user confirms their address.
+    // await sendEmailVerification(cred.user);
+    // await signOut(auth);
+  };
+
+  const signInWithGoogle = async () => {
+    // Google accounts are pre-verified — no email verification needed
+    await signInWithPopup(auth, googleProvider);
+  };
+
+  const sendPasswordReset = async (email: string) => {
+    await sendPasswordResetEmail(auth, email);
   };
 
   const logout = async () => {
     await signOut(auth);
-    // Clear URL to root so stale params don't persist after re-login
     window.history.replaceState(null, "", "/");
   };
 
   return (
-    <AuthContext.Provider value={{ user, role, loading, signIn, signUp, logout }}>
+    <AuthContext.Provider value={{ user, role, loading, signIn, signUp, signInWithGoogle, sendPasswordReset, resendVerificationEmail, logout }}>
       {children}
     </AuthContext.Provider>
   );

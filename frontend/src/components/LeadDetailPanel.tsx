@@ -20,6 +20,7 @@ import {
   StickyNote, Images, Loader2, RefreshCw, ChevronDown,
 } from "lucide-react";
 import { ReportButton } from "@/components/ReportDialog";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useState, useRef, useEffect } from "react";
 import { toast } from "@/hooks/use-toast";
 import { Textarea } from "@/components/ui/textarea";
@@ -344,7 +345,10 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
                 </Badge>
               )}
             </div>
-            <h2 className="text-2xl font-extrabold">{business.name}</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-2xl font-extrabold">{business.name}</h2>
+              <ReportButton cid={business.id} businessName={business.name} websiteUrl={business.analysis.websiteUrl} />
+            </div>
           </div>
         </div>
 
@@ -408,8 +412,8 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {role === "admin" && (
+        {role === "admin" && (
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant="outline"
               size="sm"
@@ -423,9 +427,8 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
                 : <RefreshCw className="h-3.5 w-3.5" />}
               {isReevaluating ? "Re-evaluating..." : "Re-evaluate"}
             </Button>
-          )}
-          <ReportButton cid={business.id} businessName={business.name} websiteUrl={business.analysis.websiteUrl} />
-        </div>
+          </div>
+        )}
         {/* Notes */}
         {isSaved && (
           <Card>
@@ -485,6 +488,16 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
               <div className="flex items-start justify-between gap-4">
                 <CardTitle className="text-base flex items-center gap-2 shrink-0">
                   <Shield className="h-4 w-4" /> Legitimacy Score
+                  <TooltipProvider>
+                    <Tooltip delayDuration={0}>
+                      <TooltipTrigger asChild>
+                        <Info className="h-3.5 w-3.5 text-muted-foreground" />
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-[220px] text-xs">
+                        Based on review count, listing age, claimed status, website presence, HTTPS, and ad pixel detection. Higher = more trustworthy business.
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 </CardTitle>
                 <div className="flex items-center gap-2 shrink-0">
                   <span className={cn(
@@ -645,7 +658,18 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
             <CardHeader className="pb-1 cursor-pointer select-none" onClick={() => setOpportunityOpen((v) => !v)}>
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <CardTitle className="text-base">Opportunity Score</CardTitle>
+                  <CardTitle className="text-base">Opportunity Score
+                    <TooltipProvider>
+                      <Tooltip delayDuration={0}>
+                        <TooltipTrigger asChild>
+                          <Info className="h-3.5 w-3.5 text-muted-foreground inline-block ml-1.5 align-middle" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-[220px] text-xs">
+                          Measures how much room there is to improve this business's digital presence — missing website, weak SEO, no ads, poor reviews, and more all increase the score.
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </CardTitle>
                   <CardDescription>Higher score = more room to help</CardDescription>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -738,7 +762,6 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
                   <p className="text-xs text-muted-foreground">Breakdown available at 5+ reviews</p>
                 )}
                 <div className="pt-2 divide-y divide-border">
-                  <StatusRow icon={Star} label="Has Reviews" value={a.recentGoogleReviews ? `${business.reviewCount} reviews` : "None"} status={a.recentGoogleReviews ? "good" : "warning"} />
                   <StatusRow icon={CheckCircle2} label="Listing Claimed" value={business.isClaimed ? "Yes" : "No"} status={business.isClaimed ? "good" : "warning"} />
                 </div>
               </CardContent>

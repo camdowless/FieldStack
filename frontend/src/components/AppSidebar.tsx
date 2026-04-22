@@ -1,4 +1,4 @@
-import { Search, LayoutDashboard, Settings, LogOut, Sun, Sparkles, CreditCard, HelpCircle, History, ShieldAlert } from "lucide-react";
+import { Search, LayoutDashboard, Settings, LogOut, Sun, Sparkles, CreditCard, HelpCircle, History, ShieldAlert, PanelLeft } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -18,6 +18,7 @@ import {
   SidebarMenuItem,
   SidebarFooter,
   SidebarHeader,
+  SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -48,15 +49,18 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="p-4">
-        <div className="flex items-center gap-3 overflow-hidden">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg gradient-bg">
-            <Search className="h-5 w-5 text-white" />
+        <div className="flex items-center justify-between overflow-hidden">
+          <div className="flex items-center gap-3 overflow-hidden">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg gradient-bg">
+              <Search className="h-5 w-5 text-white" />
+            </div>
+            {!collapsed && (
+              <span className="text-lg font-bold tracking-tight whitespace-nowrap">
+                Lead<span className="gradient-text">Scout</span>
+              </span>
+            )}
           </div>
-          {!collapsed && (
-            <span className="text-lg font-bold tracking-tight whitespace-nowrap">
-              Lead<span className="gradient-text">Scout</span>
-            </span>
-          )}
+          <SidebarTrigger className="shrink-0" />
         </div>
       </SidebarHeader>
 
