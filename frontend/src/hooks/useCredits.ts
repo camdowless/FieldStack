@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 
-const STORAGE_KEY = "cozyleads-credits";
+const STORAGE_KEY = "gimmeleads-credits";
 const DEFAULT_MAX = 200;
 const DEFAULT_REMAINING = 142;
 

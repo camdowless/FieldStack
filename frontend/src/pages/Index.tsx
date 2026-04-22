@@ -236,15 +236,37 @@ const Index = () => {
     return (
       <div className="p-6 flex items-center justify-center min-h-[80vh]">
         <div className="w-full max-w-xl text-center">
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 mx-auto mb-6">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.8, y: -10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ duration: 0.4, ease: "easeOut" }}
+            className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 mx-auto mb-6"
+          >
             <Search className="h-8 w-8 text-primary" />
-          </div>
-          <h1 className="text-3xl font-bold mb-2">Find Your Next Client</h1>
-          <p className="text-muted-foreground mb-8">
+          </motion.div>
+          <motion.h1
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.1, ease: "easeOut" }}
+            className="text-3xl font-bold mb-2"
+          >
+            Find Your Next Client
+          </motion.h1>
+          <motion.p
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.18, ease: "easeOut" }}
+            className="text-muted-foreground mb-8"
+          >
             Search by zip code or city to discover businesses with weak online presence.
-          </p>
+          </motion.p>
 
-          <div className="flex flex-col gap-4">
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.26, ease: "easeOut" }}
+            className="flex flex-col gap-4"
+          >
             {/* Row 1: Category + Location */}
             <div className="flex flex-col sm:flex-row gap-3">
               <div className="flex-1 text-left">
@@ -336,10 +358,15 @@ const Index = () => {
                 Search Leads · 1 credit
               </Button>
             </div>
-          </div>
+          </motion.div>
 
           {recentSearches.length > 0 && (
-            <div className="mt-8 text-left">
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, delay: 0.38, ease: "easeOut" }}
+              className="mt-8 text-left"
+            >
               <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
                 Recent searches
               </h2>
@@ -361,20 +388,26 @@ const Index = () => {
                   </Link>
                 ))}
               </div>
-            </div>
+            </motion.div>
           )}
 
           {savedLeadsCount > 0 && (
-            <Link
-              to="/dashboard"
-              className="mt-3 flex items-center gap-3 p-3 rounded-md border bg-card hover:bg-muted/50 transition-colors text-left group"
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.4, delay: recentSearches.length > 0 ? 0.46 : 0.38, ease: "easeOut" }}
             >
-              <BookmarkIcon className="h-4 w-4 text-primary shrink-0" />
-              <span className="flex-1 text-sm font-medium">
-                Saved Leads — {savedLeadsCount} total
-              </span>
-              <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
-            </Link>
+              <Link
+                to="/dashboard"
+                className="mt-3 flex items-center gap-3 p-3 rounded-md border bg-card hover:bg-muted/50 transition-colors text-left group"
+              >
+                <BookmarkIcon className="h-4 w-4 text-primary shrink-0" />
+                <span className="flex-1 text-sm font-medium">
+                  Saved Leads — {savedLeadsCount} total
+                </span>
+                <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
+              </Link>
+            </motion.div>
           )}
         </div>
       </div>

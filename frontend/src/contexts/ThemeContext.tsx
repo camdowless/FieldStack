@@ -13,11 +13,11 @@ export const useTheme = () => useContext(ThemeContext);
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [theme, setTheme] = useState<ThemeMode>(() => {
-    return (localStorage.getItem("cozyleads-theme") as ThemeMode) || "light";
+    return (localStorage.getItem("gimmeleads-theme") as ThemeMode) || "light";
   });
 
   useEffect(() => {
-    localStorage.setItem("cozyleads-theme", theme);
+    localStorage.setItem("gimmeleads-theme", theme);
     document.documentElement.classList.remove("theme-light", "theme-gradient");
     document.documentElement.classList.add(`theme-${theme}`);
   }, [theme]);

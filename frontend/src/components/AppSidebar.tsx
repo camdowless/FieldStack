@@ -63,7 +63,7 @@ export function AppSidebar() {
                 <Search className="h-5 w-5 text-white" />
               </div>
               <span className="text-lg font-bold tracking-tight whitespace-nowrap">
-                Cozy<span className="gradient-text">Leads</span>
+                Gimme<span className="gradient-text">Leads</span>
               </span>
             </div>
             <SidebarTrigger />

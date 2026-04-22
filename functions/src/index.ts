@@ -737,7 +737,33 @@ export const processSearchJob = functions
       }
 
       // ── Step 4: Fetch Instant Pages for all websites ──
-      const websiteUrls = hasWebsite.map((b) => b.url!);
+      // Skip web analysis for businesses with a low legitimacy score — not worth the cost.
+      const LEGIT_SCORE_WEB_THRESHOLD = 30;
+      const lowLegitBusinesses: BusinessRaw[] = [];
+      const webEligible: BusinessRaw[] = [];
+      for (const b of hasWebsite) {
+        const input = buildScorerInput(b, { website: b.url });
+        const { legitimacyScore } = computeLegitimacy(input);
+        if (legitimacyScore < LEGIT_SCORE_WEB_THRESHOLD) {
+          lowLegitBusinesses.push(b);
+        } else {
+          webEligible.push(b);
+        }
+      }
+
+      // Score low-legit businesses without web signals and flush them now
+      if (lowLegitBusinesses.length > 0) {
+        console.log(`[Job_Processor] Job ${jobId}: skipping web analysis for ${lowLegitBusinesses.length} low-legit businesses`);
+        const scored = scoreNoWebsiteBatch(lowLegitBusinesses);
+        const written = await writeResultsBatch(jobId, uid, scored);
+        totalResultsWritten += written;
+        analyzed += lowLegitBusinesses.length;
+        await updateJobProgress(jobId, analyzed, totalBusinesses);
+        saveBusinessesToCache(scored);
+        cost.firestoreWrites += scored.filter((b) => b.cid).length;
+      }
+
+      const websiteUrls = webEligible.map((b) => b.url!);
       const { signals: htmlSignals, cost: ipCost } = await fetchInstantPages(websiteUrls, authHeader);
       cost.instantPages = ipCost;
 
@@ -752,7 +778,7 @@ export const processSearchJob = functions
       const parked: BusinessRaw[] = [];
       const nonParked: BusinessRaw[] = [];
 
-      for (const b of hasWebsite) {
+      for (const b of webEligible) {
         const url = b.url!;
         const sig = signalsMap.get(url);
         if (!sig) {
