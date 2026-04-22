@@ -1,4 +1,4 @@
-import { Search, LayoutDashboard, Settings, LogOut, Sun, Sparkles, CreditCard, HelpCircle, History, ShieldAlert, PanelLeft } from "lucide-react";
+import { Search, LayoutDashboard, Settings, LogOut, Sun, Sparkles, CreditCard, HelpCircle, History, ShieldAlert } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -6,7 +6,6 @@ import { useCredits } from "@/hooks/useCredits";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
-import { Progress } from "@/components/ui/progress";
 import {
   Sidebar,
   SidebarContent,
@@ -48,37 +47,54 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader className="p-4">
-        <div className="flex items-center justify-between overflow-hidden">
-          <div className="flex items-center gap-3 overflow-hidden">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg gradient-bg">
-              <Search className="h-5 w-5 text-white" />
-            </div>
-            {!collapsed && (
-              <span className="text-lg font-bold tracking-tight whitespace-nowrap">
-                Lead<span className="gradient-text">Scout</span>
-              </span>
-            )}
+
+      {/* ── Header ─────────────────────────────────────────── */}
+      <SidebarHeader className="px-3 py-3">
+        {collapsed ? (
+          // Collapsed: just the trigger centered
+          <div className="flex justify-center">
+            <SidebarTrigger />
           </div>
-          <SidebarTrigger className="shrink-0" />
-        </div>
+        ) : (
+          // Expanded: logo + trigger
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg gradient-bg">
+                <Search className="h-5 w-5 text-white" />
+              </div>
+              <span className="text-lg font-bold tracking-tight whitespace-nowrap">
+                Cozy<span className="gradient-text">Leads</span>
+              </span>
+            </div>
+            <SidebarTrigger />
+          </div>
+        )}
       </SidebarHeader>
 
-
-
+      {/* ── Nav ────────────────────────────────────────────── */}
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+          {!collapsed && <SidebarGroupLabel>Navigation</SidebarGroupLabel>}
           <SidebarGroupContent>
             <SidebarMenu>
               {navItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild>
-                    <NavLink to={item.url} end className="hover:bg-muted/50" activeClassName="bg-muted text-primary font-medium">
-                      <item.icon className="mr-2 h-4 w-4 shrink-0" />
-                      {!collapsed && <span>{item.title}</span>}
-                    </NavLink>
-                  </SidebarMenuButton>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <SidebarMenuButton asChild>
+                        <NavLink
+                          to={item.url}
+                          end
+                          className={collapsed ? "flex justify-center px-0" : "hover:bg-muted/50"}
+                          activeClassName="bg-muted text-primary font-medium"
+                        >
+                          <item.icon className={`h-4 w-4 shrink-0 ${!collapsed ? "mr-2" : ""}`} />
+                          {!collapsed && <span>{item.title}</span>}
+                        </NavLink>
+                      </SidebarMenuButton>
+                    </TooltipTrigger>
+                    {collapsed && <TooltipContent side="right">{item.title}</TooltipContent>}
+                  </Tooltip>
                 </SidebarMenuItem>
               ))}
             </SidebarMenu>
@@ -86,66 +102,97 @@ export function AppSidebar() {
         </SidebarGroup>
 
         <SidebarGroup>
-          <SidebarGroupLabel>Account</SidebarGroupLabel>
+          {!collapsed && <SidebarGroupLabel>Account</SidebarGroupLabel>}
           <SidebarGroupContent>
             <SidebarMenu>
-              {accountItems.filter(item => item.title !== "System Admin" || role === "admin").map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild>
-                    <NavLink to={item.url} end className="hover:bg-muted/50" activeClassName="bg-muted text-primary font-medium">
-                      <item.icon className="mr-2 h-4 w-4 shrink-0" />
-                      {!collapsed && <span>{item.title}</span>}
-                    </NavLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {accountItems
+                .filter((item) => item.title !== "System Admin" || role === "admin")
+                .map((item) => (
+                  <SidebarMenuItem key={item.title}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <SidebarMenuButton asChild>
+                          <NavLink
+                            to={item.url}
+                            end
+                            className={collapsed ? "flex justify-center px-0" : "hover:bg-muted/50"}
+                            activeClassName="bg-muted text-primary font-medium"
+                          >
+                            <item.icon className={`h-4 w-4 shrink-0 ${!collapsed ? "mr-2" : ""}`} />
+                            {!collapsed && <span>{item.title}</span>}
+                          </NavLink>
+                        </SidebarMenuButton>
+                      </TooltipTrigger>
+                      {collapsed && <TooltipContent side="right">{item.title}</TooltipContent>}
+                    </Tooltip>
+                  </SidebarMenuItem>
+                ))}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="p-3 overflow-hidden">
+      {/* ── Footer ─────────────────────────────────────────── */}
+      <SidebarFooter className="p-3">
         <Separator className="mb-3" />
-        <div className="flex items-center gap-3 px-2 mb-3 overflow-hidden">
-          <Avatar className="h-9 w-9 shrink-0">
-            <AvatarFallback className="gradient-bg text-white text-sm font-semibold">
-              {displayName[0]?.toUpperCase() ?? "?"}
-            </AvatarFallback>
-          </Avatar>
+
+        {/* Avatar row */}
+        <div className={`flex mb-3 ${collapsed ? "justify-center" : "items-center gap-3 px-2"}`}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Avatar className="h-8 w-8 shrink-0 cursor-default">
+                <AvatarFallback className="gradient-bg text-white text-sm font-semibold">
+                  {displayName[0]?.toUpperCase() ?? "?"}
+                </AvatarFallback>
+              </Avatar>
+            </TooltipTrigger>
+            {collapsed && <TooltipContent side="right">{displayName}</TooltipContent>}
+          </Tooltip>
           {!collapsed && (
             <div className="min-w-0">
               <p className="text-sm font-semibold truncate">{displayName}</p>
             </div>
           )}
         </div>
+
+        {/* Credits bar — expanded only */}
         {!collapsed && (
           <div className="px-2 mb-3">
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-xs font-medium text-muted-foreground">Credits</span>
-              <span className="text-xs font-medium tabular-nums">
-                {remaining} / {max}
-              </span>
+              <span className="text-xs font-medium tabular-nums">{remaining} / {max}</span>
             </div>
             <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
-              <div
-                className={`h-full transition-all ${barColor}`}
-                style={{ width: `${Math.min(100, pct)}%` }}
-              />
+              <div className={`h-full transition-all ${barColor}`} style={{ width: `${Math.min(100, pct)}%` }} />
             </div>
           </div>
         )}
+
+        {/* Theme toggle */}
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="sm" onClick={toggleTheme} className="w-full justify-start gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={toggleTheme}
+              className={`w-full gap-2 ${collapsed ? "justify-center px-0" : "justify-start"}`}
+            >
               {theme === "light" ? <Sparkles className="h-4 w-4 shrink-0" /> : <Sun className="h-4 w-4 shrink-0" />}
               {!collapsed && <span>{theme === "light" ? "Bold Theme" : "Light Theme"}</span>}
             </Button>
           </TooltipTrigger>
           {collapsed && <TooltipContent side="right">Toggle Theme</TooltipContent>}
         </Tooltip>
+
+        {/* Logout */}
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="sm" className="w-full justify-start gap-2 text-muted-foreground" onClick={logout}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={logout}
+              className={`w-full gap-2 text-muted-foreground ${collapsed ? "justify-center px-0" : "justify-start"}`}
+            >
               <LogOut className="h-4 w-4 shrink-0" />
               {!collapsed && <span>Log out</span>}
             </Button>
@@ -153,6 +200,7 @@ export function AppSidebar() {
           {collapsed && <TooltipContent side="right">Log out</TooltipContent>}
         </Tooltip>
       </SidebarFooter>
+
     </Sidebar>
   );
 }

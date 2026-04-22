@@ -17,18 +17,18 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 // id format so they don't break with the new CID-based schema.
 function useSavedLeadsMigration() {
   useEffect(() => {
-    const MIGRATION_KEY = "leadscout-migration-v1";
+    const MIGRATION_KEY = "cozyleads-migration-v1";
     if (localStorage.getItem(MIGRATION_KEY)) return;
     let cleared = false;
     try {
-      const saved = JSON.parse(localStorage.getItem("leadscout-saved") || "[]");
+      const saved = JSON.parse(localStorage.getItem("cozyleads-saved") || "[]");
       if (Array.isArray(saved) && saved.some((l: any) => l?.business?.id?.startsWith?.("biz-"))) {
-        localStorage.removeItem("leadscout-saved");
+        localStorage.removeItem("cozyleads-saved");
         cleared = true;
       }
-      const searches = JSON.parse(localStorage.getItem("leadscout-searches") || "[]");
+      const searches = JSON.parse(localStorage.getItem("cozyleads-searches") || "[]");
       if (Array.isArray(searches) && searches.some((s: any) => (s?.resultIds || []).some?.((id: string) => id?.startsWith?.("biz-")))) {
-        localStorage.removeItem("leadscout-searches");
+        localStorage.removeItem("cozyleads-searches");
         cleared = true;
       }
     } catch {

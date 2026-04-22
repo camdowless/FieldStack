@@ -91,7 +91,7 @@ export default function Login() {
             </div>
           </div>
           <CardTitle className="text-xl">
-            Lead<span className="gradient-text">Scout</span>
+            Cozy<span className="gradient-text">Leads</span>
           </CardTitle>
           <CardDescription>
             {view === "login" && "Sign in to your account"}

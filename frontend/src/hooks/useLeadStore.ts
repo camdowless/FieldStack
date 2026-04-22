@@ -43,30 +43,30 @@ interface LeadStore {
 
 export function useLeadStore(): LeadStore {
   const [savedLeads, setSavedLeads] = useState<SavedLead[]>(() => {
-    const stored = localStorage.getItem("leadscout-saved");
+    const stored = localStorage.getItem("cozyleads-saved");
     return stored ? JSON.parse(stored) : [];
   });
 
   const [searchHistory, setSearchHistory] = useState<string[]>(() => {
-    const stored = localStorage.getItem("leadscout-history");
+    const stored = localStorage.getItem("cozyleads-history");
     return stored ? JSON.parse(stored) : [];
   });
 
   const [savedSearches, setSavedSearches] = useState<SavedSearch[]>(() => {
-    const stored = localStorage.getItem("leadscout-searches");
+    const stored = localStorage.getItem("cozyleads-searches");
     return stored ? JSON.parse(stored) : [];
   });
 
   useEffect(() => {
-    localStorage.setItem("leadscout-saved", JSON.stringify(savedLeads));
+    localStorage.setItem("cozyleads-saved", JSON.stringify(savedLeads));
   }, [savedLeads]);
 
   useEffect(() => {
-    localStorage.setItem("leadscout-history", JSON.stringify(searchHistory));
+    localStorage.setItem("cozyleads-history", JSON.stringify(searchHistory));
   }, [searchHistory]);
 
   useEffect(() => {
-    localStorage.setItem("leadscout-searches", JSON.stringify(savedSearches));
+    localStorage.setItem("cozyleads-searches", JSON.stringify(savedSearches));
   }, [savedSearches]);
 
   const saveLead = useCallback((business: Business) => {
