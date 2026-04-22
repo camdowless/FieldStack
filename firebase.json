@@ -57,6 +57,10 @@
         "function": "updateReportStatus"
       },
       {
+        "source": "/api/audit-dead-sites",
+        "function": "auditDeadSites"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

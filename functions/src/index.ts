@@ -9,6 +9,7 @@ import {
   isParkedDomain,
   extractBusinessData,
   deadSiteSignals,
+  probeUrl,
 } from "./dfsClient";
 import { lookupDomainInfo } from "./rdap";
 import { score, computeLegitimacy } from "./scorer";
@@ -1854,3 +1855,137 @@ export const getAdminStats = functions.https.onRequest((req, res) => {
     }
   });
 });
+
+// ─── Admin: Audit Dead Sites — run pipeline on reported businesses, return CSV ─
+
+export const auditDeadSites = functions
+  .runWith({ timeoutSeconds: 300, memory: "512MB" })
+  .https.onRequest((req, res) => {
+    corsHandler(req, res, async () => {
+      if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
+
+      try {
+        await verifyAdmin(req, "auditDeadSites");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "";
+        res.status(msg === "UNAUTHENTICATED" ? 401 : 403).json({ error: msg === "UNAUTHENTICATED" ? "Unauthorized." : "Forbidden. Admin role required." });
+        return;
+      }
+
+      const { cids } = req.body ?? {};
+      if (!Array.isArray(cids) || cids.length === 0 || cids.length > 100) {
+        res.status(400).json({ error: "cids must be a non-empty array of up to 100 strings" });
+        return;
+      }
+
+      const DFS_EMAIL = process.env.DFS_EMAIL;
+      const DFS_PASSWORD = process.env.DFS_PASSWORD;
+      if (!DFS_EMAIL || !DFS_PASSWORD) {
+        res.status(500).json({ error: "Server configuration error" });
+        return;
+      }
+
+      const authHeader = buildAuthHeader(DFS_EMAIL, DFS_PASSWORD);
+
+      // Load cached businesses
+      const cached = await getCachedBusinesses(cids);
+
+      // Collect URLs to audit (only businesses with a website)
+      const entries: Array<{ cid: string; name: string; url: string }> = [];
+      for (const cid of cids) {
+        const biz = cached.get(cid);
+        if (biz?.website) entries.push({ cid, name: biz.name, url: biz.website });
+      }
+
+      if (entries.length === 0) {
+        res.status(200).json({ rows: [] });
+        return;
+      }
+
+      const urls = entries.map((e) => e.url);
+
+      // Run probeUrl (HEAD + single DFS pass, no retries) with concurrency=5.
+      // Each probe is at most 7s HEAD + 25s DFS = ~32s. At concurrency 5,
+      // ceil(11/5)=3 rounds × 32s = ~96s worst-case — well within the 300s limit.
+      const CONCURRENCY = 5;
+      const probeResults: Array<{ signals: import("./types").HtmlSignals; cost: number; headErrorCode: string | null; dfsTaskStatusCode: number | null }> = new Array(urls.length);
+      let totalCost = 0;
+
+      for (let i = 0; i < urls.length; i += CONCURRENCY) {
+        const batch = urls.slice(i, i + CONCURRENCY);
+        const batchResults = await Promise.all(batch.map((url) => probeUrl(url, authHeader)));
+        for (let j = 0; j < batchResults.length; j++) {
+          probeResults[i + j] = batchResults[j];
+          totalCost += batchResults[j].cost;
+        }
+      }
+
+      const signals = probeResults.map((r) => r.signals);
+      const cost = totalCost;
+
+      // Build result rows — run scorer to detect ERROR_PAGE_* stages
+      const rows = entries.map((entry, i) => {
+        const sig = signals[i];
+        const biz = cached.get(entry.cid)!;
+        const bd = biz.businessData;
+
+        // Build a minimal BusinessRaw stub so we can use buildScorerInput
+        const bizRawStub: BusinessRaw = {
+          title: biz.name,
+          description: bd?.description ?? null,
+          address: biz.address,
+          address_info: null,
+          phone: biz.phone,
+          domain: (() => { try { return new URL(entry.url).hostname; } catch { return null; } })(),
+          url: entry.url,
+          rating: biz.rating != null ? { value: biz.rating, votes_count: biz.reviewCount } : null,
+          rating_distribution: bd?.ratingDistribution ?? null,
+          category: biz.category,
+          category_ids: null,
+          additional_categories: bd?.additionalCategories ?? null,
+          is_claimed: bd?.isClaimed ?? false,
+          price_level: bd?.priceLevel ?? null,
+          total_photos: bd?.totalPhotos ?? null,
+          attributes: null,
+          work_time: bd?.currentStatus ? { work_hours: { timetable: null, current_status: bd.currentStatus } } : null,
+          contact_info: (bd?.socialLinks ?? []).map((l) => ({ type: l.type, value: l.value, source: "cached" })),
+          people_also_search: null,
+          place_topics: bd?.placeTopics ?? null,
+          logo: bd?.logo ?? null,
+          main_image: bd?.mainImage ?? null,
+          last_updated_time: bd?.lastUpdatedTime ?? null,
+          first_seen: bd?.firstSeen ?? null,
+          check_url: bd?.checkUrl ?? null,
+          cid: entry.cid,
+          feature_id: null,
+          place_id: null,
+          latitude: bd?.latitude ?? null,
+          longitude: bd?.longitude ?? null,
+        };
+
+        const input = buildScorerInput(bizRawStub, { website: entry.url, htmlSignals: sig });
+        const { label } = score(input);
+
+        const isDeadOrError = label === "dead site";
+        const deathStage = sig?.deathStage ?? (isDeadOrError ? "UNKNOWN" : null);
+
+        return {
+          cid: entry.cid,
+          name: entry.name,
+          url: entry.url,
+          label,
+          deathStage: deathStage ?? "",
+          fetchFailed: sig?.fetchFailed ?? false,
+          statusCode: sig?.statusCode ?? "",
+          headErrorCode: probeResults[i].headErrorCode ?? "",
+          dfsTaskStatusCode: probeResults[i].dfsTaskStatusCode ?? "",
+          pageTitle: sig?.pageMeta?.title ?? "",
+          totalDomSize: sig?.totalDomSize ?? "",
+          wordCount: sig?.wordCount ?? "",
+        };
+      });
+
+      console.log(`[auditDeadSites] audited ${rows.length} URLs, cost=${cost}`);
+      res.status(200).json({ rows, cost });
+    });
+  });

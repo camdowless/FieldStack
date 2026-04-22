@@ -133,10 +133,20 @@ export interface PageChecks {
   sizeGreaterThan3mb: boolean;
 }
 
+export type DeathStage =
+  | "HEAD_FAIL"
+  | "DFS_PASS_1"
+  | "DFS_PASS_2"
+  | "DFS_PASS_3_NON_20000"
+  | "ERROR_PAGE_TITLE"
+  | "ERROR_PAGE_DOM";
+
 export interface HtmlSignals {
   // Core metrics
   statusCode: number | null;
   fetchFailed: boolean;
+  /** Set on dead-site signals to record which pipeline stage killed the URL. */
+  deathStage?: DeathStage;
   onpageScore: number | null;
   totalDomSize: number | null;
   pageSize: number | null;

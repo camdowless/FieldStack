@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { fetchAdminReports, updateReportStatus, fetchBusinessesByCids } from "@/lib/api";
-import type { AdminReportGroup } from "@/lib/api";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { fetchAdminReports, updateReportStatus, fetchBusinessesByCids, auditDeadSites } from "@/lib/api";
+import type { AdminReportGroup, DeadSiteAuditRow } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,7 +10,8 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "@/hooks/use-toast";
-import { RefreshCw, Search, ExternalLink, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, Flag } from "lucide-react";
+import { RefreshCw, Search, ExternalLink, ChevronLeft, ChevronRight, ArrowUp, ArrowDown, Flag, Download } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 import { LeadDetailPanel } from "@/components/LeadDetailPanel";
 import { normalizeBusiness } from "@/data/leadTypes";
 import type { Business } from "@/data/mockBusinesses";
@@ -178,6 +179,11 @@ export function ReportReviewTab() {
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<AdminReportGroup | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [checkedCids, setCheckedCids] = useState<Set<string>>(new Set());
+  const [auditing, setAuditing] = useState(false);
+  const [auditResult, setAuditResult] = useState<{ rows: DeadSiteAuditRow[]; cost: number; csvBlob: Blob; filename: string } | null>(null);
+  const [auditError, setAuditError] = useState<string | null>(null);
+  const csvUrlRef = useRef<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -216,8 +222,59 @@ export function ReportReviewTab() {
     }
   };
 
-  const toggleSort = (col: SortCol) => {
-    if (sortCol === col) {
+  const handleAudit = async () => {
+    const cids = Array.from(checkedCids);
+    if (cids.length === 0) return;
+    setAuditing(true);
+    setAuditResult(null);
+    setAuditError(null);
+    if (csvUrlRef.current) { URL.revokeObjectURL(csvUrlRef.current); csvUrlRef.current = null; }
+    try {
+      const { rows, cost } = await auditDeadSites(cids);
+      const headers = ["cid", "name", "url", "label", "deathStage", "fetchFailed", "statusCode", "headErrorCode", "dfsTaskStatusCode", "pageTitle", "totalDomSize", "wordCount"];
+      const escape = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+      const csv = [
+        headers.join(","),
+        ...rows.map((r) => headers.map((h) => escape(r[h as keyof typeof r])).join(",")),
+      ].join("\n");
+      const csvBlob = new Blob([csv], { type: "text/csv" });
+      const filename = `dead-site-audit-${new Date().toISOString().slice(0, 10)}.csv`;
+      setAuditResult({ rows, cost, csvBlob, filename });
+    } catch (err) {
+      setAuditError(err instanceof Error ? err.message : "Audit failed — unknown error");
+    } finally {
+      setAuditing(false);
+    }
+  };
+
+  const handleDownload = () => {
+    if (!auditResult) return;
+    if (csvUrlRef.current) URL.revokeObjectURL(csvUrlRef.current);
+    const url = URL.createObjectURL(auditResult.csvBlob);
+    csvUrlRef.current = url;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = auditResult.filename;
+    a.click();
+  };
+
+  const toggleCheck = (cid: string) => {
+    setCheckedCids((prev) => {
+      const next = new Set(prev);
+      next.has(cid) ? next.delete(cid) : next.add(cid);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    if (checkedCids.size === paginated.length) {
+      setCheckedCids(new Set());
+    } else {
+      setCheckedCids(new Set(paginated.map((g) => g.cid)));
+    }
+  };
+
+  const toggleSort = (col: SortCol) => {    if (sortCol === col) {
       setSortDir((d) => d === "asc" ? "desc" : "asc");
     } else {
       setSortCol(col);
@@ -285,12 +342,59 @@ export function ReportReviewTab() {
         <Button variant="outline" size="sm" className="h-9" onClick={load} disabled={loading}>
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
         </Button>
+        {checkedCids.size > 0 && (
+          <Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={handleAudit} disabled={auditing}>
+            {auditing ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            {auditing ? `Auditing…` : `Audit ${checkedCids.size} site${checkedCids.size !== 1 ? "s" : ""}`}
+          </Button>
+        )}
         {!loading && (
           <span className="text-sm text-muted-foreground ml-1">
             {filtered.length} business{filtered.length !== 1 ? "es" : ""}
           </span>
         )}
       </div>
+
+      {/* Audit result banner */}
+      {auditError && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 flex items-center justify-between gap-4">
+          <p className="text-sm text-destructive">{auditError}</p>
+          <Button size="sm" variant="ghost" className="h-7 text-muted-foreground shrink-0" onClick={() => setAuditError(null)}>Dismiss</Button>
+        </div>
+      )}
+      {auditResult && (
+        <div className="rounded-md border bg-muted/40 px-4 py-3 flex items-start justify-between gap-4 flex-wrap">
+          <div className="space-y-1.5 min-w-0">
+            <p className="text-sm font-medium">
+              Audit complete — {auditResult.rows.length} URL{auditResult.rows.length !== 1 ? "s" : ""} · DFS cost ${auditResult.cost.toFixed(4)}
+            </p>
+            {/* Stage distribution */}
+            <div className="flex flex-wrap gap-1.5">
+              {(() => {
+                const counts: Record<string, number> = {};
+                for (const r of auditResult.rows) {
+                  const stage = r.deathStage || (r.label === "dead site" ? "UNKNOWN" : r.label);
+                  counts[stage] = (counts[stage] ?? 0) + 1;
+                }
+                return Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([stage, n]) => (
+                  <span key={stage} className="inline-flex items-center gap-1 text-xs rounded-full border px-2.5 py-0.5 bg-background font-mono">
+                    {stage || "live"}<span className="text-muted-foreground">×{n}</span>
+                  </span>
+                ));
+              })()}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button size="sm" variant="outline" className="h-8 gap-1.5" onClick={handleDownload}>
+              <Download className="h-3.5 w-3.5" />
+              Download CSV
+            </Button>
+            <Button size="sm" variant="ghost" className="h-8 text-muted-foreground" onClick={() => setAuditResult(null)}>
+              Dismiss
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Table */}
       {loading ? (
@@ -305,18 +409,24 @@ export function ReportReviewTab() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-muted-foreground bg-muted/30">
+                  <th className="py-3 px-3 w-[40px]">
+                    <Checkbox
+                      checked={paginated.length > 0 && checkedCids.size === paginated.length}
+                      onCheckedChange={toggleAll}
+                      aria-label="Select all"
+                    />
+                  </th>
                   <SortHeader col="businessName" className="min-w-[200px]">Business</SortHeader>
                   <th className="py-3 px-3 font-medium text-left min-w-[180px]">Reasons</th>
                   <SortHeader col="reportCount" className="w-[90px]">Reports</SortHeader>
                   <SortHeader col="openCount" className="w-[80px]">Open</SortHeader>
                   <SortHeader col="latestAt" className="w-[120px]">Latest</SortHeader>
-                  <th className="py-3 px-3 w-[60px]" />
-                </tr>
+                  <th className="py-3 px-3 w-[60px]" />                </tr>
               </thead>
               <tbody>
                 {paginated.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="py-12 text-center text-muted-foreground">
+                    <td colSpan={7} className="py-12 text-center text-muted-foreground">
                       No reports found.
                     </td>
                   </tr>
@@ -327,6 +437,13 @@ export function ReportReviewTab() {
                     className="border-b border-border/50 hover:bg-muted/30 transition-colors cursor-pointer group"
                     onClick={() => { setSelected(g); setSheetOpen(true); }}
                   >
+                    <td className="py-3 px-3" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={checkedCids.has(g.cid)}
+                        onCheckedChange={() => toggleCheck(g.cid)}
+                        aria-label={`Select ${g.businessName}`}
+                      />
+                    </td>
                     <td className="py-3 px-3">
                       <span className="font-medium block truncate max-w-[240px]">{g.businessName}</span>
                       {g.websiteUrl && (

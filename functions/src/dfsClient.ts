@@ -1,6 +1,7 @@
 import {
   BusinessRaw,
   HtmlSignals,
+  DeathStage,
   PageTimingData,
   PageMetaData,
   PageChecks,
@@ -344,10 +345,11 @@ export function uncrawlableSignals(url: string): HtmlSignals {
 }
 
 /** Build a dead-site HtmlSignals stub for URLs that failed to fetch. */
-export function deadSiteSignals(url: string, statusCode: number | null): HtmlSignals {
+export function deadSiteSignals(url: string, statusCode: number | null, deathStage?: DeathStage): HtmlSignals {
   return {
     statusCode,
     fetchFailed: true,
+    deathStage,
     onpageScore: null,
     totalDomSize: null,
     pageSize: null,
@@ -615,18 +617,21 @@ const HEAD_CHECK_TIMEOUT_MS = 7_000;
  * unreachable (DNS failure, connection refused, SSL error, or timeout).
  * A non-200 status still counts as "alive" — the server responded.
  */
-async function isServerAlive(url: string): Promise<boolean> {
+async function isServerAlive(url: string): Promise<{ alive: boolean; errorCode: string | null }> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), HEAD_CHECK_TIMEOUT_MS);
     try {
       await fetch(url, { method: "HEAD", signal: controller.signal, redirect: "follow" });
-      return true; // any response = server is up
+      return { alive: true, errorCode: null }; // any response = server is up
     } finally {
       clearTimeout(timer);
     }
-  } catch {
-    return false; // timeout, DNS failure, SSL error, etc.
+  } catch (err) {
+    const code = err instanceof Error
+      ? ((err as NodeJS.ErrnoException).code ?? (err.name === "AbortError" ? "ETIMEDOUT" : err.name) ?? "UNKNOWN")
+      : "UNKNOWN";
+    return { alive: false, errorCode: String(code) };
   }
 }
 
@@ -644,6 +649,44 @@ async function resolveRedirect(url: string): Promise<string> {
   } catch {
     return url;
   }
+}
+
+/**
+ * Lightweight single-pass URL probe for the dead-site audit.
+ * Does a HEAD liveness check then one DFS instant_pages call — no retries,
+ * no redirect resolution. Fast enough to run 5 in parallel safely.
+ */
+export async function probeUrl(
+  url: string,
+  authHeader: string
+): Promise<{ signals: HtmlSignals; cost: number; headErrorCode: string | null; dfsTaskStatusCode: number | null }> {
+  const crawlUrl = url.startsWith("http://") ? url.replace("http://", "https://") : url;
+
+  const { alive, errorCode: headErrorCode } = await isServerAlive(crawlUrl);
+  if (!alive) {
+    return { signals: deadSiteSignals(url, null, "HEAD_FAIL"), cost: 0, headErrorCode, dfsTaskStatusCode: null };
+  }
+
+  const result = await fetchOnePage(crawlUrl, authHeader, { returnDespiteTimeout: true });
+  const cost = result.cost;
+  const dfsTaskStatusCode = result.taskStatusCode;
+
+  if (result.page === undefined) {
+    const isTaskSuccess = dfsTaskStatusCode === 20000;
+    return {
+      signals: isTaskSuccess ? uncrawlableSignals(url) : deadSiteSignals(url, null, "DFS_PASS_1"),
+      cost,
+      headErrorCode: null,
+      dfsTaskStatusCode,
+    };
+  }
+
+  const sig = parseInstantPageItem(url, result.page);
+  if (sig === null) {
+    return { signals: deadSiteSignals(url, null, "DFS_PASS_1"), cost, headErrorCode: null, dfsTaskStatusCode };
+  }
+  if (sig.fetchFailed && !sig.deathStage) sig.deathStage = "DFS_PASS_1";
+  return { signals: sig, cost, headErrorCode: null, dfsTaskStatusCode };
 }
 
 export async function fetchInstantPages(
@@ -664,15 +707,15 @@ export async function fetchInstantPages(
 
   // Pre-populate results for confirmed-dead servers so we skip DFS entirely.
   const results: (HtmlSignals | null)[] = urls.map((url, i) => {
-    if (!aliveFlags[i]) {
+    if (!aliveFlags[i].alive) {
       console.log(`[fetchInstantPages] ${crawlUrls[i]} failed HEAD check — skipping DFS`);
-      return deadSiteSignals(url, null);
+      return deadSiteSignals(url, null, "HEAD_FAIL");
     }
     return null;
   });
 
   // Only crawl URLs that passed the HEAD check.
-  const crawlIndices = urls.map((_, i) => i).filter((i) => aliveFlags[i]);
+  const crawlIndices = urls.map((_, i) => i).filter((i) => aliveFlags[i].alive);
   if (crawlIndices.length === 0) {
     return { signals: results as HtmlSignals[], cost: 0 };
   }
@@ -693,7 +736,9 @@ export async function fetchInstantPages(
     } else {
       // Pass the original url (not crawlUrl) so HtmlSignals.isHttps reflects
       // the stored URL, but the actual crawl used the normalized https version.
-      results[i] = parseInstantPageItem(urls[i], firstPass[j].page);
+      const sig = parseInstantPageItem(urls[i], firstPass[j].page);
+      if (sig && sig.fetchFailed && !sig.deathStage) sig.deathStage = "DFS_PASS_1";
+      results[i] = sig;
     }
   }
 
@@ -724,9 +769,10 @@ export async function fetchInstantPages(
       if (signal === null) {
         // task 20000 = DFS reached the server but couldn't parse content → live but uncrawlable
         const isTaskSuccess = retryResults[j].taskStatusCode === 20000;
-        results[i] = isTaskSuccess ? uncrawlableSignals(urls[i]) : deadSiteSignals(urls[i], null);
+        results[i] = isTaskSuccess ? uncrawlableSignals(urls[i]) : deadSiteSignals(urls[i], null, "DFS_PASS_2");
         console.log(`[fetchInstantPages] ${crawlUrls[i]} ${isTaskSuccess ? "uncrawlable (task 20000, live)" : "dead"} after retry (taskCode=${retryResults[j].taskStatusCode})`);
       } else {
+        if (signal.fetchFailed && !signal.deathStage) signal.deathStage = "DFS_PASS_2";
         results[i] = signal;
       }
     }
@@ -748,9 +794,10 @@ export async function fetchInstantPages(
         if (signal === null) {
           // task 20000 after redirect resolution = server is live, DFS just can't crawl it
           const isTaskSuccess = redirectResults[k].taskStatusCode === 20000;
-          results[i] = isTaskSuccess ? uncrawlableSignals(urls[i]) : deadSiteSignals(urls[i], null);
+          results[i] = isTaskSuccess ? uncrawlableSignals(urls[i]) : deadSiteSignals(urls[i], null, "DFS_PASS_3_NON_20000");
           console.log(`[fetchInstantPages] ${resolvedUrls[k]} ${isTaskSuccess ? "uncrawlable (task 20000, live)" : "dead"} after redirect resolution`);
         } else {
+          if (signal.fetchFailed && !signal.deathStage) signal.deathStage = "DFS_PASS_3_NON_20000";
           results[i] = signal;
         }
       }

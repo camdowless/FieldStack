@@ -1,4 +1,4 @@
-import { ScorerInput, BusinessLabel, ScoreBreakdown, LegitimacyBreakdown } from "./types";
+import { ScorerInput, BusinessLabel, ScoreBreakdown, LegitimacyBreakdown, DeathStage } from "./types";
 
 const CURRENT_YEAR = new Date().getFullYear();
 
@@ -50,17 +50,22 @@ const UNPUBLISHED_SITE_PATTERNS = [
 ];
 
 function isErrorPage(input: ScorerInput): boolean {
+  return errorPageStage(input) !== null;
+}
+
+/** Returns the DeathStage if this is an error page, or null if it's a real page. */
+function errorPageStage(input: ScorerInput): DeathStage | null {
   const signals = input.htmlSignals;
-  if (!signals) return false;
+  if (!signals) return null;
 
   const title = signals.pageMeta?.title ?? "";
 
   // Unambiguous "no site here" titles — catch regardless of DOM size
-  if (UNPUBLISHED_SITE_PATTERNS.some((p) => p.test(title))) return true;
+  if (UNPUBLISHED_SITE_PATTERNS.some((p) => p.test(title))) return "ERROR_PAGE_TITLE";
 
   // Tiny DOM size is a strong signal of an error/stub page
   if (signals.totalDomSize !== null && signals.totalDomSize < 500) {
-    if (ERROR_PAGE_TITLE_PATTERNS.some((p) => p.test(title))) return true;
+    if (ERROR_PAGE_TITLE_PATTERNS.some((p) => p.test(title))) return "ERROR_PAGE_TITLE";
   }
 
   // Header/footer both contain error text
@@ -70,10 +75,10 @@ function isErrorPage(input: ScorerInput): boolean {
     (header.includes("403 forbidden") || header.includes("404 not found")) &&
     (footer.includes("403 forbidden") || footer.includes("404 not found"))
   ) {
-    return true;
+    return "ERROR_PAGE_DOM";
   }
 
-  return false;
+  return null;
 }
 
 // ─── Defunct / acquired business detection ─────────────────────────────────────
@@ -282,6 +287,9 @@ export function score(input: ScorerInput): ScoreResult {
     if (legitimacyMultiplier < 1) {
       reasons.push(`Legitimacy adjustment ×${legitimacyMultiplier.toFixed(2)} (legitimacy ${legitimacyScore}/100)`);
     }
+    // Tag the signal with the specific error-page sub-stage
+    const stage = errorPageStage(input);
+    if (stage && input.htmlSignals) input.htmlSignals.deathStage = stage;
     return {
       score: Math.min(100, Math.max(0, final)),
       label: "dead site",
