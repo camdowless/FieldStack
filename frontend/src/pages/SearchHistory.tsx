@@ -7,6 +7,7 @@ import { useFirebaseLeadStore } from "@/hooks/useFirebaseLeadStore";
 import { usePreferences } from "@/hooks/usePreferences";
 import { ResultsTable } from "@/components/ResultsTable";
 import { Button } from "@/components/ui/button";
+import { formatCategoryLabel } from "@/data/dfsCategories";
 import {
   Trash2, Search, Clock, X, Loader2, ArrowLeft,
 } from "lucide-react";
@@ -72,10 +73,13 @@ const SearchHistory = () => {
     return d.toLocaleDateString();
   };
 
+  const toTitleCase = (s: string) =>
+    s.replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+
   const describeSearch = (s: FirestoreSavedSearch) => {
     const parts: string[] = [];
-    if (s.category) parts.push(s.category);
-    if (s.location) parts.push(s.location);
+    if (s.category && s.category !== "businesses") parts.push(formatCategoryLabel(s.category));
+    if (s.location) parts.push(toTitleCase(s.location));
     return parts.length > 0 ? parts.join(" · ") : "All leads";
   };
 
