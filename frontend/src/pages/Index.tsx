@@ -555,6 +555,7 @@ const Index = () => {
         }}
         onSelectBusiness={setSelectedBusiness}
         onFilteredCountChange={setFilteredCount}
+        isLoading={viewState === "loading"}
       />
 
       {/* Sticky bulk action bar */}

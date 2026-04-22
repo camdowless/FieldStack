@@ -1,7 +1,6 @@
 import type { Business } from "@/data/mockBusinesses";
 import {
   generateColdEmail, generateColdCallScript,
-  generateFixActionItems, generateAdCampaignOutline,
 } from "@/data/actionItems";
 import { useFirebaseLeadStore, LEAD_STATUSES } from "@/hooks/useFirebaseLeadStore";
 import { useLeadStore } from "@/hooks/useLeadStore";
@@ -16,9 +15,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Bookmark, BookmarkCheck, MapPin, Phone, Star, Globe,
   Shield, ShieldOff, Gauge, Code, Search as SearchIcon,
-  TrendingDown, ExternalLink, Clock, AlertTriangle, Sparkles,
-  Wrench, Copy, CheckCircle2, XCircle, Mail, Server, Info, Pencil,
-  StickyNote, Images, Loader2, RefreshCw,
+  TrendingDown, ExternalLink, Clock, AlertTriangle,
+  Copy, CheckCircle2, XCircle, Mail, Server, Info, Pencil,
+  StickyNote, Images, Loader2, RefreshCw, ChevronDown,
 } from "lucide-react";
 import { ReportButton } from "@/components/ReportDialog";
 import { useState, useRef, useEffect } from "react";
@@ -58,8 +57,8 @@ function getLegitimacyLabel(score: number): string {
   return "Iffy";
 }
 
-// Web gap tile component
-function WebGapTile({
+// Web health row component (concise)
+function WebHealthRow({
   icon: Icon,
   label,
   value,
@@ -75,41 +74,18 @@ function WebGapTile({
   const dotColor =
     status === "bad" ? "bg-red-500" : status === "good" ? "bg-green-500" : "bg-muted-foreground/40";
   return (
-    <div className="flex flex-col gap-1.5 rounded-lg border bg-card p-3">
-      <div className="flex items-center justify-between">
-        <Icon className="h-4 w-4 text-muted-foreground" />
+    <div className="flex items-center justify-between py-2 px-1">
+      <div className="flex items-center gap-2.5">
+        <Icon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+        <span className="text-sm">{label}</span>
+        {badge && (
+          <span className="text-[10px] bg-muted text-muted-foreground rounded px-1.5 py-0.5 leading-none">{badge}</span>
+        )}
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-sm text-muted-foreground">{value}</span>
         <span className={cn("h-2 w-2 rounded-full shrink-0", dotColor)} />
       </div>
-      <div>
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-xs font-medium">{label}</span>
-          {badge && (
-            <span className="text-[10px] bg-muted text-muted-foreground rounded px-1.5 py-0.5 leading-none">{badge}</span>
-          )}
-        </div>
-        <p className="text-xs text-muted-foreground mt-0.5">{value}</p>
-      </div>
-    </div>
-  );
-}
-
-function ScoreGauge({ label, score, max = 100 }: { label: string; score: number | null; max?: number }) {
-  if (score == null) {
-    return (
-      <div className="text-center">
-        <div className="text-2xl font-bold text-muted-foreground">—</div>
-        <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
-        <Progress value={0} className="h-1.5 mt-2" />
-      </div>
-    );
-  }
-  const pct = Math.round((score / max) * 100);
-  const color = pct >= 70 ? "text-green-500" : pct >= 40 ? "text-yellow-500" : "text-red-500";
-  return (
-    <div className="text-center">
-      <div className={`text-2xl font-bold ${color}`}>{score}</div>
-      <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
-      <Progress value={pct} className="h-1.5 mt-2" />
     </div>
   );
 }
@@ -238,12 +214,12 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
   const fbStore = useFirebaseLeadStore();
   const store = useLeadStore();
   const { role } = useAuth();
-  const [showPricing, setShowPricing] = useState(true);
   const [isEditingEmail, setIsEditingEmail] = useState(false);
-  const [localCompleted, setLocalCompleted] = useState<string[]>([]);
   const [localEmailDraft, setLocalEmailDraft] = useState<string | null>(null);
   const [isDownloadingPhotos, setIsDownloadingPhotos] = useState(false);
   const [isReevaluating, setIsReevaluating] = useState(false);
+  const [legitimacyOpen, setLegitimacyOpen] = useState(false);
+  const [opportunityOpen, setOpportunityOpen] = useState(false);
 
   // Notes state with debounced save
   const savedRecord = fbStore.getSavedLead(business.id);
@@ -265,24 +241,6 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
   };
 
   const { analysis: a } = business;
-  const fixItems = generateFixActionItems(business);
-
-  const completedActionIds = isSaved ? store.getSavedLead(business.id)?.completedActions ?? [] : localCompleted;
-  const handleToggleAction = (actionId: string) => {
-    if (isSaved) {
-      store.toggleActionComplete(business.id, actionId);
-    } else {
-      setLocalCompleted((prev) => prev.includes(actionId) ? prev.filter((a) => a !== actionId) : [...prev, actionId]);
-    }
-  };
-
-  const severityRank: Record<string, number> = { critical: 0, medium: 1, low: 2 };
-  const sortedFixItems = [...fixItems].sort((x, y) => {
-    const xDone = completedActionIds.includes(x.id) ? 1 : 0;
-    const yDone = completedActionIds.includes(y.id) ? 1 : 0;
-    if (xDone !== yDone) return xDone - yDone;
-    return severityRank[x.severity] - severityRank[y.severity];
-  });
 
   const generatedEmail = generateColdEmail(business);
   const emailContent = (isSaved ? store.getSavedLead(business.id)?.customEmailScript : localEmailDraft) ?? generatedEmail;
@@ -499,7 +457,6 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
       <Tabs defaultValue="analysis" className="space-y-4">
         <TabsList>
           <TabsTrigger value="analysis">Analysis</TabsTrigger>
-          <TabsTrigger value="actions">Action Items</TabsTrigger>
           <TabsTrigger value="scripts">Outreach Scripts</TabsTrigger>
         </TabsList>
 
@@ -522,58 +479,65 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
             </Card>
           )}
 
-          {/* 1. Legitimacy Score — top, with confidence meter */}
+          {/* 1. Legitimacy Score — collapsible, closed by default */}
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Shield className="h-4 w-4" /> Legitimacy Score
-              </CardTitle>
-              <CardDescription>How likely this is a real, operating business</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center gap-4">
-                <div className={cn(
-                  "text-3xl font-bold tabular-nums shrink-0",
-                  (business.legitimacyScore ?? 0) >= 71 ? "text-green-500" :
-                  (business.legitimacyScore ?? 0) >= 41 ? "text-yellow-500" : "text-red-500"
-                )}>
-                  {business.legitimacyScore ?? 0}
-                </div>
-                <div className="flex-1 space-y-1.5">
-                  {/* Pill-shaped gradient progress bar */}
-                  <div className="relative h-3 w-full rounded-full overflow-hidden bg-muted">
-                    <div
-                      className="absolute inset-y-0 left-0 rounded-full transition-all"
-                      style={{
-                        width: `${business.legitimacyScore ?? 0}%`,
-                        background: (() => {
-                          const s = business.legitimacyScore ?? 0;
-                          if (s >= 71) return "#22c55e";
-                          if (s >= 41) return "#eab308";
-                          return "#ef4444";
-                        })(),
-                      }}
-                    />
-                  </div>
-                  <p className="text-xs text-muted-foreground">
+            <CardHeader className="pb-2 cursor-pointer select-none" onClick={() => setLegitimacyOpen((v) => !v)}>
+              <div className="flex items-start justify-between gap-4">
+                <CardTitle className="text-base flex items-center gap-2 shrink-0">
+                  <Shield className="h-4 w-4" /> Legitimacy Score
+                </CardTitle>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={cn(
+                    "text-xl font-bold tabular-nums leading-none",
+                    (business.legitimacyScore ?? 0) >= 71 ? "text-green-500" :
+                    (business.legitimacyScore ?? 0) >= 41 ? "text-yellow-500" : "text-red-500"
+                  )}>
+                    {business.legitimacyScore ?? 0}
+                  </span>
+                  <span className="text-xs text-muted-foreground leading-none">
                     {getLegitimacyLabel(business.legitimacyScore ?? 0)}
-                  </p>
+                  </span>
+                  <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform duration-200", legitimacyOpen && "rotate-180")} />
                 </div>
               </div>
-              {business.legitimacyReasons && business.legitimacyReasons.length > 0 && (
-                <ul className="space-y-1.5">
-                  {business.legitimacyReasons.map((r, i) => (
-                    <li key={i} className="flex items-start gap-2 text-sm">
-                      <span className={cn(
-                        "mt-1.5 h-1.5 w-1.5 rounded-full shrink-0",
-                        r.startsWith("-") || r.includes("(-") ? "bg-red-500" : "bg-green-500"
-                      )} />
-                      <span className="text-muted-foreground">{r}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
+              {/* Progress bar always visible */}
+              <div className="relative h-2 w-full rounded-full overflow-hidden bg-muted mt-3">
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full"
+                  style={{
+                    width: `${business.legitimacyScore ?? 0}%`,
+                    background: (() => {
+                      const s = business.legitimacyScore ?? 0;
+                      if (s >= 71) return "#22c55e";
+                      if (s >= 41) return "#eab308";
+                      return "#ef4444";
+                    })(),
+                  }}
+                />
+              </div>
+            </CardHeader>
+            <div className={cn(
+              "grid transition-all duration-300 ease-in-out",
+              legitimacyOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+            )}>
+              <div className="overflow-hidden">
+                {business.legitimacyReasons && business.legitimacyReasons.length > 0 && (
+                  <CardContent className="pt-2 pb-4">
+                    <ul className="space-y-1.5">
+                      {business.legitimacyReasons.map((r, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm">
+                          <span className={cn(
+                            "mt-1.5 h-1.5 w-1.5 rounded-full shrink-0",
+                            r.startsWith("-") || r.includes("(-") ? "bg-red-500" : "bg-green-500"
+                          )} />
+                          <span className="text-muted-foreground">{r}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </CardContent>
+                )}
+              </div>
+            </div>
           </Card>
 
           {/* 2. Marketing agency warning banner (conditional) */}
@@ -584,112 +548,150 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
             </div>
           )}
 
-          {/* 3. Web Gaps grid */}
+          {/* 3. Web Health */}
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base">Web Gaps</CardTitle>
+              <CardTitle className="text-base">Web Health</CardTitle>
             </CardHeader>
             <CardContent>
-              {(() => {
-                const domainAgeBadge = a.websiteAge ? `~${a.websiteAge}yr` : undefined;
-                const tiles: Array<{ icon: any; label: string; value: string; status: "good" | "bad" | "neutral"; badge?: string; order: number }> = [
-                  {
-                    icon: Globe,
-                    label: "Has Website",
-                    value: a.hasWebsite ? (a.websiteUrl ?? "Yes") : "No website",
-                    status: a.hasWebsite ? "good" : "bad",
-                    badge: a.hasWebsite ? domainAgeBadge : undefined,
-                    order: a.hasWebsite ? 1 : 0,
-                  },
-                  {
-                    icon: a.hasHttps ? Shield : ShieldOff,
-                    label: "HTTPS",
-                    value: !a.hasWebsite ? "N/A" : a.hasHttps ? "Secure" : "Not Secure",
-                    status: !a.hasWebsite ? "neutral" : a.hasHttps ? "good" : "bad",
-                    order: !a.hasWebsite ? 2 : a.hasHttps ? 1 : 0,
-                  },
-                  {
-                    icon: Gauge,
-                    label: "Mobile Friendly",
-                    value: !a.hasWebsite ? "N/A" : a.mobileFriendly ? "Yes" : "No",
-                    status: !a.hasWebsite ? "neutral" : a.mobileFriendly ? "good" : "bad",
-                    order: !a.hasWebsite ? 2 : a.mobileFriendly ? 1 : 0,
-                  },
-                  {
-                    icon: Code,
-                    label: "Deprecated HTML",
-                    value: !a.hasWebsite ? "N/A" : a.deprecatedHtmlTags > 0 ? `${a.deprecatedHtmlTags} tags` : "None",
-                    status: !a.hasWebsite ? "neutral" : a.deprecatedHtmlTags > 3 ? "bad" : "good",
-                    order: !a.hasWebsite ? 2 : a.deprecatedHtmlTags > 3 ? 0 : 1,
-                  },
-                  {
-                    icon: TrendingDown,
-                    label: "Ad Pixel",
-                    value: !a.hasWebsite ? "N/A" : a.hasOnlineAds ? "Detected" : "Not found",
-                    status: !a.hasWebsite ? "neutral" : a.hasOnlineAds ? "good" : "bad",
-                    order: !a.hasWebsite ? 2 : a.hasOnlineAds ? 1 : 0,
-                  },
-                  {
-                    icon: SearchIcon,
-                    label: "Lighthouse SEO",
-                    value: seoGauge != null ? `${seoGauge}/100` : "N/A",
-                    status: seoGauge == null ? "neutral" : seoGauge < 50 ? "bad" : "good",
-                    order: seoGauge == null ? 2 : seoGauge < 50 ? 0 : 1,
-                  },
-                  {
-                    icon: Gauge,
-                    label: "Lighthouse Perf",
-                    value: designGauge != null ? `${designGauge}/100` : "N/A",
-                    status: designGauge == null ? "neutral" : designGauge < 50 ? "bad" : "good",
-                    order: designGauge == null ? 2 : designGauge < 50 ? 0 : 1,
-                  },
-                  {
-                    icon: Clock,
-                    label: "Time to Interactive",
-                    value: !a.hasWebsite || a.loadTimeMs === 0 ? "N/A" : `${(a.loadTimeMs / 1000).toFixed(1)}s`,
-                    status: !a.hasWebsite || a.loadTimeMs === 0 ? "neutral" : a.loadTimeMs > 5000 ? "bad" : "good",
-                    order: !a.hasWebsite || a.loadTimeMs === 0 ? 2 : a.loadTimeMs > 5000 ? 0 : 1,
-                  },
-                ];
-                const sorted = [...tiles].sort((a, b) => a.order - b.order);
-                return (
-                  <div className="grid grid-cols-2 gap-2">
-                    {sorted.map((t) => (
-                      <WebGapTile key={t.label} icon={t.icon} label={t.label} value={t.value} status={t.status} badge={t.badge} />
-                    ))}
-                  </div>
-                );
-              })()}
+              {!a.hasWebsite ? (
+                <p className="text-sm text-muted-foreground py-2">No website found</p>
+              ) : (
+                <div className="divide-y divide-border">
+                  {(() => {
+                    const domainAgeBadge = a.websiteAge ? `~${a.websiteAge}yr` : undefined;
+                    const rows: Array<{ icon: any; label: string; value: string; status: "good" | "bad" | "neutral"; badge?: string }> = [
+                      {
+                        icon: Globe,
+                        label: "Website",
+                        value: a.websiteUrl ?? "Yes",
+                        status: "good",
+                        badge: domainAgeBadge,
+                      },
+                      {
+                        icon: a.hasHttps ? Shield : ShieldOff,
+                        label: "HTTPS",
+                        value: a.hasHttps ? "Secure" : "Not Secure",
+                        status: a.hasHttps ? "good" : "bad",
+                      },
+                      {
+                        icon: Gauge,
+                        label: "Mobile Friendly",
+                        value: a.mobileFriendly ? "Yes" : "No",
+                        status: a.mobileFriendly ? "good" : "bad",
+                      },
+                      {
+                        icon: Code,
+                        label: "Deprecated HTML",
+                        value: a.deprecatedHtmlTags > 0 ? `${a.deprecatedHtmlTags} tags` : "None",
+                        status: a.deprecatedHtmlTags > 3 ? "bad" : "good",
+                      },
+                      {
+                        icon: TrendingDown,
+                        label: "Ad Pixel",
+                        value: a.hasOnlineAds ? "Detected" : "Not found",
+                        status: a.hasOnlineAds ? "good" : "bad",
+                      },
+                      {
+                        icon: SearchIcon,
+                        label: "SEO Score",
+                        value: seoGauge != null ? `${seoGauge}/100` : "N/A",
+                        status: seoGauge == null ? "neutral" : seoGauge < 50 ? "bad" : "good",
+                      },
+                      {
+                        icon: Gauge,
+                        label: "Performance",
+                        value: designGauge != null ? `${designGauge}/100` : "N/A",
+                        status: designGauge == null ? "neutral" : designGauge < 50 ? "bad" : "good",
+                      },
+                      {
+                        icon: Clock,
+                        label: "Load Speed",
+                        value: a.loadTimeMs > 0 ? `${(a.loadTimeMs / 1000).toFixed(1)}s` : "N/A",
+                        status: a.loadTimeMs === 0 ? "neutral" : a.loadTimeMs > 5000 ? "bad" : "good",
+                      },
+                      ...(business.server || business.mediaType || business.pageSize ? [
+                        {
+                          icon: Server,
+                          label: "Server",
+                          value: business.server || "—",
+                          status: "neutral" as const,
+                        },
+                        {
+                          icon: Code,
+                          label: "Media Type",
+                          value: business.mediaType || "—",
+                          status: "neutral" as const,
+                        },
+                        {
+                          icon: Gauge,
+                          label: "Page Size",
+                          value: formatBytes(business.pageSize),
+                          status: "neutral" as const,
+                        },
+                      ] : []),
+                    ];
+                    return rows.map((r) => (
+                      <WebHealthRow key={r.label} icon={r.icon} label={r.label} value={r.value} status={r.status} badge={r.badge} />
+                    ));
+                  })()}
+                </div>
+              )}
             </CardContent>
           </Card>
 
           {/* 4. Opportunity Score */}
           <Card>
-            <CardHeader className="pb-1">
-              <CardTitle>Opportunity Score</CardTitle>
-              <CardDescription>Higher score = more room to help</CardDescription>
+            <CardHeader className="pb-1 cursor-pointer select-none" onClick={() => setOpportunityOpen((v) => !v)}>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="text-base">Opportunity Score</CardTitle>
+                  <CardDescription>Higher score = more room to help</CardDescription>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={cn(
+                    "text-xl font-bold tabular-nums leading-none",
+                    business.leadScore >= 70 ? "text-green-500" :
+                    business.leadScore >= 40 ? "text-yellow-500" : "text-red-500"
+                  )}>
+                    {business.leadScore}
+                  </span>
+                  {business.reasons && business.reasons.length > 0 && (
+                    <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform duration-200", opportunityOpen && "rotate-180")} />
+                  )}
+                </div>
+              </div>
             </CardHeader>
             <CardContent>
-              {a.hasWebsite ? (
-                <div className="grid grid-cols-2 gap-4">
-                  <ScoreGauge label="Opportunity" score={business.leadScore} />
-                  <ScoreGauge label="SEO" score={seoGauge} />
-                  <ScoreGauge label="Performance" score={designGauge} />
-                  <ScoreGauge label="Load Speed" score={speedGauge} />
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="flex justify-center">
-                    <div className="w-full max-w-xs">
-                      <ScoreGauge label="Opportunity" score={business.leadScore} />
-                    </div>
-                  </div>
-                  <div className="rounded-md border bg-info text-info-foreground border-info-border px-4 py-3 text-sm">
-                    SEO, performance, and load speed will be available once this business has a website.
-                  </div>
-                </div>
-              )}
+              <div className="relative h-3 w-full rounded-full overflow-hidden bg-muted">
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full transition-all"
+                  style={{
+                    width: `${business.leadScore}%`,
+                    background: business.leadScore >= 70 ? "#22c55e" : business.leadScore >= 40 ? "#eab308" : "#ef4444",
+                  }}
+                />
+              </div>
             </CardContent>
+            <div className={cn(
+              "grid transition-all duration-300 ease-in-out",
+              opportunityOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
+            )}>
+              <div className="overflow-hidden">
+                {business.reasons && business.reasons.length > 0 && (
+                  <CardContent className="pt-0">
+                    <ul className="space-y-1.5">
+                      {business.reasons.map((r, i) => (
+                        <li key={i} className="flex items-start gap-2 text-sm">
+                          <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
+                          <span className="text-muted-foreground">{r}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </CardContent>
+                )}
+              </div>
+            </div>
           </Card>
 
           {/* 5. Rating & Reviews */}
@@ -773,102 +775,6 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
             </Card>
           )}
 
-          {(business.server || business.mediaType || business.pageSize) && (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base flex items-center gap-2"><Server className="h-4 w-4" /> Tech Stack</CardTitle>
-              </CardHeader>
-              <CardContent className="divide-y divide-border">
-                <StatusRow icon={Server} label="Server" value={business.server || "—"} status="neutral" />
-                <StatusRow icon={Code} label="Media Type" value={business.mediaType || "—"} status="neutral" />
-                <StatusRow icon={Gauge} label="Page Size" value={formatBytes(business.pageSize)} status="neutral" />
-              </CardContent>
-            </Card>
-          )}
-
-          {business.reasons && business.reasons.length > 0 && (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base flex items-center gap-2"><Sparkles className="h-4 w-4" /> Why this opportunity score</CardTitle>
-                <CardDescription>What contributed to the {business.leadScore}/100 opportunity score</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ul className="space-y-2">
-                  {business.reasons.map((r, i) => (
-                    <li key={i} className="flex items-start gap-2 text-sm">
-                      <span className="mt-1 h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
-                      <span>{r}</span>
-                    </li>
-                  ))}
-                </ul>
-              </CardContent>
-            </Card>
-          )}
-        </TabsContent>
-
-        <TabsContent value="actions" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2"><Wrench className="h-5 w-5" /> Fix Action Items</CardTitle>
-              <CardDescription>
-                Prioritized technical improvements for this lead
-                {fixItems.length > 0 && (
-                  <span className="ml-2 text-xs text-muted-foreground">
-                    · {completedActionIds.filter((id) => fixItems.some((i) => i.id === id)).length}/{fixItems.length} done
-                  </span>
-                )}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                {sortedFixItems.map((item) => {
-                  const checked = completedActionIds.includes(item.id);
-                  const sevClass =
-                    item.severity === "critical"
-                      ? "border border-destructive/30 border-l-4 border-l-destructive bg-destructive/5"
-                      : item.severity === "medium"
-                      ? "border border-yellow-500/30 bg-yellow-500/5"
-                      : "border border-border bg-secondary/40";
-                  const titleWeight =
-                    item.severity === "critical" ? "font-medium text-foreground" : item.severity === "low" ? "font-normal text-muted-foreground" : "font-normal text-foreground";
-                  return (
-                    <label
-                      key={item.id}
-                      className={cn(
-                        "flex items-start gap-3 rounded-lg p-3 text-sm cursor-pointer transition-opacity",
-                        sevClass,
-                        checked && "opacity-50"
-                      )}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => handleToggleAction(item.id)}
-                        className="mt-0.5 h-[18px] w-[18px] rounded border-input accent-primary cursor-pointer shrink-0"
-                        aria-label={`Mark "${item.text}" as ${checked ? "incomplete" : "done"}`}
-                      />
-                      <span className={cn("flex-1", titleWeight, checked && "line-through")}>{item.text}</span>
-                    </label>
-                  );
-                })}
-                {fixItems.length === 0 && (
-                  <p className="text-sm text-muted-foreground text-center py-6">
-                    Nothing to fix — this lead's online presence looks solid.
-                  </p>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="flex items-center gap-3 mb-2">
-            <h3 className="text-lg font-bold">Ad Campaign Outline</h3>
-            <Button variant="outline" size="sm" onClick={() => setShowPricing(!showPricing)}>
-              {showPricing ? "Hide Pricing" : "Show Pricing"}
-            </Button>
-          </div>
-          <CopyableBlock title="Ad Campaign" content={
-            showPricing ? generateAdCampaignOutline(business) : generateAdCampaignOutline(business).split("## Pricing for Your Services")[0]
-          } />
         </TabsContent>
 
         <TabsContent value="scripts" className="space-y-4">

@@ -12,7 +12,8 @@ import {
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { LeadDetailPanel } from "./LeadDetailPanel";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 
 function cleanCategory(raw: string): string {
   if (!raw) return raw;
@@ -46,6 +47,8 @@ interface ResultsTableProps {
   onSelectBusiness?: (business: Business) => void;
   /** Called whenever filtered count changes so parent can display it */
   onFilteredCountChange?: (count: number) => void;
+  /** When true, shows a running progress indicator and animates new rows */
+  isLoading?: boolean;
 }
 
 export function ResultsTable({
@@ -56,10 +59,42 @@ export function ResultsTable({
   selection,
   onSelectBusiness,
   onFilteredCountChange,
+  isLoading = false,
 }: ResultsTableProps) {
   const [internalSelected, setInternalSelected] = useState<Business | null>(null);
   const selectedBusiness = onSelectBusiness ? null : internalSelected;
   const handleSelectBusiness = onSelectBusiness ?? setInternalSelected;
+
+  // Track which row IDs have already been seen so we only animate new arrivals
+  const seenIdsRef = useRef<Set<string>>(new Set());
+  const [newIds, setNewIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!isLoading) {
+      // Reset when a new search starts
+      seenIdsRef.current = new Set();
+      setNewIds(new Set());
+      return;
+    }
+    const incoming = results.map((b) => b.id).filter((id) => !seenIdsRef.current.has(id));
+    if (incoming.length > 0) {
+      incoming.forEach((id) => seenIdsRef.current.add(id));
+      setNewIds((prev) => {
+        const next = new Set(prev);
+        incoming.forEach((id) => next.add(id));
+        return next;
+      });
+      // Clear the "new" flag after animation completes
+      const timer = setTimeout(() => {
+        setNewIds((prev) => {
+          const next = new Set(prev);
+          incoming.forEach((id) => next.delete(id));
+          return next;
+        });
+      }, 600);
+      return () => clearTimeout(timer);
+    }
+  }, [results, isLoading]);
 
   // Filter + sort state (owned by this component)
   const [searchQuery, setSearchQuery] = useState("");
@@ -180,6 +215,18 @@ export function ResultsTable({
 
   return (
     <>
+      {/* Running indicator */}
+      {isLoading && (
+        <div className="relative h-1 w-full rounded-full bg-muted overflow-hidden mb-4">
+          <motion.div
+            className="absolute inset-y-0 left-0 bg-primary rounded-full"
+            animate={{ x: ["-100%", "100%"] }}
+            transition={{ duration: 1.4, repeat: Infinity, ease: "easeInOut" }}
+            style={{ width: "40%" }}
+          />
+        </div>
+      )}
+
       {/* Filter toolbar */}
       <div className="flex flex-col gap-2 mb-4">
         <div className="flex flex-col sm:flex-row gap-2">
@@ -301,20 +348,26 @@ export function ResultsTable({
                 </td>
               </tr>
             )}
-            {filteredResults.map((b) => {
-              const a = b.analysis;
-              const isSaved = isLeadSaved(b.id);
-              const status = deriveSiteStatus(b.label);
-              const checked = selection?.selectedIds.has(b.id) ?? false;
-              return (
-                <tr
-                  key={b.id}
-                  className="border-b border-border/50 hover:bg-muted/30 group transition-colors cursor-pointer"
-                  onClick={(e) => {
-                    if ((e.target as HTMLElement).closest('button, a, input, [role="checkbox"]')) return;
-                    handleSelectBusiness(b);
-                  }}
-                >
+            <AnimatePresence initial={false}>
+              {filteredResults.map((b) => {
+                const a = b.analysis;
+                const isSaved = isLeadSaved(b.id);
+                const status = deriveSiteStatus(b.label);
+                const checked = selection?.selectedIds.has(b.id) ?? false;
+                const isNew = newIds.has(b.id);
+                return (
+                  <motion.tr
+                    key={b.id}
+                    layout
+                    initial={isNew ? { opacity: 0, y: -8 } : false}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.25, ease: "easeOut" }}
+                    className="border-b border-border/50 hover:bg-muted/30 group transition-colors cursor-pointer"
+                    onClick={(e) => {
+                      if ((e.target as HTMLElement).closest('button, a, input, [role="checkbox"]')) return;
+                      handleSelectBusiness(b);
+                    }}
+                  >
                   {selection && (
                     <td className="py-3 px-3" onClick={(e) => e.stopPropagation()}>
                       <Checkbox
@@ -411,9 +464,10 @@ export function ResultsTable({
                       </Button>
                     </div>
                   </td>
-                </tr>
-              );
-            })}
+                  </motion.tr>
+                );
+              })}
+            </AnimatePresence>
           </tbody>
         </table>
       </div>
