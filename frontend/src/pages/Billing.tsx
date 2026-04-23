@@ -6,12 +6,14 @@ import { Separator } from "@/components/ui/separator";
 import { CheckCircle2, CreditCard, Zap, Search } from "lucide-react";
 import { motion } from "framer-motion";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
+import { useCredits } from "@/hooks/useCredits";
 import { Skeleton } from "@/components/ui/skeleton";
 
-const plans = [
-  { name: "Starter", price: 29, credits: 50, features: ["50 lead lookups/mo", "Basic analysis", "Email templates"] },
-  { name: "Pro", price: 79, credits: 200, features: ["200 lead lookups/mo", "Full analysis suite", "AI scripts & prompts", "CSV export", "Priority support"], current: true },
-  { name: "Agency", price: 199, credits: 1000, features: ["1,000 lead lookups/mo", "Everything in Pro", "Team seats (up to 5)", "White-label reports", "API access"] },
+const PLAN_DETAILS = [
+  { id: "free", name: "Free", price: 0, features: ["100 lead lookups/mo", "Basic analysis"] },
+  { id: "starter", name: "Starter", price: 29, features: ["500 lead lookups/mo", "Basic analysis", "Email templates"] },
+  { id: "pro", name: "Pro", price: 79, features: ["2,000 lead lookups/mo", "Full analysis suite", "AI scripts & prompts", "CSV export", "Priority support"] },
+  { id: "enterprise", name: "Enterprise", price: 199, features: ["10,000 lead lookups/mo", "Everything in Pro", "Team seats (up to 5)", "White-label reports", "API access"] },
 ];
 
 const invoices = [
@@ -23,8 +25,10 @@ const invoices = [
 
 const Billing = () => {
   const { searches, loading: searchesLoading } = useSearchHistory();
+  const { remaining, max, used, plan } = useCredits();
 
   const totalSpend = searches.reduce((sum, s) => sum + (s.cost?.totalDfs ?? 0), 0);
+  const usagePct = max > 0 ? (used / max) * 100 : 0;
 
   function formatDate(ts: { seconds: number } | null) {
     if (!ts) return "—";
@@ -98,45 +102,48 @@ const Billing = () => {
             <CardTitle className="flex items-center gap-2">
               <Zap className="h-5 w-5 text-primary" /> Credit Usage
             </CardTitle>
-            <CardDescription>142 of 200 credits remaining this billing cycle</CardDescription>
+            <CardDescription>{remaining} of {max} credits remaining this billing cycle</CardDescription>
           </CardHeader>
           <CardContent>
-            <Progress value={29} className="h-2 mb-2" />
-            <p className="text-xs text-muted-foreground">58 credits used • Resets Apr 30, 2026</p>
+            <Progress value={usagePct} className="h-2 mb-2" />
+            <p className="text-xs text-muted-foreground">{used} credits used · {plan.charAt(0).toUpperCase() + plan.slice(1)} plan</p>
           </CardContent>
         </Card>
 
         {/* Plans */}
         <div>
           <h2 className="text-lg font-semibold mb-4">Plans</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {plans.map((plan) => (
-              <Card key={plan.name} className={plan.current ? "border-primary ring-1 ring-primary" : ""}>
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-lg">{plan.name}</CardTitle>
-                    {plan.current && <Badge>Current</Badge>}
-                  </div>
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-3xl font-bold">${plan.price}</span>
-                    <span className="text-muted-foreground text-sm">/mo</span>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <ul className="space-y-2 mb-4">
-                    {plan.features.map((f) => (
-                      <li key={f} className="flex items-center gap-2 text-sm">
-                        <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
-                        {f}
-                      </li>
-                    ))}
-                  </ul>
-                  <Button variant={plan.current ? "secondary" : "default"} className="w-full" disabled={plan.current}>
-                    {plan.current ? "Current Plan" : "Upgrade"}
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {PLAN_DETAILS.map((p) => {
+              const isCurrent = p.id === plan;
+              return (
+                <Card key={p.id} className={isCurrent ? "border-primary ring-1 ring-primary" : ""}>
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-lg">{p.name}</CardTitle>
+                      {isCurrent && <Badge>Current</Badge>}
+                    </div>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-3xl font-bold">{p.price === 0 ? "Free" : `$${p.price}`}</span>
+                      {p.price > 0 && <span className="text-muted-foreground text-sm">/mo</span>}
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <ul className="space-y-2 mb-4">
+                      {p.features.map((f) => (
+                        <li key={f} className="flex items-center gap-2 text-sm">
+                          <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                          {f}
+                        </li>
+                      ))}
+                    </ul>
+                    <Button variant={isCurrent ? "secondary" : "default"} className="w-full" disabled={isCurrent}>
+                      {isCurrent ? "Current Plan" : "Upgrade"}
+                    </Button>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         </div>
 

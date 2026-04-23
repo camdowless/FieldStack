@@ -119,17 +119,16 @@ const Index = () => {
     }
   }, [searchJob.results]);
 
-  // Deduct credit when search completes
+  // Log cost breakdown when search completes
   const prevStatusRef = useRef(searchJob.status);
   useEffect(() => {
     if (prevStatusRef.current !== "completed" && searchJob.status === "completed") {
-      credits.consume(1);
       if (searchJob.cost) {
         console.log("[search] Cost breakdown:", searchJob.cost);
       }
     }
     prevStatusRef.current = searchJob.status;
-  }, [searchJob.status, searchJob.cost, credits]);
+  }, [searchJob.status, searchJob.cost]);
 
   const handleSearch = useCallback(() => {
     const keyword = selectedCategory !== "all" ? selectedCategory : "businesses";
@@ -140,9 +139,14 @@ const Index = () => {
       return;
     }
 
+    if (!credits.hasCredits) {
+      toast.error("You're out of credits. Please upgrade your plan to continue searching.");
+      return;
+    }
+
     searchJob.startSearch({ keyword, location: loc, radius, limit: resultLimit });
     setForceEmpty(false);
-  }, [selectedCategory, location, radius, resultLimit, searchJob.startSearch]);
+  }, [selectedCategory, location, radius, resultLimit, searchJob.startSearch, credits.hasCredits]);
 
   // When the hook rehydrates a job (page refresh), mirror params into local
   // form state and clear forceEmpty so the results view is shown.

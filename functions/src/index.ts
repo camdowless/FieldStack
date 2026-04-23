@@ -18,6 +18,8 @@ import { geocodeLocation, milesToKm, buildLocationCoordinate } from "./geocode";
 import { computeJobId, deleteResultsSubcollection, createOrReuseJob, isJobCancelled, cancelJob, identifyStuckJobs, identifyExpiredJobs } from "./jobHelpers";
 import { Timestamp } from "firebase-admin/firestore";
 import { checkUserRole, checkAdminRole } from "./authHelpers";
+import { PLAN_CREDITS } from "./types";
+import type { Subscription, SubscriptionPlan } from "./types";
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -100,6 +102,23 @@ type FirestoreUserProfile = Omit<UserProfile, "createdAt" | "updatedAt"> & {
 };
 
 /**
+ * Build a default subscription object for a given plan.
+ */
+function buildDefaultSubscription(plan: SubscriptionPlan = "free"): Subscription {
+  return {
+    plan,
+    status: "active",
+    creditsUsed: 0,
+    creditsTotal: PLAN_CREDITS[plan],
+    currentPeriodStart: null,
+    currentPeriodEnd: null,
+    stripeCustomerId: null,
+    stripeSubscriptionId: null,
+    cancelAtPeriodEnd: false,
+  };
+}
+
+/**
  * Build a complete user profile document from the given fields.
  * Single source of truth for the shape of a new user document.
  */
@@ -116,8 +135,7 @@ function buildUserProfile(fields: {
     displayName: fields.displayName ?? null,
     photoURL: fields.photoURL ?? null,
     role: "user",
-    plan: "free",
-    credits: 100,
+    subscription: buildDefaultSubscription("free"),
     createdAt: now,
     updatedAt: now,
   };
@@ -140,7 +158,7 @@ async function createUserProfile(user: admin.auth.UserRecord): Promise<void> {
     photoURL: user.photoURL,
   });
 
-  console.log(`[createUserProfile] attempting write uid=${user.uid} fields=${JSON.stringify({ email: profile.email, displayName: profile.displayName, role: profile.role, plan: profile.plan, credits: profile.credits })}`);
+  console.log(`[createUserProfile] attempting write uid=${user.uid} fields=${JSON.stringify({ email: profile.email, displayName: profile.displayName, role: profile.role, plan: profile.subscription.plan, creditsTotal: profile.subscription.creditsTotal })}`);
 
   try {
     await ref.create(profile);
@@ -460,10 +478,8 @@ export const dataforseoBusinessSearch = functions
 
       const uid = decodedToken.uid;
 
-      // Ensure user profile exists (fire-and-forget)
-      ensureUserProfile(uid).catch((err) => {
-        console.error("[user] ensureUserProfile failed:", err);
-      });
+      // Ensure user profile exists (must complete before credit check)
+      await ensureUserProfile(uid);
 
       // ── Rate limiting ──
       const rateLimitReset = await checkRateLimit(uid, "search", 3);
@@ -518,18 +534,88 @@ export const dataforseoBusinessSearch = functions
         ttl: Timestamp.fromMillis(now + 24 * 60 * 60 * 1000),
       };
 
+      // ── Credit check & deduction (atomic) ──
+      // Performed AFTER input validation but BEFORE job creation so we don't
+      // charge for invalid requests. The credit is deducted inside a transaction
+      // that also verifies the user has sufficient credits.
+      //
+      // We must also handle job deduplication: if the same search is already
+      // running, we return the existing jobId without charging again.
+      const userRef = db.collection(USERS_COLLECTION).doc(uid);
+
+      // Pre-flight credit check (read-only) — reject early before creating any job.
+      {
+        const snap = await userRef.get();
+        if (!snap.exists) {
+          res.status(402).json({ error: "Insufficient credits. Please upgrade your plan.", code: "INSUFFICIENT_CREDITS" });
+          return;
+        }
+        const data = snap.data()!;
+        const sub = data.subscription as Subscription | undefined;
+        const creditsUsed = sub?.creditsUsed ?? 0;
+        const creditsTotal = sub?.creditsTotal ?? (data.credits as number | undefined) ?? 0;
+        if (creditsUsed >= creditsTotal) {
+          res.status(402).json({ error: "Insufficient credits. Please upgrade your plan.", code: "INSUFFICIENT_CREDITS" });
+          return;
+        }
+      }
+
+      // ── Create or reuse job ──
       try {
         const result = await createOrReuseJob(jobId, jobData, jobRef as unknown as import("./jobHelpers").JobDocRef, deleteResultsSubcollection);
         if (result.isExisting) {
-          console.log(`[Job_Creator] Returning existing running job ${jobId}`);
-        } else {
-          console.log(`[Job_Creator] Created new job ${jobId} for uid=${uid}`);
+          // Duplicate running job — return existing ID without charging
+          console.log(`[Job_Creator] Returning existing running job ${jobId} (no credit charged)`);
+          res.status(200).json({ jobId });
+          return;
         }
-        res.status(200).json({ jobId });
       } catch (err: unknown) {
         console.error("[Job_Creator] Firestore error:", err);
         res.status(500).json({ error: "An unexpected error occurred. Please try again." });
+        return;
       }
+
+      // ── Atomic credit deduction (new job only) ──
+      // The pre-flight check above was a non-transactional read. Two concurrent
+      // requests could both pass it. This transaction is the authoritative gate.
+      try {
+        await db.runTransaction(async (tx) => {
+          const snap = await tx.get(userRef);
+          if (!snap.exists) {
+            throw new Error("INSUFFICIENT_CREDITS");
+          }
+          const data = snap.data()!;
+          const sub = data.subscription as Subscription | undefined;
+          const creditsUsed = sub?.creditsUsed ?? 0;
+          const creditsTotal = sub?.creditsTotal ?? (data.credits as number | undefined) ?? 0;
+          if (creditsUsed >= creditsTotal) {
+            throw new Error("INSUFFICIENT_CREDITS");
+          }
+          tx.update(userRef, {
+            "subscription.creditsUsed": admin.firestore.FieldValue.increment(1),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        });
+      } catch (err) {
+        if (err instanceof Error && err.message === "INSUFFICIENT_CREDITS") {
+          // Roll back: delete the job so the onCreate processor doesn't run a
+          // search the user can't pay for. The processor handles missing docs
+          // gracefully (its jobRef.update calls will fail and it exits).
+          await deleteResultsSubcollection(jobId);
+          await jobRef.delete().catch((delErr) => {
+            console.error(`[credits] Failed to roll back job ${jobId}:`, delErr);
+          });
+          res.status(402).json({ error: "Insufficient credits. Please upgrade your plan.", code: "INSUFFICIENT_CREDITS" });
+          return;
+        }
+        console.error("[credits] Transaction failed:", err);
+        res.status(500).json({ error: "An unexpected error occurred. Please try again." });
+        return;
+      }
+
+      console.log(`[credits] Deducted 1 credit for uid=${uid}`);
+      console.log(`[Job_Creator] Created new job ${jobId} for uid=${uid}`);
+      res.status(200).json({ jobId });
     });
   });
 
@@ -1952,9 +2038,10 @@ export const getAdminStats = functions.https.onRequest((req, res) => {
     }
 
     try {
-      const [statsSnap, bizCount] = await Promise.all([
+      const [statsSnap, bizCount, highOpportunityCount] = await Promise.all([
         db.collection("admin").doc("stats").get(),
         db.collection(BUSINESSES_COLLECTION).count().get(),
+        db.collection(BUSINESSES_COLLECTION).where("score", ">", 70).count().get(),
       ]);
 
       const stats = statsSnap.data() ?? {};
@@ -1962,6 +2049,10 @@ export const getAdminStats = functions.https.onRequest((req, res) => {
       const totalResultCount = stats.totalResultCount ?? 0;
       const totalDfsCost = stats.totalDfsCost ?? 0;
       const totalBusinessesIndexed = bizCount.data().count;
+      const highOpportunity = highOpportunityCount.data().count;
+      const pctHighOpportunity = totalBusinessesIndexed > 0
+        ? (highOpportunity / totalBusinessesIndexed) * 100
+        : 0;
 
       const avgCostPerSearch = totalSearches > 0 ? totalDfsCost / totalSearches : 0;
       const avgResultsPerSearch = totalSearches > 0 ? totalResultCount / totalSearches : 0;
@@ -1980,6 +2071,8 @@ export const getAdminStats = functions.https.onRequest((req, res) => {
           totalCachedBusinesses: stats.totalCachedBusinesses ?? 0,
           totalFreshBusinesses: stats.totalFreshBusinesses ?? 0,
         },
+        highOpportunityCount: highOpportunity,
+        pctHighOpportunity,
         lastUpdated: stats.lastUpdated ?? null,
       });
     } catch (err) {

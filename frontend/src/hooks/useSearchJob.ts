@@ -335,6 +335,10 @@ export function useSearchJob(): UseSearchJobReturn {
             setState((s) => ({ ...s, status: "rate_limited", retryAfter }));
             return;
           }
+          if (res.status === 402 && body?.code === "INSUFFICIENT_CREDITS") {
+            setState((s) => ({ ...s, status: "failed", error: "You're out of credits. Please upgrade your plan to continue searching." }));
+            return;
+          }
           const msg = typeof body?.error === "string" ? body.error : `Search failed (${res.status})`;
           setState((s) => ({ ...s, status: "failed", error: msg }));
           return;

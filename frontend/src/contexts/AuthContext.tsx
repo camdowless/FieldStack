@@ -11,13 +11,24 @@ import {
 import { doc, onSnapshot } from "firebase/firestore";
 import { auth, googleProvider, firestore } from "@/lib/firebase";
 
+export interface Subscription {
+  plan: "free" | "starter" | "pro" | "enterprise";
+  status: "active" | "past_due" | "cancelled" | "trialing";
+  creditsUsed: number;
+  creditsTotal: number;
+  currentPeriodStart: unknown;
+  currentPeriodEnd: unknown;
+  stripeCustomerId: string | null;
+  stripeSubscriptionId: string | null;
+  cancelAtPeriodEnd: boolean;
+}
+
 export interface UserProfile {
   uid: string;
   email: string | null;
   displayName: string | null;
   photoURL: string | null;
-  plan: "free" | "pro";
-  credits: number;
+  subscription: Subscription;
   createdAt: unknown;
   updatedAt: unknown;
 }

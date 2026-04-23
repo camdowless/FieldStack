@@ -7,35 +7,26 @@ import { onAuthStateChanged } from "firebase/auth";
 const SEARCH_ENDPOINT = "/api/search";
 
 /**
- * Get a fresh Firebase ID token, always force-refreshing to ensure the
- * latest custom claims (role) are present. Handles the race condition
+ * Get a Firebase ID token for API calls. Uses the cached token by default
+ * (Firebase SDK auto-refreshes when near expiry). Handles the race condition
  * where auth.currentUser is null immediately after page load.
  *
- * Returns null if the user is not signed in or the token cannot be obtained.
+ * Pass forceRefresh=true only after custom-claim changes (e.g. role updates).
  */
-export async function getAuthToken(): Promise<string | null> {
-  const caller = new Error().stack?.split("\n")[2]?.trim() ?? "unknown";
-  console.log(`[getAuthToken] called — auth.currentUser=${auth.currentUser?.uid ?? "null"} caller=${caller}`);
-
+export async function getAuthToken(forceRefresh = false): Promise<string | null> {
   // Fast path: currentUser is already resolved
   if (auth.currentUser) {
-    const uid = auth.currentUser.uid;
-    console.log(`[getAuthToken] Fast path — uid=${uid} requesting forceRefresh token…`);
     try {
-      const token = await auth.currentUser.getIdToken(/* forceRefresh */ true);
-      console.log(`[getAuthToken] ✅ Fast path token obtained uid=${uid} token_prefix=${token.slice(0, 20)}… length=${token.length}`);
-      return token;
+      return await auth.currentUser.getIdToken(forceRefresh);
     } catch (err) {
-      console.error(`[getAuthToken] ❌ Fast path getIdToken failed uid=${uid}`, err);
+      console.error("[getAuthToken] getIdToken failed", err);
       return null;
     }
   }
 
   // Slow path: auth.currentUser is null — wait for Firebase to resolve auth state
-  console.log("[getAuthToken] Slow path — auth.currentUser is null, waiting for onAuthStateChanged (max 5s)…");
   return new Promise((resolve) => {
     const timeout = setTimeout(() => {
-      console.error("[getAuthToken] ❌ Slow path TIMEOUT — auth state did not resolve within 5s. Returning null.");
       unsub();
       resolve(null);
     }, 5_000);
@@ -44,17 +35,13 @@ export async function getAuthToken(): Promise<string | null> {
       clearTimeout(timeout);
       unsub();
       if (!user) {
-        console.warn("[getAuthToken] Slow path — onAuthStateChanged resolved with null user (signed out). Returning null.");
         resolve(null);
         return;
       }
-      console.log(`[getAuthToken] Slow path — onAuthStateChanged resolved uid=${user.uid}. Requesting forceRefresh token…`);
       try {
-        const token = await user.getIdToken(/* forceRefresh */ true);
-        console.log(`[getAuthToken] ✅ Slow path token obtained uid=${user.uid} token_prefix=${token.slice(0, 20)}… length=${token.length}`);
-        resolve(token);
+        resolve(await user.getIdToken(forceRefresh));
       } catch (err) {
-        console.error(`[getAuthToken] ❌ Slow path getIdToken failed uid=${user.uid}`, err);
+        console.error("[getAuthToken] getIdToken failed", err);
         resolve(null);
       }
     });
@@ -175,7 +162,10 @@ export async function createSearchJob(
     const body = await res.json().catch(() => ({ error: res.statusText }));
     const msg = typeof body?.error === "string" ? body.error : `Search failed (${res.status})`;
     const retryable = res.status >= 500 || res.status === 429;
-    throw new SearchError(msg, res.status, retryable);
+    const code = typeof body?.code === "string" ? body.code : undefined;
+    const err = new SearchError(msg, res.status, retryable);
+    if (code) (err as SearchError & { code?: string }).code = code;
+    throw err;
   }
 
   const data = await res.json().catch(() => null);
@@ -539,6 +529,8 @@ export interface AdminStatsResponse {
     totalCachedBusinesses: number;
     totalFreshBusinesses: number;
   };
+  highOpportunityCount: number;
+  pctHighOpportunity: number;
   lastUpdated: { seconds: number } | { _seconds: number } | string | null;
 }
 

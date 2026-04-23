@@ -356,6 +356,32 @@ export interface CancelJobResponse {
   success: boolean;
 }
 
+// ─── Subscription ─────────────────────────────────────────────────────────────
+
+export type SubscriptionPlan = "free" | "starter" | "pro" | "enterprise";
+export type SubscriptionStatus = "active" | "past_due" | "cancelled" | "trialing";
+
+export interface Subscription {
+  plan: SubscriptionPlan;
+  status: SubscriptionStatus;
+  creditsUsed: number;
+  creditsTotal: number;
+  currentPeriodStart: Timestamp | null;
+  currentPeriodEnd: Timestamp | null;
+  stripeCustomerId: string | null;
+  stripeSubscriptionId: string | null;
+  cancelAtPeriodEnd: boolean;
+}
+
+// ─── Plan credit limits (single source of truth) ─────────────────────────────
+
+export const PLAN_CREDITS: Record<SubscriptionPlan, number> = {
+  free: 100,
+  starter: 500,
+  pro: 2000,
+  enterprise: 10000,
+};
+
 // ─── User Profile ─────────────────────────────────────────────────────────────
 
 export interface UserProfile {
@@ -364,8 +390,7 @@ export interface UserProfile {
   displayName: string | null;
   photoURL: string | null;
   role: "user" | "admin";
-  plan: "free" | "pro";
-  credits: number;
+  subscription: Subscription;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

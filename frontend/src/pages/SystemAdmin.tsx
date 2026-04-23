@@ -38,7 +38,7 @@ export default function SystemAdmin() {
   const {
     totalSearches, totalResultCount, totalDfsCost,
     totalBusinessesIndexed, avgCostPerSearch, avgResultsPerSearch,
-    breakdown, lastUpdated, loading, error,
+    breakdown, highOpportunityCount, pctHighOpportunity, lastUpdated, loading, error,
   } = useAdminStats();
 
   const [recalculating, setRecalculating] = useState(false);
@@ -139,6 +139,11 @@ export default function SystemAdmin() {
                     <StatRow label="Fresh fetches" value={fmtN(freshCount)} sub="not from cache" />
                     <StatRow label="Cached hits" value={fmtN(breakdown.totalCachedBusinesses)} />
                     <StatRow label="Avg results / search" value={avgResultsPerSearch > 0 ? avgResultsPerSearch.toFixed(1) : "—"} />
+                    <StatRow
+                      label="High opportunity businesses"
+                      value={totalBusinessesIndexed > 0 ? `${pctHighOpportunity.toFixed(1)}%` : "—"}
+                      sub={`score > 70 · ${fmtN(highOpportunityCount)} of ${fmtN(totalBusinessesIndexed)}`}
+                    />
                   </div>
                 </div>
 

@@ -36,6 +36,8 @@ export function useAdminStats(): AdminStats {
       totalCachedBusinesses: 0,
       totalFreshBusinesses: 0,
     },
+    highOpportunityCount: data?.highOpportunityCount ?? 0,
+    pctHighOpportunity: data?.pctHighOpportunity ?? 0,
     lastUpdated: data?.lastUpdated ?? null,
     loading,
     error,
