@@ -51,47 +51,47 @@
     font-family: 'Inter', system-ui, sans-serif;
   }
 
-  /* Gradient & Bold Theme */
+  /* Dark Theme */
   .theme-gradient {
-    --background: 240 15% 9%;
-    --foreground: 0 0% 95%;
-    --card: 240 15% 12%;
-    --card-foreground: 0 0% 95%;
-    --popover: 240 15% 12%;
-    --popover-foreground: 0 0% 95%;
-    --primary: 260 80% 60%;
+    --background: 0 0% 8%;
+    --foreground: 0 0% 93%;
+    --card: 0 0% 11%;
+    --card-foreground: 0 0% 93%;
+    --popover: 0 0% 11%;
+    --popover-foreground: 0 0% 93%;
+    --primary: 210 100% 56%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 240 12% 18%;
-    --secondary-foreground: 0 0% 95%;
-    --muted: 240 12% 18%;
-    --muted-foreground: 240 5% 60%;
-    --accent: 240 12% 22%;
-    --accent-foreground: 0 0% 95%;
+    --secondary: 0 0% 16%;
+    --secondary-foreground: 0 0% 93%;
+    --muted: 0 0% 16%;
+    --muted-foreground: 0 0% 55%;
+    --accent: 0 0% 20%;
+    --accent-foreground: 0 0% 93%;
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
-    --border: 240 12% 20%;
-    --input: 240 12% 20%;
-    --ring: 260 80% 60%;
+    --border: 0 0% 18%;
+    --input: 0 0% 18%;
+    --ring: 210 100% 56%;
     --radius: 0.75rem;
-    --sidebar-background: 240 15% 10%;
-    --sidebar-foreground: 0 0% 90%;
-    --sidebar-primary: 260 80% 60%;
+    --sidebar-background: 0 0% 7%;
+    --sidebar-foreground: 0 0% 88%;
+    --sidebar-primary: 210 100% 56%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 12% 18%;
-    --sidebar-accent-foreground: 0 0% 90%;
-    --sidebar-border: 240 12% 20%;
-    --sidebar-ring: 260 80% 60%;
+    --sidebar-accent: 0 0% 14%;
+    --sidebar-accent-foreground: 0 0% 88%;
+    --sidebar-border: 0 0% 16%;
+    --sidebar-ring: 210 100% 56%;
 
     --score-high: 142 71% 45%;
     --score-medium: 38 92% 50%;
     --score-low: 0 72% 51%;
-    --surface-elevated: 240 15% 14%;
-    --gradient-start: 260 80% 60%;
-    --gradient-end: 180 70% 50%;
+    --surface-elevated: 0 0% 14%;
+    --gradient-start: 210 100% 56%;
+    --gradient-end: 190 90% 50%;
 
-    --info: 215 35% 18%;
-    --info-foreground: 210 90% 85%;
-    --info-border: 215 40% 28%;
+    --info: 210 30% 16%;
+    --info-foreground: 210 80% 80%;
+    --info-border: 210 40% 26%;
 
     font-family: 'Space Grotesk', system-ui, sans-serif;
   }

@@ -24,9 +24,9 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const navItems = [
-  { title: "Lead Search", url: "/", icon: Search },
-  { title: "Search History", url: "/search-history", icon: History },
-  { title: "Saved Leads", url: "/dashboard", icon: LayoutDashboard },
+  { title: "Search", url: "/", icon: Search },
+  { title: "History", url: "/search-history", icon: History },
+  { title: "Saved", url: "/dashboard", icon: LayoutDashboard },
 ];
 
 const accountItems = [

@@ -13,6 +13,17 @@ import {
 import { firestore } from "@/lib/firebase";
 import { useAuth } from "@/contexts/AuthContext";
 
+export interface SearchCostBreakdown {
+  businessSearch: number;
+  instantPages: number;
+  lighthouse: number;
+  totalDfs: number;
+  firestoreReads: number;
+  firestoreWrites: number;
+  cachedBusinesses: number;
+  freshBusinesses: number;
+}
+
 export interface FirestoreSavedSearch {
   id: string;
   query: string;
@@ -22,6 +33,7 @@ export interface FirestoreSavedSearch {
   cids: string[];
   resultCount: number;
   createdAt: string; // ISO string derived from Firestore timestamp
+  cost?: SearchCostBreakdown | null;
 }
 
 export function useSavedSearches() {
@@ -55,6 +67,7 @@ export function useSavedSearches() {
             cids: data.cids ?? [],
             resultCount: data.resultCount ?? 0,
             createdAt: ts.toISOString(),
+            cost: data.cost ?? null,
           };
         });
         setSearches(results);

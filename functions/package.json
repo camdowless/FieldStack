@@ -12,7 +12,7 @@
     "migrate:solopro:emulator": "FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 node scripts/migrateUsersToSoloPro.mjs"
   },
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "dependencies": {
     "cors": "^2.8.5",

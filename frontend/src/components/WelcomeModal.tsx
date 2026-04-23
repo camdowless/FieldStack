@@ -61,9 +61,9 @@ export function WelcomeModal() {
           <div className="flex items-start gap-3 rounded-lg bg-muted/60 p-4">
             <Zap className="h-5 w-5 text-primary mt-0.5 shrink-0" />
             <div>
-              <p className="text-sm font-semibold">You have {credits} free searches to start</p>
+              <p className="text-sm font-semibold">You have {credits} free searches</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Search any city or zip code to find businesses that need your services. Each search uses 1 credit.
+                Search any city or zip code to find businesses that need your services. Each search uses 1 credit. These don't expire or reset.
               </p>
             </div>
           </div>
@@ -88,7 +88,7 @@ export function WelcomeModal() {
             <div className="min-w-0">
               <p className="text-sm font-semibold">Need more? Upgrade anytime.</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Pro plans start at $19/mo for 30 searches. No commitment required.
+                Pro plans start at $19/mo for 30 searches/month. No commitment required.
               </p>
             </div>
           </div>

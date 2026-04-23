@@ -57,7 +57,7 @@ const PLANS = [
     creditsPerMonth: 3,
     canSaveLeads: false,
     canGenerateScripts: false,
-    features: ["3 searches / month", "Basic lead analysis"],
+    features: ["3 searches total", "Basic lead analysis"],
     sortOrder: 0,
     active: true,
   },

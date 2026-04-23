@@ -7,9 +7,10 @@ import { useFirebaseLeadStore } from "@/hooks/useFirebaseLeadStore";
 import { usePreferences } from "@/hooks/usePreferences";
 import { ResultsTable } from "@/components/ResultsTable";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatCategoryLabel } from "@/data/dfsCategories";
 import {
-  Trash2, Search, Clock, X, Loader2, ArrowLeft,
+  Trash2, Search, Clock, X, Loader2, ArrowLeft, Coins,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { Business } from "@/data/mockBusinesses";
@@ -175,6 +176,7 @@ const SearchHistory = () => {
               <tr className="border-b text-left text-muted-foreground">
                 <th className="py-3 px-3 font-medium">Search</th>
                 <th className="py-3 px-3 font-medium w-[100px]">Results</th>
+                <th className="py-3 px-3 font-medium w-[100px]">Credits</th>
                 <th className="py-3 px-3 font-medium w-[120px]">When</th>
                 <th className="py-3 px-3 font-medium w-[60px]"></th>
               </tr>
@@ -193,6 +195,37 @@ const SearchHistory = () => {
                     </div>
                   </td>
                   <td className="py-3 px-3 text-muted-foreground">{s.resultCount} leads</td>
+                  <td className="py-3 px-3">
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <div className="flex items-center gap-1.5 text-muted-foreground w-fit cursor-default" onClick={(e) => e.stopPropagation()}>
+                            <Coins className="h-3.5 w-3.5 shrink-0" />
+                            <span>1 credit</span>
+                          </div>
+                        </TooltipTrigger>
+                        {s.cost && (
+                          <TooltipContent side="right" className="text-xs space-y-1 p-3">
+                            <p className="font-medium mb-1">DFS cost breakdown</p>
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+                              <span className="text-muted-foreground">Business search</span>
+                              <span className="text-right">${s.cost.businessSearch.toFixed(4)}</span>
+                              <span className="text-muted-foreground">Instant pages</span>
+                              <span className="text-right">${s.cost.instantPages.toFixed(4)}</span>
+                              <span className="text-muted-foreground">Lighthouse</span>
+                              <span className="text-right">${s.cost.lighthouse.toFixed(4)}</span>
+                              <span className="text-muted-foreground">Fresh businesses</span>
+                              <span className="text-right">{s.cost.freshBusinesses}</span>
+                              <span className="text-muted-foreground">Cached businesses</span>
+                              <span className="text-right">{s.cost.cachedBusinesses}</span>
+                              <span className="font-medium border-t pt-1">Total DFS</span>
+                              <span className="text-right font-medium border-t pt-1">${s.cost.totalDfs.toFixed(4)}</span>
+                            </div>
+                          </TooltipContent>
+                        )}
+                      </Tooltip>
+                    </TooltipProvider>
+                  </td>
                   <td className="py-3 px-3 text-muted-foreground">{formatDate(s.createdAt)}</td>
                   <td className="py-3 px-3">
                     <Button

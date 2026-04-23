@@ -46,6 +46,7 @@ import Dashboard from "./pages/Dashboard.tsx";
 import SearchHistory from "./pages/SearchHistory.tsx";
 import Settings from "./pages/Settings.tsx";
 import Billing from "./pages/Billing.tsx";
+import Help from "./pages/Help.tsx";
 const SystemAdmin = lazy(() => import("./pages/SystemAdmin.tsx"));
 import NotFound from "./pages/NotFound.tsx";
 
@@ -62,7 +63,14 @@ function AuthGate() {
     );
   }
 
-  if (!user) return <Login />;
+  if (!user) {
+    return (
+      <Routes>
+        {/* Allow ?mode=signup and ?mode=login deep-links from the marketing site */}
+        <Route path="*" element={<Login />} />
+      </Routes>
+    );
+  }
 
   return (
     <AppLayout>
@@ -73,6 +81,7 @@ function AuthGate() {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/billing" element={<Billing />} />
+          <Route path="/help" element={<Help />} />
           <Route path="/admin" element={<ProtectedAdminRoute element={<Suspense fallback={null}><SystemAdmin /></Suspense>} />} />
           <Route path="*" element={<NotFound />} />
         </Routes>

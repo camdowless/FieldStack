@@ -73,6 +73,18 @@
         "function": "stripeWebhook"
       },
       {
+        "source": "/api/changeSubscription",
+        "function": "changeSubscription"
+      },
+      {
+        "source": "/api/cancelSubscription",
+        "function": "cancelSubscription"
+      },
+      {
+        "source": "/api/reactivateSubscription",
+        "function": "reactivateSubscription"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

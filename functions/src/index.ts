@@ -2235,7 +2235,6 @@ export const auditDeadSites = functions
 // ─── Create Stripe Checkout Session ──────────────────────────────────────────
 
 export const createCheckoutSession = functions
-  .runWith({ minInstances: 1 })
   .https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
     if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
@@ -2294,7 +2293,6 @@ export const createCheckoutSession = functions
 });
 
 export const createPortalSession = functions
-  .runWith({ minInstances: 1 })
   .https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
     if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
@@ -2326,6 +2324,153 @@ export const createPortalSession = functions
     });
 
     res.status(200).json({ url: session.url });
+  });
+});
+
+// ─── Change Subscription (Downgrade / Upgrade in-place) ──────────────────────
+
+export const changeSubscription = functions
+  .https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
+
+    let decodedToken: admin.auth.DecodedIdToken;
+    try {
+      decodedToken = await verifyUserRole(req);
+    } catch {
+      res.status(401).json({ error: "Unauthorized. Please sign in." });
+      return;
+    }
+
+    const uid = decodedToken.uid;
+    const { priceId } = req.body ?? {};
+
+    // Validate priceId
+    const priceToplan = await buildPriceIdToPlanMap();
+    if (!priceId || !priceToplan.has(priceId)) {
+      res.status(400).json({ error: "Invalid plan selected" });
+      return;
+    }
+
+    const userSnap = await db.collection(USERS_COLLECTION).doc(uid).get();
+    if (!userSnap.exists) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const userData = userSnap.data()!;
+    const stripeSubscriptionId: string | null = userData.subscription?.stripeSubscriptionId ?? null;
+    if (!stripeSubscriptionId) {
+      res.status(400).json({ error: "No active subscription to change" });
+      return;
+    }
+
+    // Retrieve current subscription to get the item id
+    const stripeSub = await getStripe().subscriptions.retrieve(stripeSubscriptionId);
+    const itemId = stripeSub.items.data[0]?.id;
+    if (!itemId) {
+      res.status(500).json({ error: "Could not retrieve subscription item" });
+      return;
+    }
+
+    // Update the subscription immediately with proration
+    await getStripe().subscriptions.update(stripeSubscriptionId, {
+      items: [{ id: itemId, price: priceId }],
+      proration_behavior: "always_invoice",
+    });
+
+    // Webhook (customer.subscription.updated) will sync Firestore automatically
+    res.status(200).json({ success: true });
+  });
+});
+
+// ─── Cancel Subscription ──────────────────────────────────────────────────────
+
+export const cancelSubscription = functions
+  .https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
+
+    let decodedToken: admin.auth.DecodedIdToken;
+    try {
+      decodedToken = await verifyUserRole(req);
+    } catch {
+      res.status(401).json({ error: "Unauthorized. Please sign in." });
+      return;
+    }
+
+    const uid = decodedToken.uid;
+    const userSnap = await db.collection(USERS_COLLECTION).doc(uid).get();
+    if (!userSnap.exists) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const stripeSubscriptionId: string | null = userSnap.data()?.subscription?.stripeSubscriptionId ?? null;
+    if (!stripeSubscriptionId) {
+      res.status(400).json({ error: "No active subscription to cancel" });
+      return;
+    }
+
+    const { reason } = req.body ?? {};
+
+    // Cancel at period end — user keeps access until billing cycle ends
+    await getStripe().subscriptions.update(stripeSubscriptionId, {
+      cancel_at_period_end: true,
+    });
+
+    // Optimistically update Firestore so UI reflects immediately; store reason for analytics
+    const update: Record<string, unknown> = {
+      "subscription.cancelAtPeriodEnd": true,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    if (reason && typeof reason === "string") {
+      update["subscription.cancelReason"] = reason.slice(0, 200);
+    }
+    await db.collection(USERS_COLLECTION).doc(uid).update(update);
+
+    res.status(200).json({ success: true });
+  });
+});
+
+// ─── Reactivate Subscription (undo cancel) ────────────────────────────────────
+
+export const reactivateSubscription = functions
+  .https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
+
+    let decodedToken: admin.auth.DecodedIdToken;
+    try {
+      decodedToken = await verifyUserRole(req);
+    } catch {
+      res.status(401).json({ error: "Unauthorized. Please sign in." });
+      return;
+    }
+
+    const uid = decodedToken.uid;
+    const userSnap = await db.collection(USERS_COLLECTION).doc(uid).get();
+    if (!userSnap.exists) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const stripeSubscriptionId: string | null = userSnap.data()?.subscription?.stripeSubscriptionId ?? null;
+    if (!stripeSubscriptionId) {
+      res.status(400).json({ error: "No active subscription to reactivate" });
+      return;
+    }
+
+    await getStripe().subscriptions.update(stripeSubscriptionId, {
+      cancel_at_period_end: false,
+    });
+
+    await db.collection(USERS_COLLECTION).doc(uid).update({
+      "subscription.cancelAtPeriodEnd": false,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    res.status(200).json({ success: true });
   });
 });
 
