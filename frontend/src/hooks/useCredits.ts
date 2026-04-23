@@ -8,11 +8,17 @@ export function useCredits() {
   const total = sub?.creditsTotal ?? 0;
   const remaining = Math.max(0, total - used);
 
+  const periodEnd = sub?.currentPeriodEnd as { seconds: number } | null | undefined;
+  const refreshDate = periodEnd?.seconds
+    ? new Date(periodEnd.seconds * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    : null;
+
   return {
     remaining,
     max: total,
     used,
     plan: sub?.plan ?? "free",
     hasCredits: remaining > 0,
+    refreshDate,
   };
 }

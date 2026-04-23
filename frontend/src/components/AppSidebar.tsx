@@ -41,7 +41,7 @@ export function AppSidebar() {
   const collapsed = state === "collapsed";
   const { theme, toggleTheme } = useTheme();
   const { logout, user, role, profile } = useAuth();
-  const { remaining, max } = useCredits();
+  const { remaining, max, refreshDate } = useCredits();
   const displayName = profile?.displayName ?? user?.displayName ?? user?.email?.split("@")[0] ?? "User";
   const pct = max > 0 ? (remaining / max) * 100 : 0;
   const barColor = pct > 50 ? "bg-green-500" : pct >= 20 ? "bg-amber-500" : "bg-red-500";
@@ -159,13 +159,18 @@ export function AppSidebar() {
         {/* Credits bar — expanded only */}
         {!collapsed && (
           <div className="px-2 mb-3">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-xs font-medium text-muted-foreground">Credits</span>
-              <span className="text-xs font-medium tabular-nums">{remaining} / {max}</span>
-            </div>
-            <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
-              <div className={`h-full transition-all ${barColor}`} style={{ width: `${Math.min(100, pct)}%` }} />
-            </div>
+            <Link to="/billing" className="block group rounded-md hover:bg-muted/50 transition-colors -mx-1 px-1 py-1">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs font-medium text-muted-foreground group-hover:text-foreground transition-colors">Credits</span>
+                <span className="text-xs font-medium tabular-nums">{remaining} / {max}</span>
+              </div>
+              <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                <div className={`h-full transition-all ${barColor}`} style={{ width: `${Math.min(100, pct)}%` }} />
+              </div>
+              {refreshDate && (
+                <p className="text-xs text-muted-foreground mt-1">Refreshes {refreshDate}</p>
+              )}
+            </Link>
             {remaining === 0 && (
               <Button size="sm" className="w-full mt-2 gap-1.5 text-xs h-7" asChild>
                 <Link to="/billing">

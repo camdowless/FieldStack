@@ -2234,7 +2234,9 @@ export const auditDeadSites = functions
 
 // ─── Create Stripe Checkout Session ──────────────────────────────────────────
 
-export const createCheckoutSession = functions.https.onRequest((req, res) => {
+export const createCheckoutSession = functions
+  .runWith({ minInstances: 1 })
+  .https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
     if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
 
@@ -2291,7 +2293,9 @@ export const createCheckoutSession = functions.https.onRequest((req, res) => {
   });
 });
 
-export const createPortalSession = functions.https.onRequest((req, res) => {
+export const createPortalSession = functions
+  .runWith({ minInstances: 1 })
+  .https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
     if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
 
