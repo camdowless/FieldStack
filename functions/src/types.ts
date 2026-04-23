@@ -358,7 +358,7 @@ export interface CancelJobResponse {
 
 // ─── Subscription ─────────────────────────────────────────────────────────────
 
-export type SubscriptionPlan = "free" | "starter" | "pro" | "enterprise";
+export type SubscriptionPlan = "free" | "soloPro" | "agency" | "pro";
 export type SubscriptionStatus = "active" | "past_due" | "cancelled" | "trialing";
 
 export interface Subscription {
@@ -373,14 +373,11 @@ export interface Subscription {
   cancelAtPeriodEnd: boolean;
 }
 
-// ─── Plan credit limits (single source of truth) ─────────────────────────────
-
-export const PLAN_CREDITS: Record<SubscriptionPlan, number> = {
-  free: 100,
-  starter: 500,
-  pro: 2000,
-  enterprise: 10000,
-};
+// ─── Plan configuration ───────────────────────────────────────────────────────
+// Plan limits, pricing, and feature flags live in the Firestore `plans`
+// collection (see functions/src/plans.ts). Do not hardcode plan data here.
+// Use getPlanConfig() / getPlanCredits() from plans.ts at runtime.
+export type { PlanConfig } from "./plans";
 
 // ─── User Profile ─────────────────────────────────────────────────────────────
 

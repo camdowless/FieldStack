@@ -12,7 +12,7 @@ import { doc, onSnapshot } from "firebase/firestore";
 import { auth, googleProvider, firestore } from "@/lib/firebase";
 
 export interface Subscription {
-  plan: "free" | "starter" | "pro" | "enterprise";
+  plan: "free" | "soloPro" | "agency" | "pro";
   status: "active" | "past_due" | "cancelled" | "trialing";
   creditsUsed: number;
   creditsTotal: number;

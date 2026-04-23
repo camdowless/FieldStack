@@ -19,8 +19,9 @@ import { Slider } from "@/components/ui/slider";
 import {
   Search, MapPin, Bookmark, Loader2,
   ArrowLeft, Clock, Bookmark as BookmarkIcon, ChevronRight,
-  Download, AlertTriangle,
+  Download, AlertTriangle, HelpCircle,
 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
@@ -274,7 +275,27 @@ const Index = () => {
             {/* Row 1: Category + Location */}
             <div className="flex flex-col sm:flex-row gap-3">
               <div className="flex-1 text-left">
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Category</label>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 flex items-center gap-1">
+                  Category
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <HelpCircle className="h-3 w-3 cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent side="top" className="max-w-[200px]">
+                      <p className="font-semibold mb-1">Best industries for leads:</p>
+                      <ol className="list-decimal list-inside space-y-0.5 text-xs">
+                        <li>Contractors</li>
+                        <li>HVAC</li>
+                        <li>Plumbing</li>
+                        <li>Electrician</li>
+                        <li>Pest Control</li>
+                        <li>Home Service</li>
+                        <li>Insurance</li>
+                        <li>Real Estate</li>
+                      </ol>
+                    </TooltipContent>
+                  </Tooltip>
+                </label>
                 <CategoryCombobox
                   value={selectedCategory}
                   onChange={setSelectedCategory}
@@ -362,6 +383,26 @@ const Index = () => {
                 Search Leads · 1 credit
               </Button>
             </div>
+
+            {/* No credits banner */}
+            {!credits.hasCredits && (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3"
+              >
+                <div className="text-sm">
+                  <span className="font-semibold text-destructive">Out of credits.</span>{" "}
+                  <span className="text-muted-foreground">Upgrade to keep finding leads.</span>
+                </div>
+                <Link
+                  to="/billing"
+                  className="shrink-0 text-xs font-semibold text-primary underline underline-offset-2 hover:text-primary/80"
+                >
+                  View plans →
+                </Link>
+              </motion.div>
+            )}
           </motion.div>
 
           {recentSearches.length > 0 && (

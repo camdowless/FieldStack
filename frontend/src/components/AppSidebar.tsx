@@ -1,4 +1,4 @@
-import { Search, LayoutDashboard, Settings, LogOut, Sun, Sparkles, CreditCard, HelpCircle, History, ShieldAlert } from "lucide-react";
+import { Search, LayoutDashboard, Settings, LogOut, Sun, Sparkles, CreditCard, HelpCircle, History, ShieldAlert, Zap } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -6,6 +6,7 @@ import { useCredits } from "@/hooks/useCredits";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
+import { Link } from "react-router-dom";
 import {
   Sidebar,
   SidebarContent,
@@ -165,6 +166,21 @@ export function AppSidebar() {
             <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
               <div className={`h-full transition-all ${barColor}`} style={{ width: `${Math.min(100, pct)}%` }} />
             </div>
+            {remaining === 0 && (
+              <Button size="sm" className="w-full mt-2 gap-1.5 text-xs h-7" asChild>
+                <Link to="/billing">
+                  <Zap className="h-3 w-3" /> Upgrade for more searches
+                </Link>
+              </Button>
+            )}
+            {remaining > 0 && pct <= 20 && (
+              <p className="text-xs text-amber-500 mt-1.5 text-center">
+                Running low —{" "}
+                <Link to="/billing" className="underline underline-offset-2 hover:text-amber-600">
+                  upgrade
+                </Link>
+              </p>
+            )}
           </div>
         )}
 

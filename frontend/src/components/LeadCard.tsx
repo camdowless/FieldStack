@@ -7,6 +7,10 @@ import { MapPin, Star, Globe, AlertTriangle, Bookmark, BookmarkCheck } from "luc
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import { ReportButton } from "./ReportDialog";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { canSaveLeads } from "@/lib/planFeatures";
+import { useCredits } from "@/hooks/useCredits";
+import { usePlanConfig } from "@/hooks/usePlans";
 
 interface LeadCardProps {
   business: Business;
@@ -17,6 +21,8 @@ interface LeadCardProps {
 
 export function LeadCard({ business, isSaved, onSave, index = 0 }: LeadCardProps) {
   const { analysis } = business;
+  const { plan } = useCredits();
+  const planConfig = usePlanConfig(plan);
 
   const flags: string[] = [];
   if (!analysis.hasWebsite) flags.push("No Website");
@@ -58,14 +64,27 @@ export function LeadCard({ business, isSaved, onSave, index = 0 }: LeadCardProps
                 </div>
               )}
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="shrink-0"
-              onClick={(e) => { e.preventDefault(); onSave(); }}
-            >
-              {isSaved ? <BookmarkCheck className="h-5 w-5 text-primary" /> : <Bookmark className="h-5 w-5" />}
-            </Button>
+            {planConfig && canSaveLeads(planConfig) ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="shrink-0"
+                onClick={(e) => { e.preventDefault(); onSave(); }}
+              >
+                {isSaved ? <BookmarkCheck className="h-5 w-5 text-primary" /> : <Bookmark className="h-5 w-5" />}
+              </Button>
+            ) : (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button variant="ghost" size="icon" className="shrink-0" disabled>
+                      <Bookmark className="h-5 w-5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Upgrade to SoloPro to save leads</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
             <ReportButton cid={business.id} businessName={business.name} websiteUrl={business.analysis.websiteUrl} />
           </div>
 

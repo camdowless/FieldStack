@@ -1,31 +1,38 @@
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
-import { CheckCircle2, CreditCard, Zap, Search } from "lucide-react";
+import { CheckCircle2, Zap, Search, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { useCredits } from "@/hooks/useCredits";
+import { useAuth } from "@/contexts/AuthContext";
 import { Skeleton } from "@/components/ui/skeleton";
+import { usePlans } from "@/hooks/usePlans";
+import { toast } from "sonner";
 
-const PLAN_DETAILS = [
-  { id: "free", name: "Free", price: 0, features: ["100 lead lookups/mo", "Basic analysis"] },
-  { id: "starter", name: "Starter", price: 29, features: ["500 lead lookups/mo", "Basic analysis", "Email templates"] },
-  { id: "pro", name: "Pro", price: 79, features: ["2,000 lead lookups/mo", "Full analysis suite", "AI scripts & prompts", "CSV export", "Priority support"] },
-  { id: "enterprise", name: "Enterprise", price: 199, features: ["10,000 lead lookups/mo", "Everything in Pro", "Team seats (up to 5)", "White-label reports", "API access"] },
-];
-
-const invoices = [
-  { date: "Apr 1, 2026", amount: "$79.00", status: "Paid" },
-  { date: "Mar 1, 2026", amount: "$79.00", status: "Paid" },
-  { date: "Feb 1, 2026", amount: "$79.00", status: "Paid" },
-  { date: "Jan 1, 2026", amount: "$79.00", status: "Paid" },
-];
+type BillingInterval = "monthly" | "annual";
 
 const Billing = () => {
   const { searches, loading: searchesLoading } = useSearchHistory();
   const { remaining, max, used, plan } = useCredits();
+  const { user, profile } = useAuth();
+  const { plans, loading: plansLoading } = usePlans();
+  const [upgradingPriceId, setUpgradingPriceId] = useState<string | null>(null);
+  const [managingPortal, setManagingPortal] = useState(false);
+  const [billingInterval, setBillingInterval] = useState<BillingInterval>("monthly");
+
+  // Show success toast when returning from Stripe Checkout
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("session_id")) {
+      toast.success("Payment successful! Your plan has been upgraded.");
+      // Clean the URL without triggering a navigation
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, []);
 
   const totalSpend = searches.reduce((sum, s) => sum + (s.cost?.totalDfs ?? 0), 0);
   const usagePct = max > 0 ? (used / max) * 100 : 0;
@@ -35,6 +42,61 @@ const Billing = () => {
     return new Date(ts.seconds * 1000).toLocaleDateString("en-US", {
       month: "short", day: "numeric", year: "numeric",
     });
+  }
+
+  async function handleUpgrade(priceId: string) {
+    if (upgradingPriceId) return;
+    setUpgradingPriceId(priceId);
+    try {
+      const token = await user?.getIdToken();
+      if (!token) { toast.error("Please sign in to upgrade."); return; }
+      const res = await fetch("/api/createCheckoutSession", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ priceId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error ?? "Failed to start checkout. Please try again.");
+        return;
+      }
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        toast.error("No checkout URL returned. Please try again.");
+      }
+    } catch {
+      toast.error("Something went wrong. Check your connection and try again.");
+    } finally {
+      setUpgradingPriceId(null);
+    }
+  }
+
+  async function handleManageSubscription() {
+    if (managingPortal) return;
+    setManagingPortal(true);
+    try {
+      const token = await user?.getIdToken();
+      if (!token) { toast.error("Please sign in to manage your subscription."); return; }
+      const res = await fetch("/api/createPortalSession", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error ?? "Failed to open billing portal. Please try again.");
+        return;
+      }
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        toast.error("No portal URL returned. Please try again.");
+      }
+    } catch {
+      toast.error("Something went wrong. Check your connection and try again.");
+    } finally {
+      setManagingPortal(false);
+    }
   }
 
   return (
@@ -96,7 +158,7 @@ const Billing = () => {
           </CardContent>
         </Card>
 
-        {/* Current usage */}
+        {/* Credit usage */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -112,86 +174,99 @@ const Billing = () => {
 
         {/* Plans */}
         <div>
-          <h2 className="text-lg font-semibold mb-4">Plans</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {PLAN_DETAILS.map((p) => {
-              const isCurrent = p.id === plan;
-              return (
-                <Card key={p.id} className={isCurrent ? "border-primary ring-1 ring-primary" : ""}>
-                  <CardHeader className="pb-3">
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-lg">{p.name}</CardTitle>
-                      {isCurrent && <Badge>Current</Badge>}
-                    </div>
-                    <div className="flex items-baseline gap-1">
-                      <span className="text-3xl font-bold">{p.price === 0 ? "Free" : `$${p.price}`}</span>
-                      {p.price > 0 && <span className="text-muted-foreground text-sm">/mo</span>}
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <ul className="space-y-2 mb-4">
-                      {p.features.map((f) => (
-                        <li key={f} className="flex items-center gap-2 text-sm">
-                          <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
-                          {f}
-                        </li>
-                      ))}
-                    </ul>
-                    <Button variant={isCurrent ? "secondary" : "default"} className="w-full" disabled={isCurrent}>
-                      {isCurrent ? "Current Plan" : "Upgrade"}
-                    </Button>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Payment method */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <CreditCard className="h-5 w-5" /> Payment Method
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex items-center justify-between">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold">Plans</h2>
             <div className="flex items-center gap-3">
-              <div className="h-8 w-12 bg-muted rounded flex items-center justify-center text-xs font-bold">VISA</div>
-              <div>
-                <p className="text-sm font-medium">•••• •••• •••• 4242</p>
-                <p className="text-xs text-muted-foreground">Expires 12/2027</p>
+              {/* Billing interval toggle */}
+              <div className="flex items-center gap-1 rounded-lg border p-1 text-sm">
+                <button
+                  onClick={() => setBillingInterval("monthly")}
+                  className={`px-3 py-1 rounded-md transition-colors ${billingInterval === "monthly" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  Monthly
+                </button>
+                <button
+                  onClick={() => setBillingInterval("annual")}
+                  className={`px-3 py-1 rounded-md transition-colors flex items-center gap-1.5 ${billingInterval === "annual" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                  Annual
+                  <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${billingInterval === "annual" ? "bg-white/20" : "bg-green-100 text-green-700"}`}>
+                    Save 33%
+                  </span>
+                </button>
               </div>
+              {profile?.subscription.stripeSubscriptionId && (
+                <Button variant="outline" size="sm" onClick={handleManageSubscription} disabled={managingPortal}>
+                  {managingPortal && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
+                  Manage Subscription
+                </Button>
+              )}
             </div>
-            <Button variant="outline" size="sm">Update</Button>
-          </CardContent>
-        </Card>
+          </div>
+          {plansLoading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-64 w-full" />)}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {plans.map((p) => {
+                const isCurrent = p.id === plan;
+                const isAnnual = billingInterval === "annual";
+                const activePriceId = isAnnual
+                  ? (p.stripePriceIdAnnual ?? p.stripePriceId)
+                  : p.stripePriceId;
+                const displayCents = isAnnual && p.annualPriceUsdCents
+                  ? Math.round(p.annualPriceUsdCents / 12)
+                  : p.priceUsdCents;
+                const priceDisplay = displayCents === 0 ? "Free" : `$${(displayCents / 100).toFixed(0)}`;
+                const annualSavings = isAnnual && p.annualPriceUsdCents && p.priceUsdCents > 0
+                  ? Math.round((p.priceUsdCents * 12 - p.annualPriceUsdCents) / 100)
+                  : null;
 
-        {/* Invoices */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Invoice History</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-0">
-              {invoices.map((inv, i) => (
-                <div key={i}>
-                  <div className="flex items-center justify-between py-3">
-                    <div>
-                      <p className="text-sm font-medium">{inv.date}</p>
-                      <p className="text-xs text-muted-foreground">Pro Plan — Monthly</p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-medium">{inv.amount}</span>
-                      <Badge variant="secondary" className="text-xs">{inv.status}</Badge>
-                      <Button variant="ghost" size="sm">Download</Button>
-                    </div>
-                  </div>
-                  {i < invoices.length - 1 && <Separator />}
-                </div>
-              ))}
+                return (
+                  <Card key={p.id} className={isCurrent ? "border-primary ring-1 ring-primary" : ""}>
+                    <CardHeader className="pb-3">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-lg">{p.name}</CardTitle>
+                        {isCurrent && <Badge>Current</Badge>}
+                      </div>
+                      <div className="flex items-baseline gap-1">
+                        <span className="text-3xl font-bold">{priceDisplay}</span>
+                        {displayCents > 0 && <span className="text-muted-foreground text-sm">/mo</span>}
+                      </div>
+                      {isAnnual && p.annualPriceUsdCents && p.priceUsdCents > 0 && (
+                        <p className="text-xs text-muted-foreground">
+                          ${(p.annualPriceUsdCents / 100).toFixed(0)}/yr
+                          {annualSavings && <span className="text-green-600 font-medium ml-1">· save ${annualSavings}</span>}
+                        </p>
+                      )}
+                    </CardHeader>
+                    <CardContent>
+                      <ul className="space-y-2 mb-4">
+                        {p.features.map((f) => (
+                          <li key={f} className="flex items-center gap-2 text-sm">
+                            <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                            {f}
+                          </li>
+                        ))}
+                      </ul>
+                      <Button
+                        variant={isCurrent ? "secondary" : "default"}
+                        className="w-full"
+                        disabled={isCurrent || !activePriceId || (upgradingPriceId !== null && upgradingPriceId === activePriceId)}
+                        onClick={() => activePriceId && handleUpgrade(activePriceId)}
+                      >
+                        {activePriceId && upgradingPriceId === activePriceId ? (
+                          <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Redirecting…</>
+                        ) : isCurrent ? "Current Plan" : "Upgrade"}
+                      </Button>
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
-          </CardContent>
-        </Card>
+          )}
+        </div>
       </div>
     </div>
   );

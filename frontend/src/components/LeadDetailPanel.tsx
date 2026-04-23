@@ -31,6 +31,9 @@ import { reevaluateBusiness } from "@/lib/api";
 import { normalizeBusiness } from "@/data/leadTypes";
 import { updateCachedBusiness } from "@/lib/businessCache";
 import JSZip from "jszip";
+import { canGenerateScripts } from "@/lib/planFeatures";
+import { useCredits } from "@/hooks/useCredits";
+import { usePlanConfig } from "@/hooks/usePlans";
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -214,6 +217,8 @@ interface LeadDetailPanelProps {
 export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
   const fbStore = useFirebaseLeadStore();
   const store = useLeadStore();
+  const { plan } = useCredits();
+  const planConfig = usePlanConfig(plan);
   const { role } = useAuth();
   const [isEditingEmail, setIsEditingEmail] = useState(false);
   const [localEmailDraft, setLocalEmailDraft] = useState<string | null>(null);
@@ -801,16 +806,31 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
         </TabsContent>
 
         <TabsContent value="scripts" className="space-y-4">
-          <ScriptBlock
-            title="Cold Email Script"
-            content={emailContent}
-            editable
-            isEditing={isEditingEmail}
-            onToggleEdit={() => setIsEditingEmail((v) => !v)}
-            onChange={handleEmailChange}
-            showGmail
-          />
-          <CopyableBlock title="Cold Call Script" content={generateColdCallScript(business)} />
+          {planConfig && canGenerateScripts(planConfig) ? (
+            <>
+              <ScriptBlock
+                title="Cold Email Script"
+                content={emailContent}
+                editable
+                isEditing={isEditingEmail}
+                onToggleEdit={() => setIsEditingEmail((v) => !v)}
+                onChange={handleEmailChange}
+                showGmail
+              />
+              <CopyableBlock title="Cold Call Script" content={generateColdCallScript(business)} />
+            </>
+          ) : (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12 text-center gap-3">
+                <p className="text-muted-foreground text-sm">
+                  Upgrade to Agency or Pro to access AI script generation.
+                </p>
+                <Button asChild size="sm">
+                  <a href="/billing">Upgrade Plan</a>
+                </Button>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
       </Tabs>
     </div>

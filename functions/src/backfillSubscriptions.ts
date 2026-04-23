@@ -9,7 +9,11 @@
  */
 
 import * as admin from "firebase-admin";
-import { PLAN_CREDITS, type SubscriptionPlan } from "./types";
+import { type SubscriptionPlan } from "./types";
+
+// Inline credit limits — this script predates the Firestore plans collection
+// and is kept only for historical reference. Use scripts/migrateUsersToSoloPro.mjs instead.
+const PLAN_CREDITS: Record<string, number> = { free: 3, soloPro: 30, agency: 100, pro: 250 };
 
 // Initialize with explicit project ID.
 // Auth: run `gcloud auth application-default login` first, or set

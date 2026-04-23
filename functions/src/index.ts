@@ -18,8 +18,21 @@ import { geocodeLocation, milesToKm, buildLocationCoordinate } from "./geocode";
 import { computeJobId, deleteResultsSubcollection, createOrReuseJob, isJobCancelled, cancelJob, identifyStuckJobs, identifyExpiredJobs } from "./jobHelpers";
 import { Timestamp } from "firebase-admin/firestore";
 import { checkUserRole, checkAdminRole } from "./authHelpers";
-import { PLAN_CREDITS } from "./types";
 import type { Subscription, SubscriptionPlan } from "./types";
+import { getPlanCredits, buildPriceIdToPlanMap, invalidatePlanCache } from "./plans";
+import { buildPlanSeedData, PLAN_IDS } from "./seedPlans";
+import Stripe from "stripe";
+type StripeInstance = InstanceType<typeof Stripe>;
+const FRONTEND_URL = process.env.FRONTEND_URL ?? "http://localhost:5173";
+let _stripe: StripeInstance | null = null;
+function getStripe(): StripeInstance {
+  if (!_stripe) {
+    const key = process.env.STRIPE_SECRET_KEY;
+    if (!key) throw new Error("STRIPE_SECRET_KEY is not set");
+    _stripe = new Stripe(key, { apiVersion: "2026-03-25.dahlia" });
+  }
+  return _stripe;
+}
 
 admin.initializeApp();
 const db = admin.firestore();
@@ -103,13 +116,15 @@ type FirestoreUserProfile = Omit<UserProfile, "createdAt" | "updatedAt"> & {
 
 /**
  * Build a default subscription object for a given plan.
+ * creditsTotal is read from the Firestore plans collection.
  */
-function buildDefaultSubscription(plan: SubscriptionPlan = "free"): Subscription {
+async function buildDefaultSubscription(plan: SubscriptionPlan = "free"): Promise<Subscription> {
+  const creditsTotal = await getPlanCredits(plan);
   return {
     plan,
     status: "active",
     creditsUsed: 0,
-    creditsTotal: PLAN_CREDITS[plan],
+    creditsTotal,
     currentPeriodStart: null,
     currentPeriodEnd: null,
     stripeCustomerId: null,
@@ -122,12 +137,12 @@ function buildDefaultSubscription(plan: SubscriptionPlan = "free"): Subscription
  * Build a complete user profile document from the given fields.
  * Single source of truth for the shape of a new user document.
  */
-function buildUserProfile(fields: {
+async function buildUserProfile(fields: {
   uid: string;
   email?: string | null;
   displayName?: string | null;
   photoURL?: string | null;
-}): FirestoreUserProfile {
+}): Promise<FirestoreUserProfile> {
   const now = admin.firestore.FieldValue.serverTimestamp();
   return {
     uid: fields.uid,
@@ -135,7 +150,7 @@ function buildUserProfile(fields: {
     displayName: fields.displayName ?? null,
     photoURL: fields.photoURL ?? null,
     role: "user",
-    subscription: buildDefaultSubscription("free"),
+    subscription: await buildDefaultSubscription("free"),
     createdAt: now,
     updatedAt: now,
   };
@@ -151,7 +166,7 @@ function buildUserProfile(fields: {
  */
 async function createUserProfile(user: admin.auth.UserRecord): Promise<void> {
   const ref = db.collection(USERS_COLLECTION).doc(user.uid);
-  const profile = buildUserProfile({
+  const profile = await buildUserProfile({
     uid: user.uid,
     email: user.email,
     displayName: user.displayName,
@@ -2216,3 +2231,404 @@ export const auditDeadSites = functions
       res.status(200).json({ rows, cost });
     });
   });
+
+// ─── Create Stripe Checkout Session ──────────────────────────────────────────
+
+export const createCheckoutSession = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
+
+    let decodedToken: admin.auth.DecodedIdToken;
+    try {
+      decodedToken = await verifyUserRole(req);
+    } catch {
+      res.status(401).json({ error: "Unauthorized. Please sign in." });
+      return;
+    }
+
+    const uid = decodedToken.uid;
+    const { priceId } = req.body ?? {};
+
+    // Validate priceId against plans collection
+    const priceToplan = await buildPriceIdToPlanMap();
+    if (!priceId || !priceToplan.has(priceId)) {
+      res.status(400).json({ error: "Invalid plan selected" });
+      return;
+    }
+
+    // Read user profile
+    const userRef = db.collection(USERS_COLLECTION).doc(uid);
+    const userSnap = await userRef.get();
+    if (!userSnap.exists) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const userData = userSnap.data()!;
+    let stripeCustomerId: string = userData.subscription?.stripeCustomerId ?? null;
+
+    // Create Stripe Customer if not exists
+    if (!stripeCustomerId) {
+      const customer = await getStripe().customers.create({
+        email: userData.email ?? undefined,
+        metadata: { uid },
+      });
+      stripeCustomerId = customer.id;
+      await userRef.update({ "subscription.stripeCustomerId": stripeCustomerId });
+    }
+
+    // Create checkout session
+    const session = await getStripe().checkout.sessions.create({
+      customer: stripeCustomerId,
+      mode: "subscription",
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: `${FRONTEND_URL}/billing?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${FRONTEND_URL}/billing`,
+      metadata: { uid },
+    });
+
+    res.status(200).json({ url: session.url });
+  });
+});
+
+export const createPortalSession = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
+
+    let decodedToken: admin.auth.DecodedIdToken;
+    try {
+      decodedToken = await verifyUserRole(req);
+    } catch {
+      res.status(401).json({ error: "Unauthorized. Please sign in." });
+      return;
+    }
+
+    const uid = decodedToken.uid;
+    const userSnap = await db.collection(USERS_COLLECTION).doc(uid).get();
+    if (!userSnap.exists) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const stripeCustomerId: string | null = userSnap.data()?.subscription?.stripeCustomerId ?? null;
+    if (!stripeCustomerId) {
+      res.status(400).json({ error: "No active subscription to manage" });
+      return;
+    }
+
+    const session = await getStripe().billingPortal.sessions.create({
+      customer: stripeCustomerId,
+      return_url: `${FRONTEND_URL}/billing`,
+    });
+
+    res.status(200).json({ url: session.url });
+  });
+});
+
+// ─── Stripe Webhook Helpers ───────────────────────────────────────────────────
+
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
+if (!STRIPE_WEBHOOK_SECRET) {
+  console.error("[Stripe] ❌ STRIPE_WEBHOOK_SECRET is not set");
+}
+
+async function lookupUidByCustomerId(stripeCustomerId: string): Promise<string | null> {
+  const snap = await db.collection(USERS_COLLECTION)
+    .where("subscription.stripeCustomerId", "==", stripeCustomerId)
+    .limit(1)
+    .get();
+  if (snap.empty) return null;
+  return snap.docs[0].id;
+}
+
+function mapStripeStatus(stripeStatus: string): "active" | "past_due" | "cancelled" | "trialing" {
+  switch (stripeStatus) {
+    case "active": return "active";
+    case "past_due": return "past_due";
+    case "canceled": return "cancelled";
+    case "trialing": return "trialing";
+    default: return "active";
+  }
+}
+
+async function updateSubscription(
+  uid: string,
+  plan: import("./types").SubscriptionPlan,
+  stripeSubscription: { id: string; cancel_at_period_end: boolean; current_period_start: number; current_period_end: number },
+  status: "active" | "past_due" | "cancelled" | "trialing"
+): Promise<void> {
+  const creditsTotal = await getPlanCredits(plan);
+  await db.collection(USERS_COLLECTION).doc(uid).update({
+    "subscription.plan": plan,
+    "subscription.status": status,
+    "subscription.creditsTotal": creditsTotal,
+    "subscription.stripeSubscriptionId": stripeSubscription.id,
+    "subscription.cancelAtPeriodEnd": stripeSubscription.cancel_at_period_end,
+    "subscription.currentPeriodStart": Timestamp.fromMillis(stripeSubscription.current_period_start * 1000),
+    "subscription.currentPeriodEnd": Timestamp.fromMillis(stripeSubscription.current_period_end * 1000),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+}
+
+async function downgradeToFree(uid: string): Promise<void> {
+  const creditsTotal = await getPlanCredits("free");
+  await db.collection(USERS_COLLECTION).doc(uid).update({
+    "subscription.plan": "free",
+    "subscription.status": "cancelled",
+    "subscription.creditsTotal": creditsTotal,
+    "subscription.stripeSubscriptionId": null,
+    "subscription.cancelAtPeriodEnd": false,
+    "subscription.currentPeriodStart": null,
+    "subscription.currentPeriodEnd": null,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+}
+
+async function resetCredits(uid: string, invoice: { period_start: number; period_end: number }): Promise<void> {
+  const userSnap = await db.collection(USERS_COLLECTION).doc(uid).get();
+  const plan = (userSnap.data()?.subscription?.plan ?? "free") as import("./types").SubscriptionPlan;
+  const creditsTotal = await getPlanCredits(plan);
+  await db.collection(USERS_COLLECTION).doc(uid).update({
+    "subscription.creditsUsed": 0,
+    "subscription.creditsTotal": creditsTotal,
+    "subscription.currentPeriodStart": Timestamp.fromMillis(invoice.period_start * 1000),
+    "subscription.currentPeriodEnd": Timestamp.fromMillis(invoice.period_end * 1000),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+}
+
+// ─── Stripe Webhook ───────────────────────────────────────────────────────────
+
+export const stripeWebhook = functions.https.onRequest(async (req, res) => {
+  if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
+
+  const sig = req.headers["stripe-signature"] as string | undefined;
+  if (!sig) { res.status(400).send("Missing Stripe-Signature header"); return; }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let event: any;
+  try {
+    event = getStripe().webhooks.constructEvent(req.rawBody, sig, STRIPE_WEBHOOK_SECRET ?? "");
+  } catch (err) {
+    console.error("[stripeWebhook] Signature verification failed:", err);
+    res.status(400).send("Invalid webhook signature");
+    return;
+  }
+
+  try {
+    switch (event.type) {
+      case "checkout.session.completed": {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const session = event.data.object as any;
+        const uid = session.metadata?.uid;
+        if (!uid) { console.error("[stripeWebhook] checkout.session.completed: missing uid in metadata"); break; }
+        const stripeSubscriptionId = session.subscription as string;
+        if (!stripeSubscriptionId) { console.error("[stripeWebhook] checkout.session.completed: missing subscription id"); break; }
+        const subscription = await getStripe().subscriptions.retrieve(stripeSubscriptionId, {
+          expand: ["items.data.price"],
+        });
+        const priceId = subscription.items.data[0]?.price?.id;
+        if (!priceId) { console.error(`[stripeWebhook] checkout.session.completed: could not resolve priceId from subscription ${stripeSubscriptionId}`); break; }
+        const priceToplan = await buildPriceIdToPlanMap();
+        const plan = priceToplan.get(priceId);
+        if (!plan) { console.error(`[stripeWebhook] Unknown priceId: ${priceId}`); break; }
+        const item = subscription.items.data[0] as unknown as { current_period_start: number; current_period_end: number };
+        await updateSubscription(uid, plan as SubscriptionPlan, {
+          id: subscription.id,
+          cancel_at_period_end: subscription.cancel_at_period_end,
+          current_period_start: item.current_period_start,
+          current_period_end: item.current_period_end,
+        }, "active");
+        console.log(`[stripeWebhook] checkout.session.completed uid=${uid} plan=${plan}`);
+        break;
+      }
+
+      case "customer.subscription.updated": {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const subscription = event.data.object as any;
+        const uid = await lookupUidByCustomerId(subscription.customer as string);
+        if (!uid) { console.error(`[stripeWebhook] customer.subscription.updated: uid not found for customer=${subscription.customer}`); break; }
+        const priceId = subscription.items.data[0].price.id;
+        const priceToplan2 = await buildPriceIdToPlanMap();
+        const plan = (priceToplan2.get(priceId) ?? "free") as SubscriptionPlan;
+        const status = mapStripeStatus(subscription.status);
+        await updateSubscription(uid, plan, {
+          id: subscription.id,
+          cancel_at_period_end: subscription.cancel_at_period_end,
+          current_period_start: subscription.items.data[0].current_period_start,
+          current_period_end: subscription.items.data[0].current_period_end,
+        }, status);
+        console.log(`[stripeWebhook] customer.subscription.updated uid=${uid} plan=${plan} status=${status}`);
+        break;
+      }
+
+      case "customer.subscription.deleted": {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const subscription = event.data.object as any;
+        const uid = await lookupUidByCustomerId(subscription.customer as string);
+        if (!uid) { console.error(`[stripeWebhook] customer.subscription.deleted: uid not found for customer=${subscription.customer}`); break; }
+        await downgradeToFree(uid);
+        console.log(`[stripeWebhook] customer.subscription.deleted uid=${uid} → downgraded to free`);
+        break;
+      }
+
+      case "invoice.payment_succeeded": {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const invoice = event.data.object as any;
+        if (invoice.billing_reason !== "subscription_cycle") break;
+        const uid = await lookupUidByCustomerId(invoice.customer as string);
+        if (!uid) { console.error(`[stripeWebhook] invoice.payment_succeeded: uid not found for customer=${invoice.customer}`); break; }
+        await resetCredits(uid, { period_start: invoice.period_start, period_end: invoice.period_end });
+        console.log(`[stripeWebhook] invoice.payment_succeeded (renewal) uid=${uid} credits reset`);
+        break;
+      }
+
+      case "invoice.payment_failed": {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const invoice = event.data.object as any;
+        const uid = await lookupUidByCustomerId(invoice.customer as string);
+        if (!uid) { console.error(`[stripeWebhook] invoice.payment_failed: uid not found for customer=${invoice.customer}`); break; }
+        await db.collection(USERS_COLLECTION).doc(uid).update({
+          "subscription.status": "past_due",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        console.log(`[stripeWebhook] invoice.payment_failed uid=${uid} → past_due`);
+        break;
+      }
+
+      default:
+        console.log(`[stripeWebhook] Unhandled event type: ${event.type}`);
+    }
+  } catch (err) {
+    console.error("[stripeWebhook] Error processing event:", err);
+    res.status(500).json({ error: "Internal server error" });
+    return;
+  }
+
+  res.status(200).json({ received: true });
+});
+
+
+// ─── Admin: Migrate Legacy Subscription Plans ─────────────────────────────────
+
+export const migrateSubscriptionPlans = functions
+  .runWith({ timeoutSeconds: 300 })
+  .https.onRequest((req, res) => {
+    corsHandler(req, res, async () => {
+      if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
+
+      try {
+        await verifyAdmin(req, "migrateSubscriptionPlans");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "";
+        res.status(msg === "UNAUTHENTICATED" ? 401 : 403).json({
+          error: msg === "UNAUTHENTICATED" ? "Unauthorized." : "Forbidden. Admin role required.",
+        });
+        return;
+      }
+
+      const PLAN_MAP: Record<string, import("./types").SubscriptionPlan> = {
+        starter: "soloPro",
+        enterprise: "pro",
+      };
+      const VALID_PLANS = new Set(["free", "soloPro", "agency", "pro"]);
+
+      let migrated = 0;
+      let skipped = 0;
+      let processed = 0;
+
+      try {
+        const PAGE_SIZE = 500;
+        let lastDoc: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+        let hasMore = true;
+
+        while (hasMore) {
+          let query = db.collection(USERS_COLLECTION).orderBy("__name__").limit(PAGE_SIZE);
+          if (lastDoc) query = query.startAfter(lastDoc);
+
+          const snapshot = await query.get();
+          if (snapshot.empty) { hasMore = false; break; }
+
+          const batch = db.batch();
+          let batchUpdates = 0;
+
+          for (const doc of snapshot.docs) {
+            processed++;
+            const data = doc.data();
+            const currentPlan: string = data.subscription?.plan ?? "free";
+
+            if (VALID_PLANS.has(currentPlan)) {
+              skipped++;
+              continue;
+            }
+
+            const newPlan = PLAN_MAP[currentPlan] ?? "free";
+            const newCreditsTotal = await getPlanCredits(newPlan as SubscriptionPlan);
+            const currentCreditsUsed: number = data.subscription?.creditsUsed ?? 0;
+            const cappedCreditsUsed = Math.min(currentCreditsUsed, newCreditsTotal);
+
+            batch.update(doc.ref, {
+              "subscription.plan": newPlan,
+              "subscription.creditsTotal": newCreditsTotal,
+              "subscription.creditsUsed": cappedCreditsUsed,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            batchUpdates++;
+            migrated++;
+          }
+
+          if (batchUpdates > 0) await batch.commit();
+          lastDoc = snapshot.docs[snapshot.docs.length - 1];
+          if (snapshot.docs.length < PAGE_SIZE) hasMore = false;
+        }
+
+        console.log(`[migrateSubscriptionPlans] processed=${processed} migrated=${migrated} skipped=${skipped}`);
+        res.status(200).json({ processed, migrated, skipped });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Internal server error";
+        console.error("[migrateSubscriptionPlans] error:", msg);
+        res.status(500).json({ error: msg });
+      }
+    });
+  });
+
+// ─── Admin: Seed / Update Plans Collection ────────────────────────────────────
+
+export const seedPlans = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
+
+    try {
+      await verifyAdmin(req, "seedPlans");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "";
+      res.status(msg === "UNAUTHENTICATED" ? 401 : 403).json({
+        error: msg === "UNAUTHENTICATED" ? "Unauthorized." : "Forbidden. Admin role required.",
+      });
+      return;
+    }
+
+    try {
+      const seedData = buildPlanSeedData();
+      const batch = db.batch();
+
+      for (let i = 0; i < PLAN_IDS.length; i++) {
+        const planId = PLAN_IDS[i];
+        const data = seedData[i];
+        const ref = db.collection("plans").doc(planId);
+        // merge: true preserves any fields not in seed (e.g. manually set stripePriceId)
+        batch.set(ref, { ...data, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+      }
+
+      await batch.commit();
+      invalidatePlanCache();
+
+      console.log(`[seedPlans] seeded ${PLAN_IDS.length} plans`);
+      res.status(200).json({ seeded: PLAN_IDS.length, plans: PLAN_IDS });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Internal server error";
+      console.error("[seedPlans] error:", msg);
+      res.status(500).json({ error: msg });
+    }
+  });
+});
