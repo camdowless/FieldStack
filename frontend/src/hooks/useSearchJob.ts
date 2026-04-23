@@ -63,7 +63,7 @@ export interface SearchJobState {
 }
 
 export interface UseSearchJobReturn extends SearchJobState {
-  startSearch: (params: { keyword: string; location: string; radius?: number; limit?: number }) => Promise<void>;
+  startSearch: (params: { keyword: string; location: string; radius?: number }) => Promise<void>;
   cancelSearch: () => Promise<void>;
   reset: () => void;
   /** The params used for the active/rehydrated search, so the UI can restore labels. */
@@ -279,7 +279,7 @@ export function useSearchJob(): UseSearchJobReturn {
   }, [attachListeners]);
 
   const startSearch = useCallback(
-    async (params: { keyword: string; location: string; radius?: number; limit?: number }) => {
+    async (params: { keyword: string; location: string; radius?: number }) => {
       // Clean up any previous job listeners
       teardown();
 

@@ -19,10 +19,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { CheckCircle2, Zap, Search, Loader2, AlertTriangle, TrendingDown, ArrowDownCircle } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { CheckCircle2, Zap, Loader2, AlertTriangle, TrendingDown, ArrowDownCircle, Receipt, ExternalLink, Clock } from "lucide-react";
 import { RedirectingOverlay } from "@/components/RedirectingOverlay";
 import { motion } from "framer-motion";
-import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { useCredits } from "@/hooks/useCredits";
 import { useAuth } from "@/contexts/AuthContext";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -46,8 +46,23 @@ type CancelStep = 1 | 2;
 
 type BillingInterval = "monthly" | "annual";
 
+interface Invoice {
+  id: string;
+  number: string | null;
+  status: string | null;
+  amountPaid: number;
+  amountDue: number;
+  currency: string;
+  created: number;
+  periodStart: number;
+  periodEnd: number;
+  hostedInvoiceUrl: string | null;
+  invoicePdf: string | null;
+  refunded: boolean;
+  amountRefunded: number;
+}
+
 const Billing = () => {
-  const { searches, loading: searchesLoading } = useSearchHistory();
   const { remaining, max, used, plan, refreshDate } = useCredits();
   const { user, profile } = useAuth();
   const { plans, loading: plansLoading } = usePlans();
@@ -55,6 +70,12 @@ const Billing = () => {
   const [managingPortal, setManagingPortal] = useState(false);
   const [billingInterval, setBillingInterval] = useState<BillingInterval>("monthly");
   const [redirecting, setRedirecting] = useState<{ show: boolean; destination: string }>({ show: false, destination: "secure checkout" });
+  const [promoCode, setPromoCode] = useState("");
+
+  // Invoice history state
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [invoicesLoading, setInvoicesLoading] = useState(false);
+  const [invoicesLoaded, setInvoicesLoaded] = useState(false);
 
   // Downgrade confirmation state
   const [downgradeTarget, setDowngradeTarget] = useState<{ plan: PlanConfig; priceId: string } | null>(null);
@@ -70,6 +91,7 @@ const Billing = () => {
 
   const cancelAtPeriodEnd = profile?.subscription?.cancelAtPeriodEnd ?? false;
   const periodEnd = profile?.subscription?.currentPeriodEnd as { seconds: number } | null | undefined;
+  const subscriptionStatus = profile?.subscription?.status ?? "active";
 
   // Find the next plan down for the "downgrade instead" offer
   const currentPlanIndex = plans.findIndex((p) => p.id === plan);
@@ -95,7 +117,28 @@ const Billing = () => {
     }
   }, []);
 
-  const totalSpend = searches.reduce((sum, s) => sum + (s.cost?.totalDfs ?? 0), 0);
+  async function loadInvoices() {
+    if (invoicesLoaded || invoicesLoading) return;
+    setInvoicesLoading(true);
+    try {
+      const token = await getToken();
+      if (!token) return;
+      const res = await fetch("/api/getInvoices", { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (res.ok) {
+        setInvoices(data.invoices ?? []);
+        setInvoicesLoaded(true);
+      } else {
+        toast.error(data.error ?? "Failed to load invoices.");
+      }
+    } catch (err) {
+      console.error("[getInvoices]", err);
+      toast.error("Failed to load invoices. Check your connection.");
+    } finally {
+      setInvoicesLoading(false);
+    }
+  }
+
   const usagePct = max > 0 ? (used / max) * 100 : 0;
 
   function formatDate(ts: { seconds: number } | null | undefined) {
@@ -116,10 +159,12 @@ const Billing = () => {
     try {
       const token = await getToken();
       if (!token) { toast.error("Please sign in to upgrade."); return; }
+      const body: Record<string, string> = { priceId };
+      if (promoCode.trim()) body.promoCode = promoCode.trim();
       const res = await fetch("/api/createCheckoutSession", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ priceId }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) { toast.error(data.error ?? "Failed to start checkout. Please try again."); return; }
@@ -229,10 +274,10 @@ const Billing = () => {
         <h1 className="text-2xl font-bold mb-6">Billing &amp; Subscription</h1>
       </motion.div>
 
-      <Tabs defaultValue="subscription">
+      <Tabs defaultValue="subscription" onValueChange={(v) => { if (v === "invoices") loadInvoices(); }}>
         <TabsList className="mb-6">
           <TabsTrigger value="subscription">Subscription</TabsTrigger>
-          <TabsTrigger value="history">Search History</TabsTrigger>
+          <TabsTrigger value="invoices">Invoice History</TabsTrigger>
         </TabsList>
 
         <TabsContent value="subscription">
@@ -251,6 +296,40 @@ const Billing = () => {
                     {isReactivating && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
                     Reactivate
                   </Button>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Past-due / payment failed banner */}
+            {subscriptionStatus === "past_due" && !cancelAtPeriodEnd && (
+              <Card className="border-red-400 bg-red-50 dark:bg-red-950/20">
+                <CardContent className="flex items-center justify-between gap-4 py-4">
+                  <div className="flex items-center gap-3">
+                    <AlertTriangle className="h-5 w-5 text-red-500 shrink-0" />
+                    <div>
+                      <p className="text-sm font-medium text-red-800 dark:text-red-300">Payment failed</p>
+                      <p className="text-xs text-red-700 dark:text-red-400 mt-0.5">
+                        We couldn't charge your card. Update your payment method to keep your plan active.
+                      </p>
+                    </div>
+                  </div>
+                  <Button size="sm" variant="outline" onClick={handleManageSubscription} disabled={managingPortal} className="shrink-0 border-red-300 text-red-700 hover:bg-red-100">
+                    {managingPortal && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
+                    Update payment
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Trialing banner */}
+            {subscriptionStatus === "trialing" && (
+              <Card className="border-blue-400 bg-blue-50 dark:bg-blue-950/20">
+                <CardContent className="flex items-center gap-3 py-4">
+                  <Clock className="h-5 w-5 text-blue-500 shrink-0" />
+                  <p className="text-sm text-blue-800 dark:text-blue-300">
+                    You're on a free trial
+                    {periodEnd ? ` — ends ${formatDate(periodEnd)}` : ""}. No charge until the trial ends.
+                  </p>
                 </CardContent>
               </Card>
             )}
@@ -307,6 +386,17 @@ const Billing = () => {
                   )}
                 </div>
               </div>
+              {/* Promo code input — only shown for free users upgrading */}
+              {plan === "free" && (
+                <div className="flex items-center gap-2 mb-4 max-w-xs">
+                  <Input
+                    placeholder="Promo code (optional)"
+                    value={promoCode}
+                    onChange={(e) => setPromoCode(e.target.value)}
+                    className="h-8 text-sm"
+                  />
+                </div>
+              )}
               {plansLoading ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-64 w-full" />)}
@@ -408,63 +498,62 @@ const Billing = () => {
           </div>
         </TabsContent>
 
-        <TabsContent value="history">
+        <TabsContent value="invoices">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Search className="h-5 w-5 text-primary" /> Search History
+                <Receipt className="h-5 w-5 text-primary" /> Invoice History
               </CardTitle>
-              <CardDescription>
-                API cost per search (DataForSEO).{" "}
-                {!searchesLoading && searches.length > 0 && (
-                  <span>
-                    Total across {searches.length} search{searches.length !== 1 ? "es" : ""}:{" "}
-                    <strong>${totalSpend.toFixed(4)}</strong>
-                  </span>
-                )}
-              </CardDescription>
+              <CardDescription>Past charges and receipts for your subscription.</CardDescription>
             </CardHeader>
             <CardContent>
-              {searchesLoading ? (
+              {invoicesLoading ? (
                 <div className="space-y-3">
-                  {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
+                  {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
                 </div>
-              ) : searches.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No searches yet.</p>
+              ) : invoices.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No invoices yet.</p>
               ) : (
                 <div className="space-y-0">
-                  {searches.map((s, i) => (
-                    <div key={s.id}>
-                      <div className="flex items-center justify-between py-3 gap-4">
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium truncate">{s.query} — {s.location}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {formatDate(s.createdAt as { seconds: number } | null)} · {s.resultCount ?? 0} results
-                          </p>
-                        </div>
-                        <div className="text-right shrink-0">
-                          {s.cost?.totalDfs != null ? (
-                            <p className="text-sm font-medium">${s.cost.totalDfs.toFixed(4)}</p>
-                          ) : (
-                            <p className="text-sm text-muted-foreground">—</p>
-                          )}
-                          {s.cost && (
+                  {invoices.map((inv, i) => {
+                    const amount = (inv.amountPaid / 100).toFixed(2);
+                    const currency = inv.currency.toUpperCase();
+                    const date = new Date(inv.created * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+                    const isRefunded = inv.refunded || inv.amountRefunded > 0;
+                    return (
+                      <div key={inv.id}>
+                        <div className="flex items-center justify-between py-3 gap-4">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium">{date}</p>
                             <p className="text-xs text-muted-foreground">
-                              {s.cost.cachedBusinesses > 0 && `${s.cost.cachedBusinesses} cached`}
-                              {s.cost.cachedBusinesses > 0 && s.cost.freshBusinesses > 0 && " · "}
-                              {s.cost.freshBusinesses > 0 && `${s.cost.freshBusinesses} fresh`}
+                              {inv.number ?? inv.id}
+                              {isRefunded && <span className="ml-2 text-green-600">· Refunded {inv.amountRefunded > 0 ? `$${(inv.amountRefunded / 100).toFixed(2)}` : ""}</span>}
                             </p>
-                          )}
+                          </div>
+                          <div className="flex items-center gap-3 shrink-0">
+                            <div className="text-right">
+                              <p className="text-sm font-medium">{currency} ${amount}</p>
+                              <Badge variant={inv.status === "paid" ? "secondary" : "destructive"} className="text-xs">
+                                {inv.status ?? "unknown"}
+                              </Badge>
+                            </div>
+                            {inv.hostedInvoiceUrl && (
+                              <a href={inv.hostedInvoiceUrl} target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground transition-colors">
+                                <ExternalLink className="h-4 w-4" />
+                              </a>
+                            )}
+                          </div>
                         </div>
+                        {i < invoices.length - 1 && <Separator />}
                       </div>
-                      {i < searches.length - 1 && <Separator />}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
           </Card>
         </TabsContent>
+
       </Tabs>
 
       {/* Downgrade confirmation dialog */}

@@ -1,8 +1,8 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Business } from "@/data/mockBusinesses";
-import { formatCategoryLabel } from "@/data/dfsCategories";
 import { setSearchResults } from "@/lib/businessCache";
+import { formatCategoryLabel } from "@/data/dfsCategories";
 import { useSearchJob, deriveProgressDisplay } from "@/hooks/useSearchJob";
 import { useFirebaseLeadStore } from "@/hooks/useFirebaseLeadStore";
 import { useSavedSearches } from "@/hooks/useSavedSearches";
@@ -11,17 +11,16 @@ import { usePreferences } from "@/hooks/usePreferences";
 import { ResultsTable } from "@/components/ResultsTable";
 import { LeadDetailPanel } from "@/components/LeadDetailPanel";
 import { CategoryCombobox } from "@/components/CategoryCombobox";
+import { LocationAutocomplete } from "@/components/LocationAutocomplete";
 import { ResizableSheet } from "@/components/ResizableSheet";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Slider } from "@/components/ui/slider";
 import {
-  Search, MapPin, Bookmark, Loader2,
+  Search, Bookmark, Loader2,
   ArrowLeft, Clock, Bookmark as BookmarkIcon, ChevronRight,
-  Download, AlertTriangle, HelpCircle,
+  Download, AlertTriangle, Users,
 } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
@@ -30,7 +29,26 @@ const RADIUS_STEPS = [1, 5, 10, 15, 20, 30, 40, 50] as const;
 type Radius = (typeof RADIUS_STEPS)[number];
 const MAX_RADIUS: Radius = 50;
 const MAX_RADIUS_INDEX = RADIUS_STEPS.indexOf(MAX_RADIUS);
-const RESULT_LIMIT_OPTIONS = [25, 50, 100, 200] as const;
+
+// Must mirror the backend getRadiusTier() function exactly
+function getRadiusTier(r: number): { creditCost: number; limit: number } {
+  if (r <= 5)  return { creditCost: 1, limit: 150 };
+  if (r <= 15) return { creditCost: 2, limit: 400 };
+  if (r <= 30) return { creditCost: 3, limit: 700 };
+  return       { creditCost: 5, limit: 1000 };
+}
+
+// Estimated leads = ~15–20% of businesses searched pass all filters
+const RADIUS_EST_LEADS: Record<number, string> = {
+  1:  "~15–30 leads",
+  5:  "~15–30 leads",
+  10: "~40–80 leads",
+  15: "~40–80 leads",
+  20: "~70–140 leads",
+  30: "~70–140 leads",
+  40: "~100–200 leads",
+  50: "~100–200 leads",
+};
 
 type ViewState = "empty" | "loading" | "results" | "error" | "rate_limited";
 
@@ -64,7 +82,6 @@ const Index = () => {
     const parsed = (RADIUS_STEPS as readonly number[]).includes(r) ? (r as Radius) : 10;
     return parsed > MAX_RADIUS ? MAX_RADIUS : parsed;
   });
-  const [resultLimit, setResultLimit] = useState(50);
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [filteredCount, setFilteredCount] = useState(0);
@@ -96,7 +113,7 @@ const Index = () => {
 
   const fbStore = useFirebaseLeadStore();
   const credits = useCredits();
-  const { searches: firestoreSearches } = useSavedSearches();
+  const { searches: firestoreSearches, updateLeadCount } = useSavedSearches();
 
   const { prefs } = usePreferences();
 
@@ -120,34 +137,38 @@ const Index = () => {
     }
   }, [searchJob.results]);
 
-  // Log cost breakdown when search completes
+  // Save leadCount when search completes — use baseResults.length which is the
+  // post-filter count the user sees, same source as filteredCount in ResultsTable.
   const prevStatusRef = useRef(searchJob.status);
   useEffect(() => {
-    if (prevStatusRef.current !== "completed" && searchJob.status === "completed") {
-      if (searchJob.cost) {
-        console.log("[search] Cost breakdown:", searchJob.cost);
-      }
+    const justCompleted = prevStatusRef.current !== "completed" && searchJob.status === "completed";
+    if (justCompleted && searchJob.cost) {
+      console.log("[search] Cost breakdown:", searchJob.cost);
+    }
+    if (justCompleted && searchJob.jobId) {
+      updateLeadCount(searchJob.jobId, baseResults.length);
     }
     prevStatusRef.current = searchJob.status;
-  }, [searchJob.status, searchJob.cost]);
+  }, [searchJob.status, searchJob.cost, searchJob.jobId, baseResults.length, updateLeadCount]);
 
   const handleSearch = useCallback(() => {
     const keyword = selectedCategory !== "all" ? selectedCategory : "businesses";
     const loc = location.trim();
+    const { creditCost } = getRadiusTier(radius);
 
     if (!loc) {
       toast.error("Please enter a location (zip code or city).");
       return;
     }
 
-    if (!credits.hasCredits) {
-      toast.error("You're out of credits. Please upgrade your plan to continue searching.");
+    if (credits.remaining < creditCost) {
+      toast.error(`This search costs ${creditCost} credits but you only have ${credits.remaining} remaining. Please upgrade your plan.`);
       return;
     }
 
-    searchJob.startSearch({ keyword, location: loc, radius, limit: resultLimit });
+    searchJob.startSearch({ keyword, location: loc, radius });
     setForceEmpty(false);
-  }, [selectedCategory, location, radius, resultLimit, searchJob.startSearch, credits.hasCredits]);
+  }, [selectedCategory, location, radius, searchJob.startSearch, credits.remaining]);
 
   // When the hook rehydrates a job (page refresh), mirror params into local
   // form state and clear forceEmpty so the results view is shown.
@@ -184,7 +205,6 @@ const Index = () => {
     setLocation("");
     setSelectedCategory("all");
     setRadius(10);
-    setResultLimit(50);
     setSelectedBusiness(null);
     setSelectedIds(new Set());
     // Clear URL params (e.g. ?restore=...) and reset state
@@ -227,8 +247,13 @@ const Index = () => {
   const toTitleCase = (s: string) =>
     s.replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
 
+  const categoryDisplayLabel = (() => {
+    if (!selectedCategory || selectedCategory === "all") return null;
+    return formatCategoryLabel(selectedCategory);
+  })();
+
   const searchSummary = [
-    selectedCategory !== "all" ? formatCategoryLabel(selectedCategory) : null,
+    categoryDisplayLabel,
     location ? toTitleCase(location.trim()) : null,
   ].filter(Boolean).join(" in ");
 
@@ -275,56 +300,40 @@ const Index = () => {
             {/* Row 1: Category + Location */}
             <div className="flex flex-col sm:flex-row gap-3">
               <div className="flex-1 text-left">
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 flex items-center gap-1">
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
                   Category
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <HelpCircle className="h-3 w-3 cursor-help" />
-                    </TooltipTrigger>
-                    <TooltipContent side="top" className="max-w-[200px]">
-                      <p className="font-semibold mb-1">Best industries for leads:</p>
-                      <ol className="list-decimal list-inside space-y-0.5 text-xs">
-                        <li>Contractors</li>
-                        <li>HVAC</li>
-                        <li>Plumbing</li>
-                        <li>Electrician</li>
-                        <li>Pest Control</li>
-                        <li>Home Service</li>
-                        <li>Insurance</li>
-                        <li>Real Estate</li>
-                      </ol>
-                    </TooltipContent>
-                  </Tooltip>
                 </label>
                 <CategoryCombobox
                   value={selectedCategory}
                   onChange={setSelectedCategory}
                   className="w-full"
                   inputClassName="h-11 text-base"
-                  placeholder="e.g. Landscaper, Plumber"
+                  placeholder="e.g. Plumber, HVAC, Landscaper"
                   onKeyDown={(e) => e.key === "Enter" && canSearch && handleSearch()}
                 />
               </div>
               <div className="flex-1 text-left">
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Location</label>
-                <div className="relative">
-                  <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Zip code or city"
-                    className="pl-10 h-11 text-base"
-                    value={location}
-                    onChange={(e) => setLocation(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && canSearch && handleSearch()}
-                  />
-                </div>
+                <LocationAutocomplete
+                  value={location}
+                  onChange={setLocation}
+                  inputClassName="h-11 text-base"
+                  onKeyDown={(e) => e.key === "Enter" && canSearch && handleSearch()}
+                />
               </div>
             </div>
 
-            {/* Row 2: Radius slider */}
+            {/* Row 2: Radius slider with estimated lead count */}
             <div className="text-left">
-              <label className="text-xs font-medium text-muted-foreground mb-3 block">
-                Search Radius: <span className="text-foreground font-semibold">{radius} mi</span>
-              </label>
+              <div className="flex items-center justify-between mb-3">
+                <label className="text-xs font-medium text-muted-foreground">
+                  Search Radius: <span className="text-foreground font-semibold">{radius} mi</span>
+                </label>
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <Users className="h-3 w-3" />
+                  {RADIUS_EST_LEADS[radius]}
+                </span>
+              </div>
               <div className="px-1">
                 <Slider
                   min={0}
@@ -333,59 +342,43 @@ const Index = () => {
                   value={[indexFromRadius(radius)]}
                   onValueChange={([i]) => setRadius(radiusFromIndex(i))}
                   aria-label="Search radius"
-                  className="flex-grow"
-                  style={{ width: `${((MAX_RADIUS_INDEX) / (RADIUS_STEPS.length - 1)) * 100}%` }}
                 />
                 <div className="flex justify-between mt-1.5">
-                  {RADIUS_STEPS.map((r) => {
-                    const disabled = r > MAX_RADIUS;
-                    return (
-                      <span
-                        key={r}
-                        className={`text-[10px] ${
-                          disabled
-                            ? "text-muted-foreground/30 line-through"
-                            : radius === r
-                              ? "text-foreground font-medium"
-                              : "text-muted-foreground"
-                        }`}
-                      >
-                        {r}
-                      </span>
-                    );
-                  })}
+                  {RADIUS_STEPS.map((r) => (
+                    <span
+                      key={r}
+                      className={`text-[10px] ${
+                        radius === r ? "text-foreground font-medium" : "text-muted-foreground"
+                      }`}
+                    >
+                      {r}
+                    </span>
+                  ))}
                 </div>
               </div>
             </div>
 
-            {/* Row 3: Max results + Search button */}
-            <div className="flex gap-3 items-end mt-1">
-              <div className="text-left shrink-0">
-                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">Max Results</label>
-                <select
-                  value={resultLimit}
-                  onChange={(e) => setResultLimit(Number(e.target.value))}
-                  className="h-12 px-3 rounded-md border border-input bg-background text-sm"
-                  aria-label="Max results"
-                >
-                  {RESULT_LIMIT_OPTIONS.map((n) => (
-                    <option key={n} value={n}>{n}</option>
-                  ))}
-                </select>
-              </div>
+            {/* Row 3: Search button */}
+            <div className="mt-1">
               <Button
                 size="lg"
-                className="h-12 text-base flex-1"
-                disabled={!canSearch}
+                className="h-12 text-base w-full"
+                disabled={!canSearch || credits.remaining < getRadiusTier(radius).creditCost}
                 onClick={handleSearch}
               >
                 <Search className="h-4 w-4 mr-2" />
-                Search Leads · 1 credit
+                Search Leads · {getRadiusTier(radius).creditCost} credit{getRadiusTier(radius).creditCost > 1 ? "s" : ""}
               </Button>
+              {credits.remaining < getRadiusTier(radius).creditCost && credits.remaining > 0 && (
+                <p className="text-xs text-center text-muted-foreground mt-2">
+                  You have {credits.remaining} credit{credits.remaining !== 1 ? "s" : ""} — reduce the radius or{" "}
+                  <Link to="/billing" className="text-primary underline underline-offset-2">upgrade your plan</Link>.
+                </p>
+              )}
             </div>
 
             {/* No credits banner */}
-            {!credits.hasCredits && (
+            {credits.remaining === 0 && (
               <motion.div
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -428,7 +421,7 @@ const Index = () => {
                       <p className="text-xs text-muted-foreground">{relativeTime(s.createdAt)}</p>
                     </div>
                     <Badge variant="secondary" className="shrink-0">
-                      {s.resultCount} result{s.resultCount === 1 ? "" : "s"}
+                      {(s.leadCount ?? s.resultCount)} lead{(s.leadCount ?? s.resultCount) === 1 ? "" : "s"}
                     </Badge>
                   </Link>
                 ))}
@@ -461,7 +454,7 @@ const Index = () => {
 
   // ── LOADING STATE (no partial results yet) ──
   if (viewState === "loading" && searchJob.results.length === 0) {
-    const cat = selectedCategory !== "all" ? formatCategoryLabel(selectedCategory) : "businesses";
+    const cat = categoryDisplayLabel ?? "businesses";
     const loc = location ? location : "your area";
 
     let progressMessage: string;

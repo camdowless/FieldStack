@@ -85,6 +85,10 @@
         "function": "reactivateSubscription"
       },
       {
+        "source": "/api/getInvoices",
+        "function": "getInvoices"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

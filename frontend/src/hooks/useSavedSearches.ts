@@ -9,6 +9,8 @@ import {
   doc,
   getDocs,
   writeBatch,
+  updateDoc,
+  where,
 } from "firebase/firestore";
 import { firestore } from "@/lib/firebase";
 import { useAuth } from "@/contexts/AuthContext";
@@ -32,6 +34,7 @@ export interface FirestoreSavedSearch {
   radius: number;
   cids: string[];
   resultCount: number;
+  leadCount?: number;
   createdAt: string; // ISO string derived from Firestore timestamp
   cost?: SearchCostBreakdown | null;
 }
@@ -66,6 +69,7 @@ export function useSavedSearches() {
             radius: data.radius ?? 10,
             cids: data.cids ?? [],
             resultCount: data.resultCount ?? 0,
+            leadCount: data.leadCount ?? undefined,
             createdAt: ts.toISOString(),
             cost: data.cost ?? null,
           };
@@ -107,5 +111,18 @@ export function useSavedSearches() {
     }
   }, [user]);
 
-  return { searches, loading, deleteSearch, clearAllSearches };
+  const updateLeadCount = useCallback(async (jobId: string, leadCount: number) => {
+    if (!user) return;
+    try {
+      const col = collection(firestore, "users", user.uid, "searches");
+      const snap = await getDocs(query(col, where("jobId", "==", jobId), limit(1)));
+      if (!snap.empty) {
+        await updateDoc(snap.docs[0].ref, { leadCount });
+      }
+    } catch (err) {
+      console.error("[useSavedSearches] updateLeadCount failed:", err);
+    }
+  }, [user]);
+
+  return { searches, loading, deleteSearch, clearAllSearches, updateLeadCount };
 }

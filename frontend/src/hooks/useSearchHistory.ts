@@ -9,6 +9,7 @@ export interface SearchHistoryEntry {
   location: string;
   radius: number;
   resultCount: number;
+  creditCost?: number;
   createdAt: { seconds: number } | null;
   cost?: {
     businessSearch: number;

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { DFS_CATEGORIES, formatCategoryLabel, toCategoryApiKey } from "@/data/dfsCategories";
 import { Input } from "@/components/ui/input";
-import { SlidersHorizontal, Check } from "lucide-react";
+import { SlidersHorizontal, Check, Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /** Pre-build a lookup set + display list once at module level. */
@@ -13,13 +13,28 @@ const CATEGORY_LIST = DFS_CATEGORIES.map(([key, count]) => ({
 }));
 const VALID_KEYS = new Set(DFS_CATEGORIES.map(([k]) => k));
 
-const MAX_SUGGESTIONS = 50;
+// Top picks — best industries for leads, shown when input is empty
+const TOP_PICK_KEYS = [
+  "contractor",
+  "hvac_contractor",
+  "plumber",
+  "electrician",
+  "pest_control_service",
+  "landscaper",
+  "roofing_contractor",
+  "auto_repair_shop",
+  "insurance_agency",
+  "real_estate_agency",
+  "house_cleaning_service",
+  "handyman",
+];
+const TOP_PICKS = TOP_PICK_KEYS.map((key) => ({
+  apiKey: key,
+  label: formatCategoryLabel(key),
+  labelLower: formatCategoryLabel(key).toLowerCase(),
+}));
 
-function formatCount(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}K`;
-  return String(n);
-}
+const MAX_SUGGESTIONS = 50;
 
 interface CategoryComboboxProps {
   value: string;
@@ -53,13 +68,22 @@ export function CategoryCombobox({
     }
   }, [value]);
 
-  // Filter categories based on input — show after 1+ chars
+  // Filter categories based on input
+  // When empty: show top picks. When typing: filter + sort top picks first.
   const filtered = useMemo(() => {
-    if (inputValue.length < 1) return [];
+    if (inputValue.length < 1) return TOP_PICKS;
     const q = inputValue.toLowerCase();
     const matches = CATEGORY_LIST.filter((c) => c.labelLower.includes(q));
-    // Sort: starts-with first, then by business count descending
     matches.sort((a, b) => {
+      const aTop = TOP_PICK_KEYS.indexOf(a.apiKey);
+      const bTop = TOP_PICK_KEYS.indexOf(b.apiKey);
+      const aIsTop = aTop !== -1;
+      const bIsTop = bTop !== -1;
+      // Top picks first, in their defined order
+      if (aIsTop && bIsTop) return aTop - bTop;
+      if (aIsTop) return -1;
+      if (bIsTop) return 1;
+      // Then starts-with, then by count
       const aStarts = a.labelLower.startsWith(q) ? 0 : 1;
       const bStarts = b.labelLower.startsWith(q) ? 0 : 1;
       if (aStarts !== bStarts) return aStarts - bStarts;
@@ -67,6 +91,8 @@ export function CategoryCombobox({
     });
     return matches.slice(0, MAX_SUGGESTIONS);
   }, [inputValue]);
+
+  const isShowingTopPicks = inputValue.length < 1;
 
   // Close on outside click
   useEffect(() => {
@@ -192,9 +218,7 @@ export function CategoryCombobox({
             onChange("all");
           }
         }}
-        onFocus={() => {
-          if (inputValue.length >= 1) setOpen(true);
-        }}
+        onFocus={() => setOpen(true)}
         onKeyDown={handleKeyDown}
         autoComplete="off"
         role="combobox"
@@ -209,30 +233,41 @@ export function CategoryCombobox({
           role="listbox"
           className="absolute z-50 top-full mt-1 w-full rounded-md border bg-popover shadow-md max-h-60 overflow-y-auto"
         >
-          {filtered.map((cat, i) => (
-            <button
-              key={cat.apiKey}
-              type="button"
-              role="option"
-              aria-selected={i === highlightIndex}
-              className={cn(
-                "w-full text-left px-3 py-2 text-sm flex items-center justify-between gap-2 transition-colors",
-                i === highlightIndex
-                  ? "bg-accent text-accent-foreground"
-                  : "hover:bg-accent hover:text-accent-foreground",
-              )}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                selectCategory(cat.apiKey);
-              }}
-              onMouseEnter={() => setHighlightIndex(i)}
-            >
-              <span className="truncate">{cat.label}</span>
-              <span className="text-xs text-muted-foreground shrink-0">
-                {formatCount(cat.count)}
-              </span>
-            </button>
-          ))}
+          {isShowingTopPicks && (
+            <div className="px-3 pt-2 pb-1">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1">
+                <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                Top picks
+              </p>
+            </div>
+          )}
+          {filtered.map((cat, i) => {
+            const isTopPick = TOP_PICK_KEYS.includes(cat.apiKey);
+            return (
+              <button
+                key={cat.apiKey}
+                type="button"
+                role="option"
+                aria-selected={i === highlightIndex}
+                className={cn(
+                  "w-full text-left px-3 py-2 text-sm flex items-center justify-between gap-2 transition-colors",
+                  i === highlightIndex
+                    ? "bg-accent text-accent-foreground"
+                    : "hover:bg-accent hover:text-accent-foreground",
+                )}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  selectCategory(cat.apiKey);
+                }}
+                onMouseEnter={() => setHighlightIndex(i)}
+              >
+                <span className="truncate">{cat.label}</span>
+                {!isShowingTopPicks && isTopPick && (
+                  <Star className="h-3 w-3 fill-amber-400 text-amber-400 shrink-0" />
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

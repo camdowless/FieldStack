@@ -324,6 +324,7 @@ export interface JobParams {
   location: string;
   radius: number;
   limit: number;
+  creditCost: number;
 }
 
 export interface JobProgress {

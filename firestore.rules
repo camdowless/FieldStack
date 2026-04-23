@@ -59,7 +59,10 @@ service cloud.firestore {
       match /searches/{searchId} {
         allow read: if isOwner();
         allow delete: if isOwner();
-        allow create, update: if false; // server-side only via Admin SDK
+        allow create: if false; // server-side only via Admin SDK
+        allow update: if isOwner()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["leadCount"])
+          && request.resource.data.leadCount is int;
       }
 
       match /savedLeads/{cid} {
@@ -76,6 +79,12 @@ service cloud.firestore {
 
         allow create: if isOwner() && validLeadData();
         allow update: if isOwner() && validLeadData();
+      }
+
+      // Dunning / payment notifications written by server, read-only for the user
+      match /notifications/{notificationId} {
+        allow read: if isOwner();
+        allow write: if false; // server-side only via Admin SDK
       }
     }
   }

@@ -9,11 +9,14 @@ import { ResultsTable } from "@/components/ResultsTable";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatCategoryLabel } from "@/data/dfsCategories";
+import { sortByScoreDesc } from "@/hooks/useSearchJob";
 import {
   Trash2, Search, Clock, X, Loader2, ArrowLeft, Coins,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { Business } from "@/data/mockBusinesses";
+
+const DISQUALIFIED_LABELS = new Set(["disqualified", "defunct", "permanently closed"]);
 
 const SearchHistory = () => {
   const { searches: savedSearches, loading, deleteSearch, clearAllSearches } = useSavedSearches();
@@ -44,8 +47,14 @@ const SearchHistory = () => {
     try {
       const response = await fetchBusinessesByCids(search.cids);
       const businesses = response.results.map(normalizeBusiness);
-      setSearchResults(businesses);
-      setResults(businesses);
+      // Apply same disqualified filter + sort by score desc as the live search
+      const leads = sortByScoreDesc(
+        businesses.filter(
+          (b) => !DISQUALIFIED_LABELS.has(b.label ?? "") && b.leadScore !== null,
+        ),
+      );
+      setSearchResults(leads);
+      setResults(leads);
     } catch (err) {
       const message = err instanceof SearchError ? err.message : "Failed to load saved search.";
       setResultsError(message);
@@ -194,7 +203,9 @@ const SearchHistory = () => {
                       <span className="font-medium">{describeSearch(s)}</span>
                     </div>
                   </td>
-                  <td className="py-3 px-3 text-muted-foreground">{s.resultCount} leads</td>
+                  <td className="py-3 px-3 text-muted-foreground">
+                    {(s.leadCount ?? s.resultCount)} leads
+                  </td>
                   <td className="py-3 px-3">
                     <TooltipProvider>
                       <Tooltip>

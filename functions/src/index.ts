@@ -235,7 +235,7 @@ async function ensureUserProfile(uid: string): Promise<void> {
 // Exported for Job_Processor (Task 3.1)
 export function saveSearchToUser(
   uid: string,
-  search: { query: string; location: string; category: string; radius: number; cids: string[]; cost?: CostBreakdown | null },
+  search: { jobId: string; query: string; location: string; category: string; radius: number; cids: string[]; leadCount: number; cost?: CostBreakdown | null; creditCost?: number },
 ): void {
   const ref = db
     .collection(USERS_COLLECTION)
@@ -246,7 +246,7 @@ export function saveSearchToUser(
   ref
     .set({
       ...search,
-      resultCount: search.cids.length,
+      resultCount: search.leadCount,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     })
     .catch((err) => {
@@ -520,16 +520,21 @@ export const dataforseoBusinessSearch = functions
         return;
       }
 
-      // Radius: default 10 miles, clamp to 1–100
+      // Radius: default 10 miles, clamp to 1–50
       const radiusMiles = typeof rawRadius === "number"
-        ? Math.max(1, Math.min(100, rawRadius))
+        ? Math.max(1, Math.min(50, rawRadius))
         : 10;
 
-      // Limit: default 50, clamp to 1–500
-      const rawLimit = req.body?.limit;
-      const limit = typeof rawLimit === "number"
-        ? Math.max(1, Math.min(500, Math.round(rawLimit)))
-        : 50;
+      // ── Radius-based credit cost & search limit ──
+      // The backend is the authoritative source — never trust the client for this.
+      // Larger radius = more DFS API calls = more credits consumed.
+      function getRadiusTier(r: number): { creditCost: number; limit: number } {
+        if (r <= 5)  return { creditCost: 1, limit: 150 };
+        if (r <= 15) return { creditCost: 2, limit: 400 };
+        if (r <= 30) return { creditCost: 3, limit: 700 };
+        return       { creditCost: 5, limit: 1000 };
+      }
+      const { creditCost, limit } = getRadiusTier(radiusMiles);
 
       // ── Compute deterministic job ID and create job document ──
       const jobId = computeJobId(uid, keyword, location, radiusMiles);
@@ -539,7 +544,7 @@ export const dataforseoBusinessSearch = functions
       const jobData: JobDocument = {
         uid,
         status: "running",
-        params: { keyword, location, radius: radiusMiles, limit },
+        params: { keyword, location, radius: radiusMiles, limit, creditCost },
         progress: { analyzed: 0, total: 0 },
         resultCount: null,
         error: null,
@@ -569,8 +574,8 @@ export const dataforseoBusinessSearch = functions
         const sub = data.subscription as Subscription | undefined;
         const creditsUsed = sub?.creditsUsed ?? 0;
         const creditsTotal = sub?.creditsTotal ?? (data.credits as number | undefined) ?? 0;
-        if (creditsUsed >= creditsTotal) {
-          res.status(402).json({ error: "Insufficient credits. Please upgrade your plan.", code: "INSUFFICIENT_CREDITS" });
+        if (creditsTotal - creditsUsed < creditCost) {
+          res.status(402).json({ error: `This search requires ${creditCost} credits but you only have ${Math.max(0, creditsTotal - creditsUsed)} remaining. Please upgrade your plan.`, code: "INSUFFICIENT_CREDITS" });
           return;
         }
       }
@@ -603,19 +608,16 @@ export const dataforseoBusinessSearch = functions
           const sub = data.subscription as Subscription | undefined;
           const creditsUsed = sub?.creditsUsed ?? 0;
           const creditsTotal = sub?.creditsTotal ?? (data.credits as number | undefined) ?? 0;
-          if (creditsUsed >= creditsTotal) {
+          if (creditsTotal - creditsUsed < creditCost) {
             throw new Error("INSUFFICIENT_CREDITS");
           }
           tx.update(userRef, {
-            "subscription.creditsUsed": admin.firestore.FieldValue.increment(1),
+            "subscription.creditsUsed": admin.firestore.FieldValue.increment(creditCost),
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
           });
         });
       } catch (err) {
         if (err instanceof Error && err.message === "INSUFFICIENT_CREDITS") {
-          // Roll back: delete the job so the onCreate processor doesn't run a
-          // search the user can't pay for. The processor handles missing docs
-          // gracefully (its jobRef.update calls will fail and it exits).
           await deleteResultsSubcollection(jobId);
           await jobRef.delete().catch((delErr) => {
             console.error(`[credits] Failed to roll back job ${jobId}:`, delErr);
@@ -628,9 +630,9 @@ export const dataforseoBusinessSearch = functions
         return;
       }
 
-      console.log(`[credits] Deducted 1 credit for uid=${uid}`);
+      console.log(`[credits] Deducted ${creditCost} credit(s) for uid=${uid} (radius=${radiusMiles}mi)`);
       console.log(`[Job_Creator] Created new job ${jobId} for uid=${uid}`);
-      res.status(200).json({ jobId });
+      res.status(200).json({ jobId, creditCost });
     });
   });
 
@@ -761,7 +763,7 @@ export const processSearchJob = functions
     const jobId = context.params.jobId;
     const jobData = snap.data() as JobDocument;
     const { uid, params } = jobData;
-    const { keyword, location, radius: radiusMiles, limit: searchLimit } = params;
+    const { keyword, location, radius: radiusMiles, limit: searchLimit, creditCost: jobCreditCost } = params;
     const jobRef = db.collection("jobs").doc(jobId);
 
     console.log(`[Job_Processor] Starting job ${jobId} for uid=${uid}`);
@@ -878,13 +880,23 @@ export const processSearchJob = functions
       }
       cost.freshBusinesses = freshItems.length;
 
+      const DISQUALIFIED_LABELS = new Set(["disqualified", "defunct", "permanently closed"]);
+      const countLeads = (batch: ScoredBusiness[]) =>
+        batch.filter((b) => b.cid && !DISQUALIFIED_LABELS.has(b.label)).length;
+      const collectLeadCids = (batch: ScoredBusiness[]) =>
+        batch.filter((b) => b.cid && !DISQUALIFIED_LABELS.has(b.label)).map((b) => b.cid as string);
+
       let totalResultsWritten = 0;
+      let totalLeadsWritten = 0;
+      let leadCids: string[] = [];
       let analyzed = 0;
 
       // Write cached results immediately
       if (cachedBusinesses.length > 0) {
         const written = await writeResultsBatch(jobId, uid, cachedBusinesses);
         totalResultsWritten += written;
+        totalLeadsWritten += countLeads(cachedBusinesses);
+        leadCids.push(...collectLeadCids(cachedBusinesses));
         analyzed += cachedBusinesses.length;
         await updateJobProgress(jobId, analyzed, totalBusinesses);
       }
@@ -898,6 +910,8 @@ export const processSearchJob = functions
         const scored = scoreNoWebsiteBatch(noWebsite);
         const written = await writeResultsBatch(jobId, uid, scored);
         totalResultsWritten += written;
+        totalLeadsWritten += countLeads(scored);
+        leadCids.push(...collectLeadCids(scored));
         analyzed += noWebsite.length;
         await updateJobProgress(jobId, analyzed, totalBusinesses);
 
@@ -929,16 +943,16 @@ export const processSearchJob = functions
         });
 
         // Fire-and-forget: save search to user
-        const allCidsForSearch = [...cachedBusinesses, ...scoreNoWebsiteBatch(noWebsite)]
-          .filter((b) => b.cid)
-          .map((b) => b.cid as string);
         saveSearchToUser(uid, {
+          jobId,
           query: keyword,
           location,
           category: keyword,
           radius: radiusMiles,
-          cids: allCidsForSearch,
+          cids: leadCids,
+          leadCount: totalLeadsWritten,
           cost,
+          creditCost: jobCreditCost,
         });
 
         console.log(`[Job_Processor] Job ${jobId} completed with ${totalResultsWritten} results`);
@@ -966,6 +980,8 @@ export const processSearchJob = functions
         const scored = scoreNoWebsiteBatch(lowLegitBusinesses);
         const written = await writeResultsBatch(jobId, uid, scored);
         totalResultsWritten += written;
+        totalLeadsWritten += countLeads(scored);
+        leadCids.push(...collectLeadCids(scored));
         analyzed += lowLegitBusinesses.length;
         await updateJobProgress(jobId, analyzed, totalBusinesses);
         saveBusinessesToCache(scored);
@@ -1019,6 +1035,8 @@ export const processSearchJob = functions
         const scored = scoreWithSignals(deadSite, signalsMap, emptyRdap, emptyLh);
         const written = await writeResultsBatch(jobId, uid, scored);
         totalResultsWritten += written;
+        totalLeadsWritten += countLeads(scored);
+        leadCids.push(...collectLeadCids(scored));
         analyzed += deadSite.length;
         await updateJobProgress(jobId, analyzed, totalBusinesses);
 
@@ -1033,6 +1051,8 @@ export const processSearchJob = functions
         const scored = scoreWithSignals(parked, signalsMap, emptyRdap, emptyLh);
         const written = await writeResultsBatch(jobId, uid, scored);
         totalResultsWritten += written;
+        totalLeadsWritten += countLeads(scored);
+        leadCids.push(...collectLeadCids(scored));
         analyzed += parked.length;
         await updateJobProgress(jobId, analyzed, totalBusinesses);
 
@@ -1084,6 +1104,8 @@ export const processSearchJob = functions
         const scored = scoreWithSignals(nonParked, signalsMap, rdapMap, lighthouseMap);
         const written = await writeResultsBatch(jobId, uid, scored);
         totalResultsWritten += written;
+        totalLeadsWritten += countLeads(scored);
+        leadCids.push(...collectLeadCids(scored));
         analyzed += nonParked.length;
         await updateJobProgress(jobId, analyzed, totalBusinesses);
 
@@ -1105,14 +1127,16 @@ export const processSearchJob = functions
       });
 
       // Fire-and-forget: save search to user's history
-      const allResultCids = allCids.length > 0 ? allCids : [];
       saveSearchToUser(uid, {
+        jobId,
         query: keyword,
         location,
         category: keyword,
         radius: radiusMiles,
-        cids: allResultCids,
+        cids: leadCids,
+        leadCount: totalLeadsWritten,
         cost,
+        creditCost: jobCreditCost,
       });
 
       console.log(`[Job_Processor] Job ${jobId} completed with ${totalResultsWritten} results`);
@@ -2279,14 +2303,29 @@ export const createCheckoutSession = functions
     }
 
     // Create checkout session
-    const session = await getStripe().checkout.sessions.create({
+    const { promoCode } = req.body ?? {};
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sessionParams: any = {
       customer: stripeCustomerId,
       mode: "subscription",
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: `${FRONTEND_URL}/billing?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${FRONTEND_URL}/billing`,
       metadata: { uid },
-    });
+      allow_promotion_codes: !promoCode, // show promo field in Stripe UI if no code pre-applied
+    };
+    if (promoCode) {
+      // Validate and pre-apply the promo code
+      const promoCodes = await getStripe().promotionCodes.list({ code: promoCode, active: true, limit: 1 });
+      if (promoCodes.data.length > 0) {
+        sessionParams.discounts = [{ promotion_code: promoCodes.data[0].id }];
+        sessionParams.allow_promotion_codes = false;
+      } else {
+        res.status(400).json({ error: "Invalid or expired promo code." });
+        return;
+      }
+    }
+    const session = await getStripe().checkout.sessions.create(sessionParams);
 
     res.status(200).json({ url: session.url });
   });
@@ -2324,6 +2363,59 @@ export const createPortalSession = functions
     });
 
     res.status(200).json({ url: session.url });
+  });
+});
+
+// ─── Get Invoice History ──────────────────────────────────────────────────────
+
+export const getInvoices = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== "GET") { res.status(405).json({ error: "Method not allowed" }); return; }
+
+    let decodedToken: admin.auth.DecodedIdToken;
+    try {
+      decodedToken = await verifyUserRole(req);
+    } catch {
+      res.status(401).json({ error: "Unauthorized. Please sign in." });
+      return;
+    }
+
+    const uid = decodedToken.uid;
+    const userSnap = await db.collection(USERS_COLLECTION).doc(uid).get();
+    const stripeCustomerId: string | null = userSnap.data()?.subscription?.stripeCustomerId ?? null;
+    if (!stripeCustomerId) {
+      res.status(200).json({ invoices: [] });
+      return;
+    }
+
+    const invoices = await getStripe().invoices.list({
+      customer: stripeCustomerId,
+      limit: 24,
+      expand: ["data.charge"],
+    });
+
+    const result = invoices.data.map((inv) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const invAny = inv as any;
+      const charge = invAny.charge;
+      return {
+        id: inv.id,
+        number: inv.number,
+        status: inv.status,
+        amountPaid: inv.amount_paid,
+        amountDue: inv.amount_due,
+        currency: inv.currency,
+        created: inv.created,
+        periodStart: inv.period_start,
+        periodEnd: inv.period_end,
+        hostedInvoiceUrl: inv.hosted_invoice_url,
+        invoicePdf: inv.invoice_pdf,
+        refunded: charge?.refunded ?? false,
+        amountRefunded: charge?.amount_refunded ?? 0,
+      };
+    });
+
+    res.status(200).json({ invoices: result });
   });
 });
 
@@ -2570,17 +2662,17 @@ export const stripeWebhook = functions.https.onRequest(async (req, res) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const session = event.data.object as any;
         const uid = session.metadata?.uid;
-        if (!uid) { console.error("[stripeWebhook] checkout.session.completed: missing uid in metadata"); break; }
+        if (!uid) { throw new Error(`[stripeWebhook] checkout.session.completed: missing uid in metadata`); }
         const stripeSubscriptionId = session.subscription as string;
-        if (!stripeSubscriptionId) { console.error("[stripeWebhook] checkout.session.completed: missing subscription id"); break; }
+        if (!stripeSubscriptionId) { throw new Error(`[stripeWebhook] checkout.session.completed: missing subscription id`); }
         const subscription = await getStripe().subscriptions.retrieve(stripeSubscriptionId, {
           expand: ["items.data.price"],
         });
         const priceId = subscription.items.data[0]?.price?.id;
-        if (!priceId) { console.error(`[stripeWebhook] checkout.session.completed: could not resolve priceId from subscription ${stripeSubscriptionId}`); break; }
+        if (!priceId) { throw new Error(`[stripeWebhook] checkout.session.completed: could not resolve priceId from subscription ${stripeSubscriptionId}`); }
         const priceToplan = await buildPriceIdToPlanMap();
         const plan = priceToplan.get(priceId);
-        if (!plan) { console.error(`[stripeWebhook] Unknown priceId: ${priceId}`); break; }
+        if (!plan) { throw new Error(`[stripeWebhook] Unknown priceId: ${priceId}`); }
         const item = subscription.items.data[0] as unknown as { current_period_start: number; current_period_end: number };
         await updateSubscription(uid, plan as SubscriptionPlan, {
           id: subscription.id,
@@ -2596,7 +2688,7 @@ export const stripeWebhook = functions.https.onRequest(async (req, res) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const subscription = event.data.object as any;
         const uid = await lookupUidByCustomerId(subscription.customer as string);
-        if (!uid) { console.error(`[stripeWebhook] customer.subscription.updated: uid not found for customer=${subscription.customer}`); break; }
+        if (!uid) { throw new Error(`[stripeWebhook] customer.subscription.updated: uid not found for customer=${subscription.customer}`); }
         const priceId = subscription.items.data[0].price.id;
         const priceToplan2 = await buildPriceIdToPlanMap();
         const plan = (priceToplan2.get(priceId) ?? "free") as SubscriptionPlan;
@@ -2615,7 +2707,7 @@ export const stripeWebhook = functions.https.onRequest(async (req, res) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const subscription = event.data.object as any;
         const uid = await lookupUidByCustomerId(subscription.customer as string);
-        if (!uid) { console.error(`[stripeWebhook] customer.subscription.deleted: uid not found for customer=${subscription.customer}`); break; }
+        if (!uid) { throw new Error(`[stripeWebhook] customer.subscription.deleted: uid not found for customer=${subscription.customer}`); }
         await downgradeToFree(uid);
         console.log(`[stripeWebhook] customer.subscription.deleted uid=${uid} → downgraded to free`);
         break;
@@ -2626,7 +2718,7 @@ export const stripeWebhook = functions.https.onRequest(async (req, res) => {
         const invoice = event.data.object as any;
         if (invoice.billing_reason !== "subscription_cycle") break;
         const uid = await lookupUidByCustomerId(invoice.customer as string);
-        if (!uid) { console.error(`[stripeWebhook] invoice.payment_succeeded: uid not found for customer=${invoice.customer}`); break; }
+        if (!uid) { throw new Error(`[stripeWebhook] invoice.payment_succeeded: uid not found for customer=${invoice.customer}`); }
         await resetCredits(uid, { period_start: invoice.period_start, period_end: invoice.period_end });
         console.log(`[stripeWebhook] invoice.payment_succeeded (renewal) uid=${uid} credits reset`);
         break;
@@ -2636,12 +2728,44 @@ export const stripeWebhook = functions.https.onRequest(async (req, res) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const invoice = event.data.object as any;
         const uid = await lookupUidByCustomerId(invoice.customer as string);
-        if (!uid) { console.error(`[stripeWebhook] invoice.payment_failed: uid not found for customer=${invoice.customer}`); break; }
+        if (!uid) { throw new Error(`[stripeWebhook] invoice.payment_failed: uid not found for customer=${invoice.customer}`); }
         await db.collection(USERS_COLLECTION).doc(uid).update({
           "subscription.status": "past_due",
           updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         });
-        console.log(`[stripeWebhook] invoice.payment_failed uid=${uid} → past_due`);
+        // Write a dunning notification so the UI can surface a banner
+        await db.collection(USERS_COLLECTION).doc(uid).collection("notifications").add({
+          type: "payment_failed",
+          invoiceId: invoice.id,
+          amountDue: invoice.amount_due,
+          nextPaymentAttempt: invoice.next_payment_attempt ?? null,
+          hostedInvoiceUrl: invoice.hosted_invoice_url ?? null,
+          read: false,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        console.log(`[stripeWebhook] invoice.payment_failed uid=${uid} → past_due + notification written`);
+        break;
+      }
+
+      case "charge.refunded": {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const charge = event.data.object as any;
+        const uid = await lookupUidByCustomerId(charge.customer as string);
+        if (!uid) { throw new Error(`[stripeWebhook] charge.refunded: uid not found for customer=${charge.customer}`); }
+        // Restore credits proportional to the refund amount relative to the charge amount
+        const userSnap = await db.collection(USERS_COLLECTION).doc(uid).get();
+        const userData = userSnap.data();
+        if (!userData) break;
+        const creditsTotal: number = userData.subscription?.creditsTotal ?? 0;
+        const creditsUsed: number = userData.subscription?.creditsUsed ?? 0;
+        const refundFraction = charge.amount > 0 ? (charge.amount_refunded as number) / (charge.amount as number) : 0;
+        const creditsToRestore = Math.round(creditsTotal * refundFraction);
+        const newCreditsUsed = Math.max(0, creditsUsed - creditsToRestore);
+        await db.collection(USERS_COLLECTION).doc(uid).update({
+          "subscription.creditsUsed": newCreditsUsed,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        console.log(`[stripeWebhook] charge.refunded uid=${uid} refundFraction=${refundFraction.toFixed(2)} creditsRestored=${creditsToRestore}`);
         break;
       }
 
