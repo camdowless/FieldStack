@@ -104,13 +104,13 @@ function docToSavedLead(id: string, data: Record<string, unknown>): SavedLeadDoc
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 
 export function useFirebaseLeadStore() {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const [leads, setLeads] = useState<SavedLeadDoc[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Real-time listener on users/{uid}/savedLeads
   useEffect(() => {
-    if (!user) {
+    if (!user || !role) {
       setLeads([]);
       setLoading(false);
       return;
@@ -133,7 +133,7 @@ export function useFirebaseLeadStore() {
     );
 
     return unsub;
-  }, [user?.uid]);
+  }, [user?.uid, role]);
 
   const savedLeadMap = useMemo(
     () => new Map(leads.map((l) => [l.cid, l])),

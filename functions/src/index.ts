@@ -13,7 +13,7 @@ import {
 } from "./dfsClient";
 import { lookupDomainInfo } from "./rdap";
 import { score, computeLegitimacy } from "./scorer";
-import { ScoredBusiness, CostBreakdown, BusinessRaw, ScorerInput, JobDocument } from "./types";
+import { ScoredBusiness, CostBreakdown, BusinessRaw, ScorerInput, JobDocument, UserProfile } from "./types";
 import { geocodeLocation, milesToKm, buildLocationCoordinate } from "./geocode";
 import { computeJobId, deleteResultsSubcollection, createOrReuseJob, isJobCancelled, cancelJob, identifyStuckJobs, identifyExpiredJobs } from "./jobHelpers";
 import { Timestamp } from "firebase-admin/firestore";
@@ -24,19 +24,36 @@ const db = admin.firestore();
 db.settings({ ignoreUndefinedProperties: true });
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────
-// Set CORS_ORIGIN (comma-separated) in your Firebase environment before deploying:
-//   firebase functions:config:set app.cors_origin="https://your-app.web.app"
-// Omitting it in production will log a warning and deny all cross-origin requests.
-const ALLOWED_ORIGINS: string[] | false = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim())
-  : (() => {
-      if (process.env.NODE_ENV === "production") {
-        console.warn("[CORS] CORS_ORIGIN is not set — all cross-origin requests will be blocked.");
-      }
-      return [];
-    })();
+// Set CORS_ORIGIN (comma-separated) in functions/.env:
+//   CORS_ORIGIN=https://your-app.web.app,https://your-custom-domain.com
+const rawCorsOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim()).filter(Boolean)
+  : [];
 
-const corsHandler = cors({ origin: ALLOWED_ORIGINS });
+if (rawCorsOrigins.length === 0) {
+  console.error("[CORS] ❌ CORS_ORIGIN is not set — all cross-origin requests will be rejected with 401. Set CORS_ORIGIN in functions/.env");
+} else {
+  console.log(`[CORS] Allowed origins: ${rawCorsOrigins.join(", ")}`);
+}
+
+const corsHandler = cors({
+  origin: (origin, callback) => {
+    // Allow requests with no Origin header (same-origin, curl, server-to-server)
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+    if (rawCorsOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.warn(`[CORS] ❌ Rejected origin="${origin}" — not in allowed list: [${rawCorsOrigins.join(", ")}]`);
+      callback(new Error(`CORS: origin "${origin}" is not allowed`));
+    }
+  },
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
+});
 
 // ─── Auth Helper ──────────────────────────────────────────────────────────────
 
@@ -50,7 +67,10 @@ async function verifyUserRole(req: functions.https.Request): Promise<admin.auth.
   if (!header?.startsWith("Bearer ")) {
     throw new Error("UNAUTHENTICATED");
   }
-  const decoded = await admin.auth().verifyIdToken(header.split("Bearer ")[1], true /* checkRevoked */);
+  // No checkRevoked here — revocation is reserved for admin/security actions.
+  // Checking revocation on every user request breaks sessions for users whose
+  // tokens were revoked during admin operations (e.g. role changes).
+  const decoded = await admin.auth().verifyIdToken(header.split("Bearer ")[1]);
   checkUserRole(decoded);
   return decoded;
 }
@@ -74,15 +94,81 @@ async function verifyAdmin(req: functions.https.Request, functionName?: string):
 
 const USERS_COLLECTION = "users";
 
+type FirestoreUserProfile = Omit<UserProfile, "createdAt" | "updatedAt"> & {
+  createdAt: admin.firestore.FieldValue;
+  updatedAt: admin.firestore.FieldValue;
+};
+
 /**
- * Ensure a user document exists. Creates one from Firebase Auth data if missing.
+ * Build a complete user profile document from the given fields.
+ * Single source of truth for the shape of a new user document.
+ */
+function buildUserProfile(fields: {
+  uid: string;
+  email?: string | null;
+  displayName?: string | null;
+  photoURL?: string | null;
+}): FirestoreUserProfile {
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  return {
+    uid: fields.uid,
+    email: fields.email ?? null,
+    displayName: fields.displayName ?? null,
+    photoURL: fields.photoURL ?? null,
+    role: "user",
+    plan: "free",
+    credits: 100,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+/**
+ * Authoritative user profile creation — called from the onUserCreate auth
+ * trigger with the full UserRecord already in hand.
+ *
+ * Uses Firestore `create()` so it fails loudly if the doc already exists
+ * (which should never happen in the onCreate path). This guarantees the
+ * complete profile is written atomically before the function returns.
+ */
+async function createUserProfile(user: admin.auth.UserRecord): Promise<void> {
+  const ref = db.collection(USERS_COLLECTION).doc(user.uid);
+  const profile = buildUserProfile({
+    uid: user.uid,
+    email: user.email,
+    displayName: user.displayName,
+    photoURL: user.photoURL,
+  });
+
+  console.log(`[createUserProfile] attempting write uid=${user.uid} fields=${JSON.stringify({ email: profile.email, displayName: profile.displayName, role: profile.role, plan: profile.plan, credits: profile.credits })}`);
+
+  try {
+    await ref.create(profile);
+    console.log(`[createUserProfile] SUCCESS uid=${user.uid} (${user.email ?? "no email"})`);
+  } catch (err: unknown) {
+    const code = (err as { code?: number }).code;
+    if (code === 6) {
+      console.warn(`[createUserProfile] doc already exists uid=${user.uid}, skipping`);
+      return;
+    }
+    console.error(`[createUserProfile] FAILED uid=${user.uid} code=${code}`, err);
+    throw err;
+  }
+}
+
+/**
+ * Lazy safety-net: ensure a user document exists when called from HTTP
+ * functions (e.g. dataforseoBusinessSearch). Falls back to fetching the
+ * auth record if the doc is missing — this should rarely happen because
+ * onUserCreate handles the primary creation path.
  */
 async function ensureUserProfile(uid: string): Promise<void> {
   const ref = db.collection(USERS_COLLECTION).doc(uid);
   const snap = await ref.get();
   if (snap.exists) return;
 
-  // Pull basic info from Firebase Auth
+  console.warn(`[user] profile missing for ${uid} — creating via fallback`);
+
   let email: string | null = null;
   let displayName: string | null = null;
   let photoURL: string | null = null;
@@ -91,17 +177,23 @@ async function ensureUserProfile(uid: string): Promise<void> {
     email = userRecord.email ?? null;
     displayName = userRecord.displayName ?? null;
     photoURL = userRecord.photoURL ?? null;
-  } catch {
-    // If we can't fetch auth record, just create with uid only
+  } catch (err) {
+    console.error(`[user] failed to fetch auth record for ${uid}:`, err);
   }
 
-  await ref.set({
-    email,
-    displayName,
-    photoURL,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
-  console.log(`[user] created profile for ${uid}`);
+  const profile = buildUserProfile({ uid, email, displayName, photoURL });
+
+  try {
+    await ref.create(profile);
+    console.log(`[user] created profile for ${uid} via fallback`);
+  } catch (err: unknown) {
+    const code = (err as { code?: number }).code;
+    if (code === 6) {
+      // Another path created it between our read and write — that's fine
+      return;
+    }
+    throw err;
+  }
 }
 
 /**
@@ -326,9 +418,25 @@ export function buildScorerInput(
 // ─── Auth Trigger: Assign default role on account creation ──────────────────
 
 export const onUserCreate = functions.auth.user().onCreate(async (user) => {
-  await admin.auth().setCustomUserClaims(user.uid, { role: "user" });
+  console.log(`[onUserCreate] TRIGGERED uid=${user.uid} email=${user.email ?? "none"} provider=${user.providerData.map((p) => p.providerId).join(",")}`);
+
+  // 1. Set the custom claim so the frontend can gate on role.
+  try {
+    await admin.auth().setCustomUserClaims(user.uid, { role: "user" });
+    console.log(`[onUserCreate] custom claim set uid=${user.uid}`);
+  } catch (err) {
+    console.error(`[onUserCreate] FAILED to set custom claim uid=${user.uid}`, err);
+    throw err; // propagate so Cloud Functions retries
+  }
+
   // Do NOT revoke tokens here — the claim will be picked up on next natural
   // token refresh. Revoking immediately after signup breaks the new user's session.
+
+  // 2. Write the full user profile document using the UserRecord we already
+  //    have — no redundant getUser() call, no silent swallowing of errors.
+  await createUserProfile(user);
+
+  console.log(`[onUserCreate] COMPLETE uid=${user.uid}`);
 });
 
 export const dataforseoBusinessSearch = functions

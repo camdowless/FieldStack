@@ -14,13 +14,14 @@ const DEFAULTS: UserPreferences = {
 };
 
 export function usePreferences() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [prefs, setPrefs] = useState<UserPreferences>(DEFAULTS);
   const [loaded, setLoaded] = useState(false);
 
-  // Load preferences from Firestore on auth
+  // Wait for profile to exist before reading/writing preferences.
+  // This prevents creating a ghost parent document before onUserCreate fires.
   useEffect(() => {
-    if (!user) {
+    if (!user || !profile) {
       setPrefs(DEFAULTS);
       setLoaded(false);
       return;
@@ -44,7 +45,7 @@ export function usePreferences() {
     }).catch(() => {
       setLoaded(true);
     });
-  }, [user]);
+  }, [user, profile]);
 
   const update = useCallback((patch: Partial<UserPreferences>) => {
     setPrefs((prev) => {

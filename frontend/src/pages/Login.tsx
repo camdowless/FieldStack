@@ -108,8 +108,7 @@ export default function Login() {
                 variant="outline"
                 className="w-full gap-2"
                 onClick={handleGoogle}
-                disabled={true}
-                title="Google sign-in coming soon"
+                disabled={loading}
               >
                 <GoogleIcon />
                 Continue with Google

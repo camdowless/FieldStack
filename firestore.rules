@@ -35,23 +35,30 @@ service cloud.firestore {
     }
 
     match /users/{uid} {
-      allow read: if hasUserRole() && request.auth.uid == uid;
+      // isOwner: authenticated user accessing their own data.
+      // We don't require the role claim here because onUserCreate sets it
+      // asynchronously — the token may not have it yet on first sign-in.
+      function isOwner() {
+        return request.auth != null && request.auth.uid == uid;
+      }
+
+      allow read: if isOwner();
       allow write: if false; // server-side only via Admin SDK
 
       // Allow users to update their own preferences
       match /preferences/{doc} {
-        allow read, write: if hasUserRole() && request.auth.uid == uid;
+        allow read, write: if isOwner();
       }
 
       match /searches/{searchId} {
-        allow read: if hasUserRole() && request.auth.uid == uid;
-        allow delete: if hasUserRole() && request.auth.uid == uid;
+        allow read: if isOwner();
+        allow delete: if isOwner();
         allow create, update: if false; // server-side only via Admin SDK
       }
 
       match /savedLeads/{cid} {
-        allow read: if hasUserRole() && request.auth.uid == uid;
-        allow delete: if hasUserRole() && request.auth.uid == uid;
+        allow read: if isOwner();
+        allow delete: if isOwner();
 
         function validLeadData() {
           let d = request.resource.data;
@@ -61,8 +68,8 @@ service cloud.firestore {
             && d.cid is string && d.cid.size() <= 50;
         }
 
-        allow create: if hasUserRole() && request.auth.uid == uid && validLeadData();
-        allow update: if hasUserRole() && request.auth.uid == uid && validLeadData();
+        allow create: if isOwner() && validLeadData();
+        allow update: if isOwner() && validLeadData();
       }
     }
   }

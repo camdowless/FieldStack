@@ -12,6 +12,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { firestore, auth } from "@/lib/firebase";
 import { normalizeBusiness, type ApiBusiness } from "@/data/leadTypes";
 import type { Business } from "@/data/mockBusinesses";
+import { getAuthToken } from "@/lib/api";
 
 // ─── Job persistence ───────────────────────────────────────────────────────────
 
@@ -243,7 +244,7 @@ export function useSearchJob(): UseSearchJobReturn {
 
       // Force-refresh the token so role claims are present before the Firestore read
       try {
-        await user.getIdToken();
+        await user.getIdToken(true);
       } catch (err) {
         console.warn("[useSearchJob] Token refresh failed, skipping rehydration:", err);
         return;
@@ -292,14 +293,27 @@ export function useSearchJob(): UseSearchJobReturn {
         retryAfter: null,
       });
 
-      // Get auth token
-      const token = await auth.currentUser?.getIdToken();
+      // Get auth token — always force-refreshes to ensure role claim is present
+      console.log(`[useSearchJob] startSearch — requesting auth token. auth.currentUser=${auth.currentUser?.uid ?? "null"}`);
+      const token = await getAuthToken();
       if (!token) {
+        console.error("[useSearchJob] ❌ getAuthToken() returned null — user is not authenticated. Cannot search.");
         setState((s) => ({ ...s, status: "failed", error: "You must be signed in to search." }));
         return;
       }
+      console.log(`[useSearchJob] ✅ Token obtained length=${token.length} prefix=${token.slice(0, 20)}…`);
+
+      // Decode the JWT payload (no verification — just for logging)
+      try {
+        const payloadB64 = token.split(".")[1];
+        const payload = JSON.parse(atob(payloadB64));
+        console.log(`[useSearchJob] JWT payload: uid=${payload.sub} role="${payload.role ?? "MISSING"}" exp=${new Date(payload.exp * 1000).toISOString()} iat=${new Date(payload.iat * 1000).toISOString()}`);
+      } catch {
+        console.warn("[useSearchJob] Could not decode JWT payload for logging");
+      }
 
       // Call Job_Creator
+      console.log(`[useSearchJob] POST /api/search keyword="${params.keyword}" location="${params.location}" radius=${params.radius}`);
       let jobId: string;
       try {
         const res = await fetch("/api/search", {
@@ -311,8 +325,11 @@ export function useSearchJob(): UseSearchJobReturn {
           body: JSON.stringify(params),
         });
 
+        console.log(`[useSearchJob] /api/search response status=${res.status} ok=${res.ok}`);
+
         if (!res.ok) {
           const body = await res.json().catch(() => ({ error: res.statusText }));
+          console.error(`[useSearchJob] ❌ /api/search failed status=${res.status} body=${JSON.stringify(body)}`);
           if (res.status === 429) {
             const retryAfter = typeof body?.retryAfter === "number" ? body.retryAfter : 60;
             setState((s) => ({ ...s, status: "rate_limited", retryAfter }));
@@ -325,7 +342,9 @@ export function useSearchJob(): UseSearchJobReturn {
 
         const data = await res.json();
         jobId = data.jobId;
-      } catch {
+        console.log(`[useSearchJob] ✅ Job created jobId=${jobId}`);
+      } catch (err) {
+        console.error("[useSearchJob] ❌ Network error calling /api/search", err);
         setState((s) => ({
           ...s,
           status: "failed",
@@ -336,10 +355,10 @@ export function useSearchJob(): UseSearchJobReturn {
 
       setState((s) => ({ ...s, jobId, status: "running" }));
 
-      console.log(`[useSearchJob] Job created: ${jobId}, setting up listeners`);
-
       const uid = auth.currentUser?.uid;
+      console.log(`[useSearchJob] Post-fetch auth.currentUser uid=${uid ?? "null"}`);
       if (!uid) {
+        console.error("[useSearchJob] ❌ auth.currentUser is null after successful fetch — auth state was lost mid-request");
         setState((s) => ({ ...s, status: "failed", error: "Authentication lost. Please sign in and try again." }));
         teardown();
         return;
@@ -357,7 +376,7 @@ export function useSearchJob(): UseSearchJobReturn {
   const cancelSearch = useCallback(async () => {
     if (!state.jobId) return;
 
-    const token = await auth.currentUser?.getIdToken();
+    const token = await getAuthToken();
     if (!token) return;
 
     try {

@@ -10,7 +10,8 @@ import {
   getDocs,
   writeBatch,
 } from "firebase/firestore";
-import { firestore, auth } from "@/lib/firebase";
+import { firestore } from "@/lib/firebase";
+import { useAuth } from "@/contexts/AuthContext";
 
 export interface FirestoreSavedSearch {
   id: string;
@@ -24,12 +25,12 @@ export interface FirestoreSavedSearch {
 }
 
 export function useSavedSearches() {
+  const { user, role } = useAuth();
   const [searches, setSearches] = useState<FirestoreSavedSearch[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const user = auth.currentUser;
-    if (!user) {
+    if (!user || !role) {
       setSearches([]);
       setLoading(false);
       return;
@@ -66,11 +67,10 @@ export function useSavedSearches() {
     );
 
     return unsub;
-  }, [auth.currentUser?.uid]);
+  }, [user?.uid, role]);
 
   const deleteSearch = useCallback(
     async (searchId: string) => {
-      const user = auth.currentUser;
       if (!user) return;
       try {
         await deleteDoc(doc(firestore, "users", user.uid, "searches", searchId));
@@ -78,11 +78,10 @@ export function useSavedSearches() {
         console.error("[useSavedSearches] delete failed:", err);
       }
     },
-    [],
+    [user],
   );
 
   const clearAllSearches = useCallback(async () => {
-    const user = auth.currentUser;
     if (!user) return;
     try {
       const col = collection(firestore, "users", user.uid, "searches");
@@ -93,7 +92,7 @@ export function useSavedSearches() {
     } catch (err) {
       console.error("[useSavedSearches] clearAll failed:", err);
     }
-  }, []);
+  }, [user]);
 
   return { searches, loading, deleteSearch, clearAllSearches };
 }

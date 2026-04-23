@@ -4,15 +4,27 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signInWithPopup,
-  sendEmailVerification,
   sendPasswordResetEmail,
   signOut,
   type User,
 } from "firebase/auth";
-import { auth, googleProvider } from "@/lib/firebase";
+import { doc, onSnapshot } from "firebase/firestore";
+import { auth, googleProvider, firestore } from "@/lib/firebase";
+
+export interface UserProfile {
+  uid: string;
+  email: string | null;
+  displayName: string | null;
+  photoURL: string | null;
+  plan: "free" | "pro";
+  credits: number;
+  createdAt: unknown;
+  updatedAt: unknown;
+}
 
 interface AuthContextValue {
   user: User | null;
+  profile: UserProfile | null;
   role: "user" | "admin" | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<{ needsVerification?: boolean }>;
@@ -25,56 +37,175 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+const PROFILE_TIMEOUT_MS = 12_000;
+const CLAIM_TIMEOUT_MS = 8_000;
+const CLAIM_POLL_INTERVAL_MS = 1_500;
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [role, setRole] = useState<"user" | "admin" | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (u) => {
-      if (u) {
-        // Uses cached token (up to 1hr stale). Role changes won't reflect in
-        // the UI until the token refreshes naturally or the user reloads.
-        // Backend enforces roles correctly regardless — this is UI-only lag.
-        const tokenResult = await u.getIdTokenResult();
-        setRole((tokenResult.claims.role as "user" | "admin") ?? null);
-      } else {
-        setRole(null);
+    let profileUnsub: (() => void) | null = null;
+    let profileTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    let claimTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    let claimPollId: ReturnType<typeof setInterval> | null = null;
+    let settled = false;
+
+    function clearTimers() {
+      if (profileTimeoutId) { clearTimeout(profileTimeoutId); profileTimeoutId = null; }
+      if (claimTimeoutId) { clearTimeout(claimTimeoutId); claimTimeoutId = null; }
+      if (claimPollId) { clearInterval(claimPollId); claimPollId = null; }
+    }
+
+    function teardownProfile() {
+      clearTimers();
+      if (profileUnsub) { profileUnsub(); profileUnsub = null; }
+    }
+
+    function settle(resolvedRole: "user" | "admin", reason: string) {
+      if (settled) {
+        console.log(`[AuthContext] settle() called again (already settled) — ignoring. reason="${reason}"`);
+        return;
       }
-      setUser(u);
+      settled = true;
+      clearTimers();
+      console.log(`[AuthContext] ✅ SETTLED role="${resolvedRole}" reason="${reason}" loading→false`);
+      setRole(resolvedRole);
       setLoading(false);
+    }
+
+    const authUnsub = onAuthStateChanged(auth, async (u) => {
+      console.log(`[AuthContext] onAuthStateChanged fired — uid=${u?.uid ?? "null"} email=${u?.email ?? "null"} isAnonymous=${u?.isAnonymous ?? "n/a"}`);
+
+      teardownProfile();
+      settled = false;
+
+      if (!u) {
+        console.log("[AuthContext] No user — clearing state, loading→false");
+        setUser(null);
+        setProfile(null);
+        setRole(null);
+        setLoading(false);
+        return;
+      }
+
+      // Validate the cached session token is still live
+      console.log(`[AuthContext] Validating cached session token for uid=${u.uid}…`);
+      try {
+        const token = await u.getIdToken(false);
+        console.log(`[AuthContext] Session token valid. uid=${u.uid} token_prefix=${token.slice(0, 20)}…`);
+      } catch (err) {
+        console.warn(`[AuthContext] ❌ Stale/invalid session token uid=${u.uid} — signing out.`, err);
+        await signOut(auth);
+        return;
+      }
+
+      setUser(u);
+      setLoading(true);
+      console.log(`[AuthContext] User set, loading→true. Waiting for Firestore profile doc users/${u.uid}…`);
+
+      // ── Step 1: Wait for Firestore profile doc ──────────────────────────────
+      profileTimeoutId = setTimeout(() => {
+        console.warn(`[AuthContext] ⏱ Profile doc timeout after ${PROFILE_TIMEOUT_MS}ms uid=${u.uid} — settling with default role="user"`);
+        settle("user", "profile-doc-timeout");
+      }, PROFILE_TIMEOUT_MS);
+
+      const profileRef = doc(firestore, "users", u.uid);
+      console.log(`[AuthContext] Subscribing to Firestore users/${u.uid}…`);
+
+      profileUnsub = onSnapshot(profileRef, async (snap) => {
+        if (!snap.exists()) {
+          console.log(`[AuthContext] Profile doc users/${u.uid} does not exist yet — waiting…`);
+          return;
+        }
+
+        const data = snap.data() as UserProfile;
+        console.log(`[AuthContext] ✅ Profile doc arrived uid=${u.uid} fields=${JSON.stringify(Object.keys(data))}`);
+        setProfile(data);
+
+        if (profileTimeoutId) { clearTimeout(profileTimeoutId); profileTimeoutId = null; }
+
+        // ── Step 2: Poll for role custom claim ──────────────────────────────
+        let claimResolved = false;
+        let pollCount = 0;
+
+        async function pollForClaim() {
+          pollCount++;
+          console.log(`[AuthContext] 🔄 Token refresh attempt #${pollCount} uid=${u.uid} (forceRefresh=true)…`);
+          try {
+            const tokenResult = await u.getIdTokenResult(true);
+            const claimRole = tokenResult.claims.role as string | undefined;
+            const expiry = tokenResult.expirationTime;
+            const issuedAt = tokenResult.issuedAtTime;
+            console.log(
+              `[AuthContext] Token result #${pollCount}: role="${claimRole ?? "MISSING"}" ` +
+              `issuedAt=${issuedAt} expiresAt=${expiry} ` +
+              `allClaims=${JSON.stringify(tokenResult.claims)}`
+            );
+
+            if (claimRole === "user" || claimRole === "admin") {
+              claimResolved = true;
+              if (claimPollId) { clearInterval(claimPollId); claimPollId = null; }
+              if (claimTimeoutId) { clearTimeout(claimTimeoutId); claimTimeoutId = null; }
+              console.log(`[AuthContext] ✅ Role claim resolved: "${claimRole}" on attempt #${pollCount}`);
+              settle(claimRole, `claim-poll-attempt-${pollCount}`);
+            } else {
+              console.log(`[AuthContext] Role claim not present yet on attempt #${pollCount} — will retry in ${CLAIM_POLL_INTERVAL_MS}ms`);
+            }
+          } catch (err) {
+            console.warn(`[AuthContext] ❌ Token refresh failed on attempt #${pollCount} uid=${u.uid}`, err);
+          }
+        }
+
+        await pollForClaim();
+        if (claimResolved) return;
+
+        claimPollId = setInterval(pollForClaim, CLAIM_POLL_INTERVAL_MS);
+
+        claimTimeoutId = setTimeout(() => {
+          if (claimResolved) return;
+          if (claimPollId) { clearInterval(claimPollId); claimPollId = null; }
+          console.warn(`[AuthContext] ⏱ Role claim timeout after ${CLAIM_TIMEOUT_MS}ms uid=${u.uid} after ${pollCount} attempts — defaulting to "user"`);
+          settle("user", "claim-timeout");
+        }, CLAIM_TIMEOUT_MS);
+
+      }, (err) => {
+        console.error(`[AuthContext] ❌ Firestore profile snapshot error uid=${u.uid}`, err);
+        settle("user", "firestore-snapshot-error");
+      });
     });
-    return unsub;
+
+    return () => {
+      console.log("[AuthContext] Cleanup — unsubscribing auth listener and tearing down profile");
+      authUnsub();
+      teardownProfile();
+    };
   }, []);
 
   const signIn = async (email: string, password: string): Promise<{ needsVerification?: boolean }> => {
+    console.log(`[AuthContext] signIn() called email=${email}`);
     await signInWithEmailAndPassword(auth, email, password);
-    // EMAIL VERIFICATION DISABLED — re-enable by uncommenting the block below
-    // when you're ready to enforce verified emails on sign-in.
-    // if (!cred.user.emailVerified) {
-    //   return { needsVerification: true };
-    // }
+    console.log(`[AuthContext] signIn() Firebase call complete — onAuthStateChanged will fire next`);
     return {};
   };
 
   const resendVerificationEmail = async () => {
-    // EMAIL VERIFICATION DISABLED — re-enable alongside the signIn check above
-    // if (auth.currentUser) {
-    //   await sendEmailVerification(auth.currentUser);
-    // }
+    // EMAIL VERIFICATION DISABLED
   };
 
   const signUp = async (email: string, password: string) => {
+    console.log(`[AuthContext] signUp() called email=${email}`);
     await createUserWithEmailAndPassword(auth, email, password);
-    // EMAIL VERIFICATION DISABLED — re-enable the lines below to send a
-    // verification email and force sign-out until the user confirms their address.
-    // await sendEmailVerification(cred.user);
-    // await signOut(auth);
+    console.log(`[AuthContext] signUp() Firebase call complete — onAuthStateChanged will fire next`);
   };
 
   const signInWithGoogle = async () => {
-    // Google accounts are pre-verified — no email verification needed
+    console.log("[AuthContext] signInWithGoogle() called");
     await signInWithPopup(auth, googleProvider);
+    console.log("[AuthContext] signInWithGoogle() complete — onAuthStateChanged will fire next");
   };
 
   const sendPasswordReset = async (email: string) => {
@@ -82,12 +213,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
+    console.log(`[AuthContext] logout() called — current uid=${auth.currentUser?.uid ?? "null"}`);
     await signOut(auth);
+    console.log("[AuthContext] signOut() complete — onAuthStateChanged will fire with null user");
     window.history.replaceState(null, "", "/");
   };
 
   return (
-    <AuthContext.Provider value={{ user, role, loading, signIn, signUp, signInWithGoogle, sendPasswordReset, resendVerificationEmail, logout }}>
+    <AuthContext.Provider value={{ user, profile, role, loading, signIn, signUp, signInWithGoogle, sendPasswordReset, resendVerificationEmail, logout }}>
       {children}
     </AuthContext.Provider>
   );

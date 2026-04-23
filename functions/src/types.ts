@@ -355,3 +355,17 @@ export interface CreateJobResponse {
 export interface CancelJobResponse {
   success: boolean;
 }
+
+// ─── User Profile ─────────────────────────────────────────────────────────────
+
+export interface UserProfile {
+  uid: string;
+  email: string | null;
+  displayName: string | null;
+  photoURL: string | null;
+  role: "user" | "admin";
+  plan: "free" | "pro";
+  credits: number;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}

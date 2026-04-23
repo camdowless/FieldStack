@@ -39,9 +39,9 @@ export function AppSidebar() {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const { theme, toggleTheme } = useTheme();
-  const { logout, user, role } = useAuth();
+  const { logout, user, role, profile } = useAuth();
   const { remaining, max } = useCredits();
-  const displayName = user?.displayName ?? user?.email?.split("@")[0] ?? "User";
+  const displayName = profile?.displayName ?? user?.displayName ?? user?.email?.split("@")[0] ?? "User";
   const pct = max > 0 ? (remaining / max) * 100 : 0;
   const barColor = pct > 50 ? "bg-green-500" : pct >= 20 ? "bg-amber-500" : "bg-red-500";
 

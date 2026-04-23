@@ -3,9 +3,9 @@
  * Fires rapid sequential requests to each endpoint and shows status codes inline.
  */
 import { useState } from "react";
-import { auth } from "@/lib/firebase";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { getAuthToken } from "@/lib/api";
 
 interface Result {
   n: number;
@@ -14,7 +14,7 @@ interface Result {
 }
 
 async function getToken(): Promise<string> {
-  const token = await auth.currentUser?.getIdToken();
+  const token = await getAuthToken();
   if (!token) throw new Error("Not signed in");
   return token;
 }
