@@ -22,7 +22,7 @@ export default function Login() {
   const [searchParams] = useSearchParams();
 
   const [view, setView] = useState<View>(() =>
-    searchParams.get("mode") === "login" ? "login" : "signup"
+    searchParams.get("mode") === "signup" ? "signup" : "login"
   );
 
   const [email, setEmail] = useState("");
@@ -37,8 +37,8 @@ export default function Login() {
   // Sync view if URL param changes
   useEffect(() => {
     const mode = searchParams.get("mode");
-    if (mode === "login") setView("login");
-    else if (mode === "signup") setView("signup");
+    if (mode === "signup") setView("signup");
+    else setView("login");
   }, [searchParams]);
 
   const clearForm = () => {

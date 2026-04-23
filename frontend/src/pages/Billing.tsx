@@ -415,7 +415,7 @@ const Billing = () => {
                     const displayCents = isAnnual && p.annualPriceUsdCents
                       ? Math.round(p.annualPriceUsdCents / 12)
                       : p.priceUsdCents;
-                    const priceDisplay = displayCents === 0 ? "Free" : `${(displayCents / 100).toFixed(0)}`;
+                    const priceDisplay = displayCents === 0 ? "Free" : `$${(displayCents / 100).toFixed(0)}`;
                     const annualSavings = isAnnual && p.annualPriceUsdCents && p.priceUsdCents > 0
                       ? Math.round((p.priceUsdCents * 12 - p.annualPriceUsdCents) / 100)
                       : null;

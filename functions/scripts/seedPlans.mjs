@@ -68,10 +68,10 @@ const PLANS = [
     annualPriceUsdCents: 15200,           // $152/yr (~$12.67/mo, save 33%)
     stripePriceId:"price_1TPRMtCJGegnNrTU7jFf8MYs",    // ← monthly Price ID from Stripe
     stripePriceIdAnnual: "price_1TPRXBCJGegnNrTUrogVAbr8", // ← annual Price ID from Stripe
-    creditsPerMonth: 30,
+    creditsPerMonth: 12,
     canSaveLeads: true,
     canGenerateScripts: false,
-    features: ["30 searches / month", "Full lead analysis", "Save leads"],
+    features: ["12 search credits / month", "Up to 180 leads per month", "Full lead analysis", "Save leads"],
     sortOrder: 1,
     active: true,
   },
@@ -82,10 +82,10 @@ const PLANS = [
     annualPriceUsdCents: 39200,           // $392/yr (~$32.67/mo, save 33%)
     stripePriceId: "price_1TPRNYCJGegnNrTUE2C21NOR",    // ← monthly Price ID from Stripe
     stripePriceIdAnnual: "price_1TPRXqCJGegnNrTUIwaQ9gZN", // ← annual Price ID from Stripe
-    creditsPerMonth: 100,
+    creditsPerMonth: 40,
     canSaveLeads: true,
     canGenerateScripts: true,
-    features: ["100 searches / month", "Full lead analysis", "Save leads", "AI script generation"],
+    features: ["40 search credits / month", "Up to 600 leads per month", "Full lead analysis", "Save leads", "AI script generation"],
     sortOrder: 2,
     active: true,
   },
@@ -96,10 +96,10 @@ const PLANS = [
     annualPriceUsdCents: 79200,           // $792/yr (~$66/mo, save 33%)
     stripePriceId: "price_1TPRO6CJGegnNrTUEi6lruSV",    // ← monthly Price ID from Stripe
     stripePriceIdAnnual: "price_1TPRYOCJGegnNrTUz3wIRBJs", // ← annual Price ID from Stripe
-    creditsPerMonth: 250,
+    creditsPerMonth: 100,
     canSaveLeads: true,
     canGenerateScripts: true,
-    features: ["250 searches / month", "Full lead analysis", "Save leads", "AI script generation", "Priority support"],
+    features: ["100 search credits / month", "Up to 1,500 leads per month", "Full lead analysis", "Save leads", "AI script generation", "Priority support"],
     sortOrder: 3,
     active: true,
   },
