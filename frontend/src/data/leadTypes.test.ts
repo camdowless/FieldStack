@@ -77,7 +77,7 @@ const arbWebsiteData: fc.Arbitrary<ApiWebsiteData | null> = fc.option(
     copyrightYear: fc.option(fc.integer({ min: 1990, max: 2026 }), { nil: null }),
     headerText: fc.option(fc.string({ maxLength: 100 }), { nil: null }),
     footerText: fc.option(fc.string({ maxLength: 100 }), { nil: null }),
-    hasAdPixel: fc.option(fc.boolean(), { nil: null }),
+    hasOnlineAds: fc.option(fc.boolean(), { nil: null }),
     hasAgencyFooter: fc.option(fc.boolean(), { nil: null }),
     hasBrokenResources: fc.option(fc.boolean(), { nil: null }),
     hasBrokenLinks: fc.option(fc.boolean(), { nil: null }),

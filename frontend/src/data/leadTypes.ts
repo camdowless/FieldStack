@@ -63,7 +63,7 @@ export interface ApiWebsiteData {
   copyrightYear: number | null;
   headerText: string | null;
   footerText: string | null;
-  hasAdPixel: boolean | null;
+  hasOnlineAds: boolean | null;
   hasAgencyFooter: boolean | null;
   hasBrokenResources: boolean | null;
   hasBrokenLinks: boolean | null;
@@ -129,7 +129,7 @@ export function normalizeBusiness(api: ApiBusiness): Business {
     isParkedDomain: false,
     isExpiredDomain: !!s.isExpiredDomain,
     facebookAsWebsite: false,
-    hasOnlineAds: !!wd?.hasAdPixel,
+    hasOnlineAds: !!wd?.hasOnlineAds,
     hasMarketingAgency: !!wd?.hasAgencyFooter,
     seoScore,
     recentGoogleReviews: (api.reviewCount ?? 0) > 0,

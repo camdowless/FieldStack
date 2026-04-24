@@ -170,7 +170,7 @@ export interface HtmlSignals {
   footerText: string;
 
   // Scripts & tracking
-  hasAdPixel: boolean;
+  hasOnlineAds: boolean;
   hasAgencyFooter: boolean;
 
   // Broken resources

@@ -1256,7 +1256,7 @@ function scorerInputFromCached(biz: ScoredBusiness): ScorerInput {
       copyrightYear: null,
       headerText: "",
       footerText: "",
-      hasAdPixel: false,
+      hasOnlineAds: false,
       hasAgencyFooter: false,
       hasBrokenResources: false,
       hasBrokenLinks: false,

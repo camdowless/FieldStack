@@ -330,9 +330,9 @@ export function score(input: ScorerInput): ScoreResult {
       raw += 10;
       reasons.push(`Low word count: ${s.wordCount} (+10)`);
     }
-    if (s.hasAdPixel) {
+    if (s.hasOnlineAds) {
       raw -= 10;
-      reasons.push("Has ad/analytics pixel (-10)");
+      reasons.push("Running online ads (-10)");
     }
     if (s.hasAgencyFooter) {
       raw -= 15;

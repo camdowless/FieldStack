@@ -75,17 +75,6 @@ export function normalizeUrl(raw: string): string {
   return url.toString().replace(/\?$/, "");
 }
 
-const AD_PIXEL_DOMAINS = [
-  "googletagmanager.com",
-  "google-analytics.com",
-  "googleadservices.com",
-  "facebook.net",
-  "connect.facebook.net",
-  "ads.linkedin.com",
-  "static.ads-twitter.com",
-  "snap.licdn.com",
-];
-
 const AGENCY_FOOTER_PATTERNS = [
   /built by/i,
   /designed by/i,
@@ -113,12 +102,38 @@ const PARKING_KEYWORDS = [
   "afternic",
 ];
 
+const AD_SCRIPT_DOMAINS = [
+  "googletagmanager.com",
+  "google-analytics.com",
+  "googleadservices.com",
+  "googlesyndication.com",
+  "doubleclick.net",
+  "facebook.net",
+  "connect.facebook.net",
+  "ads.linkedin.com",
+  "static.ads-twitter.com",
+  "snap.licdn.com",
+  "tiktok.com",
+  "clarity.ms",
+  "hotjar.com",
+  "adroll.com",
+  "criteo.com",
+  "outbrain.com",
+  "taboola.com",
+];
+
 const CUSTOM_JS = `(function() {
   var bodyText = document.body ? document.body.innerText : '';
   var header = bodyText.substring(0, 500);
   var footer = bodyText.substring(Math.max(0, bodyText.length - 500));
   var match = footer.match(/\\b(19|20)\\d{2}\\b/);
-  return JSON.stringify({ headerText: header, footerText: footer, copyrightYear: match ? parseInt(match[0], 10) : null });
+  var adDomains = ${JSON.stringify(AD_SCRIPT_DOMAINS)};
+  var hasAds = false;
+  for (var i = 0; i < document.scripts.length; i++) {
+    var src = document.scripts[i].getAttribute('src') || '';
+    if (adDomains.some(function(d) { return src.indexOf(d) >= 0; })) { hasAds = true; break; }
+  }
+  return JSON.stringify({ headerText: header, footerText: footer, copyrightYear: match ? parseInt(match[0], 10) : null, hasAds: hasAds });
 })()`;
 
 export function buildAuthHeader(email: string, password: string): string {
@@ -131,11 +146,12 @@ export interface FooterData {
   headerText: string;
   footerText: string;
   copyrightYear: number | null;
+  hasAds: boolean;
 }
 
 export function extractFooterData(customJsResponse: string | null | undefined): FooterData {
   if (!customJsResponse) {
-    return { headerText: "", footerText: "", copyrightYear: null };
+    return { headerText: "", footerText: "", copyrightYear: null, hasAds: false };
   }
   try {
     const parsed = JSON.parse(customJsResponse);
@@ -143,9 +159,10 @@ export function extractFooterData(customJsResponse: string | null | undefined): 
       headerText: typeof parsed.headerText === "string" ? parsed.headerText.toLowerCase() : "",
       footerText: typeof parsed.footerText === "string" ? parsed.footerText.toLowerCase() : "",
       copyrightYear: typeof parsed.copyrightYear === "number" ? parsed.copyrightYear : null,
+      hasAds: parsed.hasAds === true,
     };
   } catch {
-    return { headerText: "", footerText: "", copyrightYear: null };
+    return { headerText: "", footerText: "", copyrightYear: null, hasAds: false };
   }
 }
 
@@ -295,10 +312,6 @@ export function extractHtmlSignals(
   statusCode: number | null = 200
 ): HtmlSignals {
   const checks = (page.checks ?? {}) as Record<string, unknown>;
-  const resourceTags = (page.resource_tags ?? {}) as Record<string, unknown>;
-  const scripts = Array.isArray(resourceTags.scripts)
-    ? (resourceTags.scripts as Array<Record<string, unknown>>)
-    : [];
   const lastModified = (page.last_modified ?? {}) as Record<string, unknown>;
 
   // Use pageMeta.contentWordCount (plain_text_word_count) — the top-level words_count
@@ -323,14 +336,23 @@ export function extractHtmlSignals(
   // meaning the server actually issued a 3xx, not just that we changed http→https.
   const redirectedToHttps = !url.startsWith("https://") && isHttps && checks.is_redirect === true;
 
-  const { headerText, footerText, copyrightYear } = extractFooterData(
+  const { headerText, footerText, copyrightYear, hasAds: customJsHasAds } = extractFooterData(
     typeof page.custom_js_response === "string" ? page.custom_js_response : null
   );
 
-  const hasAdPixel = scripts.some((script) => {
-    const scriptUrl = typeof script.url === "string" ? script.url : "";
-    return AD_PIXEL_DOMAINS.some((domain) => scriptUrl.includes(domain));
-  });
+  // Primary: custom_js DOM scan (most reliable — runs in the actual browser context).
+  // Fallback: scan the DFS resources array (flat list of loaded resources with resource_type).
+  let hasOnlineAds = customJsHasAds;
+  if (!hasOnlineAds) {
+    const resources = Array.isArray(page.resources)
+      ? (page.resources as Array<Record<string, unknown>>)
+      : [];
+    hasOnlineAds = resources.some((r) => {
+      if (r.resource_type !== "script") return false;
+      const resourceUrl = typeof r.url === "string" ? r.url : "";
+      return AD_SCRIPT_DOMAINS.some((domain) => resourceUrl.includes(domain));
+    });
+  }
 
   const hasAgencyFooter = AGENCY_FOOTER_PATTERNS.some((pattern) =>
     pattern.test(footerText)
@@ -356,7 +378,7 @@ export function extractHtmlSignals(
     copyrightYear,
     headerText,
     footerText,
-    hasAdPixel,
+    hasOnlineAds,
     hasAgencyFooter,
     hasBrokenResources: bool(page.broken_resources),
     hasBrokenLinks: bool(page.broken_links),
@@ -396,7 +418,7 @@ export function uncrawlableSignals(url: string): HtmlSignals {
     copyrightYear: null,
     headerText: "",
     footerText: "",
-    hasAdPixel: false,
+    hasOnlineAds: false,
     hasAgencyFooter: false,
     hasBrokenResources: false,
     hasBrokenLinks: false,
@@ -432,7 +454,7 @@ export function deadSiteSignals(url: string, statusCode: number | null, deathSta
     copyrightYear: null,
     headerText: "",
     footerText: "",
-    hasAdPixel: false,
+    hasOnlineAds: false,
     hasAgencyFooter: false,
     hasBrokenResources: false,
     hasBrokenLinks: false,

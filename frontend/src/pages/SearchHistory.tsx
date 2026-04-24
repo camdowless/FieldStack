@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { useSavedSearches, type FirestoreSavedSearch } from "@/hooks/useSavedSearches";
 import { fetchBusinessesByCids, SearchError } from "@/lib/api";
 import { normalizeBusiness } from "@/data/leadTypes";
@@ -11,7 +12,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { formatCategoryLabel } from "@/data/dfsCategories";
 import { sortByScoreDesc } from "@/hooks/useSearchJob";
 import {
-  Trash2, Search, Clock, X, Loader2, ArrowLeft, Coins,
+  Trash2, Search, Clock, X, Loader2, ArrowLeft, Coins, RefreshCw,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { Business } from "@/data/mockBusinesses";
@@ -22,6 +23,18 @@ const SearchHistory = () => {
   const { searches: savedSearches, loading, deleteSearch, clearAllSearches } = useSavedSearches();
   const fbStore = useFirebaseLeadStore();
   const { prefs } = usePreferences();
+  const navigate = useNavigate();
+
+  const handleRerun = useCallback((e: React.MouseEvent, s: FirestoreSavedSearch) => {
+    e.stopPropagation();
+    const params = new URLSearchParams({
+      rerun: "1",
+      keyword: s.category || "businesses",
+      location: s.location,
+      radius: String(s.radius ?? 10),
+    });
+    navigate(`/?${params.toString()}`);
+  }, [navigate]);
 
   // Inline result viewing state
   const [activeSearch, setActiveSearch] = useState<FirestoreSavedSearch | null>(null);
@@ -239,14 +252,31 @@ const SearchHistory = () => {
                   </td>
                   <td className="py-3 px-3 text-muted-foreground">{formatDate(s.createdAt)}</td>
                   <td className="py-3 px-3">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
-                      onClick={(e) => { e.stopPropagation(); deleteSearch(s.id); }}
-                    >
-                      <Trash2 className="h-4 w-4 text-muted-foreground" />
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                              onClick={(e) => handleRerun(e, s)}
+                            >
+                              <RefreshCw className="h-4 w-4 text-muted-foreground" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="top">Re-run with updated scoring</TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                        onClick={(e) => { e.stopPropagation(); deleteSearch(s.id); }}
+                      >
+                        <Trash2 className="h-4 w-4 text-muted-foreground" />
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ))}

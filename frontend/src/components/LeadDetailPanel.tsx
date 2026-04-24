@@ -499,7 +499,7 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
                         <Info className="h-3.5 w-3.5 text-muted-foreground" />
                       </TooltipTrigger>
                       <TooltipContent className="max-w-[220px] text-xs">
-                        Based on review count, listing age, claimed status, website presence, HTTPS, and ad pixel detection. Higher = more trustworthy business.
+                        Based on review count, listing age, claimed status, website presence, HTTPS, and online ad detection. Higher = more trustworthy business.
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
@@ -606,7 +606,7 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
                       },
                       {
                         icon: TrendingDown,
-                        label: "Ad Pixel",
+                        label: "Ads",
                         value: a.hasOnlineAds ? "Detected" : "Not found",
                         status: a.hasOnlineAds ? "good" : "bad",
                       },

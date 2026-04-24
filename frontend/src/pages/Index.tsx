@@ -199,6 +199,32 @@ const Index = () => {
     prevRestoreRef.current = restoreId;
   }, [searchParams]);
 
+  // Auto-trigger a re-run when navigated from Search History with ?rerun=1
+  const rerunFiredRef = useRef(false);
+  useEffect(() => {
+    if (searchParams.get("rerun") !== "1") return;
+    if (rerunFiredRef.current) return;
+    rerunFiredRef.current = true;
+
+    const keyword = searchParams.get("keyword") || "businesses";
+    const loc = searchParams.get("location") || "";
+    const r = Number(searchParams.get("radius")) || 10;
+    const snappedRadius = (RADIUS_STEPS as readonly number[]).includes(r) ? (r as Radius) : 10;
+
+    setSelectedCategory(keyword === "businesses" ? "all" : keyword);
+    setLocation(loc);
+    setRadius(snappedRadius > MAX_RADIUS ? MAX_RADIUS : snappedRadius);
+    setForceEmpty(false);
+
+    if (loc) {
+      searchJob.startSearch({ keyword, location: loc, radius: snappedRadius });
+    }
+
+    // Clean up the rerun params from the URL without a history entry
+    setSearchParams({}, { replace: true });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const handleNewSearch = useCallback(() => {
     searchJob.reset();
     setForceEmpty(true);
