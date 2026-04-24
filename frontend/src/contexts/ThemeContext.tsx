@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 
-type ThemeMode = "light" | "gradient";
+type ThemeMode = "light" | "dark";
 
 interface ThemeContextType {
   theme: ThemeMode;
@@ -13,16 +13,19 @@ export const useTheme = () => useContext(ThemeContext);
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [theme, setTheme] = useState<ThemeMode>(() => {
-    return (localStorage.getItem("gimmeleads-theme") as ThemeMode) || "light";
+    const stored = localStorage.getItem("gimmeleads-theme");
+    // migrate old "gradient" value
+    if (stored === "gradient") return "dark";
+    return (stored as ThemeMode) || "light";
   });
 
   useEffect(() => {
     localStorage.setItem("gimmeleads-theme", theme);
-    document.documentElement.classList.remove("theme-light", "theme-gradient");
+    document.documentElement.classList.remove("theme-light", "theme-dark");
     document.documentElement.classList.add(`theme-${theme}`);
   }, [theme]);
 
-  const toggleTheme = () => setTheme((t) => (t === "light" ? "gradient" : "light"));
+  const toggleTheme = () => setTheme((t) => (t === "light" ? "dark" : "light"));
 
   return <ThemeContext.Provider value={{ theme, toggleTheme }}>{children}</ThemeContext.Provider>;
 };

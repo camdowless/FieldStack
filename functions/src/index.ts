@@ -19,7 +19,7 @@ import { computeJobId, deleteResultsSubcollection, createOrReuseJob, isJobCancel
 import { Timestamp } from "firebase-admin/firestore";
 import { checkUserRole, checkAdminRole } from "./authHelpers";
 import type { Subscription, SubscriptionPlan } from "./types";
-import { getPlanCredits, buildPriceIdToPlanMap, invalidatePlanCache } from "./plans";
+import { getPlanCredits, buildPriceIdToPlanMap, invalidatePlanCache, getAllPlans } from "./plans";
 import { buildPlanSeedData, PLAN_IDS } from "./seedPlans";
 import Stripe from "stripe";
 type StripeInstance = InstanceType<typeof Stripe>;
@@ -2292,6 +2292,22 @@ export const createCheckoutSession = functions
     const userData = userSnap.data()!;
     let stripeCustomerId: string = userData.subscription?.stripeCustomerId ?? null;
 
+    // Guard: checkout is for free → paid upgrades only.
+    // Paid → lower-paid downgrades must go through changeSubscription (which uses
+    // proration_behavior: "none" and schedules the change at period end).
+    // Use sortOrder from the plans collection so this is resilient to plan additions/reordering.
+    const targetPlan = priceToplan.get(priceId)!;
+    const currentPlan = (userData.subscription?.plan ?? "free") as SubscriptionPlan;
+    const allPlans = await getAllPlans();
+    const currentSortOrder = allPlans.get(currentPlan)?.sortOrder ?? 0;
+    const targetSortOrder = allPlans.get(targetPlan as SubscriptionPlan)?.sortOrder ?? 0;
+    if (currentSortOrder > 0 && targetSortOrder <= currentSortOrder) {
+      // User is on a paid plan and trying to go to the same or lower tier via checkout.
+      // Reject — they must use the downgrade flow.
+      res.status(400).json({ error: "Use the downgrade option to switch to a lower plan." });
+      return;
+    }
+
     // Create Stripe Customer if not exists
     if (!stripeCustomerId) {
       const customer = await getStripe().customers.create({
@@ -2303,7 +2319,7 @@ export const createCheckoutSession = functions
     }
 
     // Create checkout session
-    const { promoCode } = req.body ?? {};
+    const { promoCode, existingSubscriptionId } = req.body ?? {};
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sessionParams: any = {
       customer: stripeCustomerId,
@@ -2311,8 +2327,9 @@ export const createCheckoutSession = functions
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: `${FRONTEND_URL}/billing?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${FRONTEND_URL}/billing`,
-      metadata: { uid },
-      allow_promotion_codes: !promoCode, // show promo field in Stripe UI if no code pre-applied
+      // Store old subscription id so the webhook can cancel it after the new one activates
+      metadata: { uid, existingSubscriptionId: existingSubscriptionId ?? "" },
+      allow_promotion_codes: !promoCode,
     };
     if (promoCode) {
       // Validate and pre-apply the promo code
@@ -2457,6 +2474,19 @@ export const changeSubscription = functions
       return;
     }
 
+    // Guard: changeSubscription is for downgrades only (paid → lower paid).
+    // Upgrades must go through createCheckoutSession so the user confirms payment.
+    // Also block changing to the same plan — that's a no-op.
+    const targetPlan = priceToplan.get(priceId)!;
+    const currentPlan = (userData.subscription?.plan ?? "free") as SubscriptionPlan;
+    const allPlansForChange = await getAllPlans();
+    const currentSortOrder = allPlansForChange.get(currentPlan)?.sortOrder ?? 0;
+    const targetSortOrder = allPlansForChange.get(targetPlan as SubscriptionPlan)?.sortOrder ?? 0;
+    if (targetSortOrder >= currentSortOrder) {
+      res.status(400).json({ error: "Use the upgrade flow to switch to a higher or equal plan." });
+      return;
+    }
+
     // Retrieve current subscription to get the item id
     const stripeSub = await getStripe().subscriptions.retrieve(stripeSubscriptionId);
     const itemId = stripeSub.items.data[0]?.id;
@@ -2465,11 +2495,20 @@ export const changeSubscription = functions
       return;
     }
 
-    // Update the subscription immediately with proration
-    await getStripe().subscriptions.update(stripeSubscriptionId, {
+    // If subscription was set to cancel at period end, clear that flag first
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const updateParams: any = {
       items: [{ id: itemId, price: priceId }],
-      proration_behavior: "always_invoice",
-    });
+      // Schedule the change at the end of the current billing period.
+      // The user keeps their current credits and access until then.
+      proration_behavior: "none",
+      billing_cycle_anchor: "unchanged",
+    };
+    if (stripeSub.cancel_at_period_end) {
+      updateParams.cancel_at_period_end = false;
+    }
+
+    await getStripe().subscriptions.update(stripeSubscriptionId, updateParams);
 
     // Webhook (customer.subscription.updated) will sync Firestore automatically
     res.status(200).json({ success: true });
@@ -2504,7 +2543,33 @@ export const cancelSubscription = functions
       return;
     }
 
+    // Only allow cancellation when the subscription is in a cancellable state.
+    // Blocking on past_due prevents interfering with dunning recovery.
+    const currentStatus: string = userSnap.data()?.subscription?.status ?? "active";
+    if (!["active", "trialing"].includes(currentStatus)) {
+      res.status(409).json({ error: `Cannot cancel a subscription with status "${currentStatus}". Please update your payment method first.` });
+      return;
+    }
+
+    // Idempotency: if already set to cancel, nothing to do.
+    const alreadyCancelling: boolean = userSnap.data()?.subscription?.cancelAtPeriodEnd ?? false;
+    if (alreadyCancelling) {
+      res.status(200).json({ success: true, alreadyCancelling: true });
+      return;
+    }
+
     const { reason } = req.body ?? {};
+
+    // Sanitize reason: strip non-printable characters, collapse whitespace, cap length.
+    function sanitizeCancelReason(raw: unknown): string | null {
+      if (!raw || typeof raw !== "string") return null;
+      return raw
+        .replace(/[^\x20-\x7E]/g, "") // printable ASCII only
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 200) || null;
+    }
+    const sanitizedReason = sanitizeCancelReason(reason);
 
     // Cancel at period end — user keeps access until billing cycle ends
     await getStripe().subscriptions.update(stripeSubscriptionId, {
@@ -2516,8 +2581,8 @@ export const cancelSubscription = functions
       "subscription.cancelAtPeriodEnd": true,
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
-    if (reason && typeof reason === "string") {
-      update["subscription.cancelReason"] = reason.slice(0, 200);
+    if (sanitizedReason) {
+      update["subscription.cancelReason"] = sanitizedReason;
     }
     await db.collection(USERS_COLLECTION).doc(uid).update(update);
 
@@ -2553,6 +2618,13 @@ export const reactivateSubscription = functions
       return;
     }
 
+    // Only allow reactivation when the subscription is actually pending cancellation.
+    const isCancellingAtPeriodEnd: boolean = userSnap.data()?.subscription?.cancelAtPeriodEnd ?? false;
+    if (!isCancellingAtPeriodEnd) {
+      res.status(409).json({ error: "Subscription is not pending cancellation." });
+      return;
+    }
+
     await getStripe().subscriptions.update(stripeSubscriptionId, {
       cancel_at_period_end: false,
     });
@@ -2563,6 +2635,101 @@ export const reactivateSubscription = functions
     });
 
     res.status(200).json({ success: true });
+  });
+});
+
+// ─── Sync Subscription (called on login to reconcile Stripe → Firestore) ─────
+
+export const syncSubscription = functions
+  .runWith({ timeoutSeconds: 30 })
+  .https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
+
+    let decodedToken: admin.auth.DecodedIdToken;
+    try {
+      decodedToken = await verifyUserRole(req);
+    } catch {
+      res.status(401).json({ error: "Unauthorized" });
+      return;
+    }
+
+    const uid = decodedToken.uid;
+
+    // Rate-limit syncSubscription — it hits Stripe on every call.
+    // 1 call per minute per user is more than enough for a login-time sync.
+    const rlReset = await checkRateLimit(uid, "syncSubscription", 1);
+    if (rlReset !== null) {
+      // Soft-fail: return 200 so the client doesn't surface an error to the user.
+      // The Firestore profile is already up-to-date from the last sync.
+      console.log(`[syncSubscription] rate-limited uid=${uid} — skipping Stripe call`);
+      res.status(200).json({ synced: false, reason: "rate_limited" });
+      return;
+    }
+
+    const userSnap = await db.collection(USERS_COLLECTION).doc(uid).get();
+    if (!userSnap.exists) { res.status(404).json({ error: "User not found" }); return; }
+
+    const userData = userSnap.data()!;
+    const stripeCustomerId: string | null = userData.subscription?.stripeCustomerId ?? null;
+
+    // No Stripe customer → nothing to sync, they're on free
+    if (!stripeCustomerId) {
+      res.status(200).json({ synced: false, reason: "no_customer" });
+      return;
+    }
+
+    // Fetch all active/trialing subscriptions for this customer
+    const subs = await getStripe().subscriptions.list({
+      customer: stripeCustomerId,
+      status: "all",
+      limit: 10,
+      expand: ["data.items.data.price"],
+    });
+
+    // Find the most relevant subscription: active > trialing > past_due, ignore cancelled
+    const priority = ["active", "trialing", "past_due"];
+    const activeSub = subs.data
+      .filter((s) => priority.includes(s.status))
+      .sort((a, b) => priority.indexOf(a.status) - priority.indexOf(b.status))[0] ?? null;
+
+    if (!activeSub) {
+      // No active subscription in Stripe — ensure Firestore reflects free.
+      // Guard: if the user cancelled but is still within their paid period
+      // (cancelAtPeriodEnd=true and currentPeriodEnd is in the future), do NOT
+      // downgrade yet. The customer.subscription.deleted webhook will handle it
+      // when the period actually ends.
+      const currentPlan = userData.subscription?.plan ?? "free";
+      const cancelAtPeriodEnd: boolean = userData.subscription?.cancelAtPeriodEnd ?? false;
+      const periodEndTs = userData.subscription?.currentPeriodEnd as admin.firestore.Timestamp | null | undefined;
+      const periodEndMs = periodEndTs?.toMillis?.() ?? 0;
+      const stillInPaidPeriod = cancelAtPeriodEnd && periodEndMs > Date.now();
+
+      if (currentPlan !== "free" && !stillInPaidPeriod) {
+        await downgradeToFree(uid);
+        console.log(`[syncSubscription] uid=${uid} no active Stripe sub → downgraded to free`);
+      } else if (stillInPaidPeriod) {
+        console.log(`[syncSubscription] uid=${uid} cancelled but still in paid period until ${new Date(periodEndMs).toISOString()} — skipping downgrade`);
+      }
+      res.status(200).json({ synced: true, plan: stillInPaidPeriod ? currentPlan : "free" });
+      return;
+    }
+
+    const priceId = activeSub.items.data[0]?.price?.id;
+    const priceToplan = await buildPriceIdToPlanMap();
+    const plan = (priceToplan.get(priceId ?? "") ?? "free") as SubscriptionPlan;
+    const status = mapStripeStatus(activeSub.status);
+    const item = activeSub.items.data[0] as unknown as { current_period_start: number; current_period_end: number };
+
+    await updateSubscription(uid, plan, {
+      id: activeSub.id,
+      cancel_at_period_end: activeSub.cancel_at_period_end,
+      current_period_start: item.current_period_start,
+      current_period_end: item.current_period_end,
+    }, status);
+
+    console.log(`[syncSubscription] uid=${uid} synced plan=${plan} status=${status} subId=${activeSub.id}`);
+    res.status(200).json({ synced: true, plan, status });
   });
 });
 
@@ -2582,13 +2749,22 @@ async function lookupUidByCustomerId(stripeCustomerId: string): Promise<string |
   return snap.docs[0].id;
 }
 
-function mapStripeStatus(stripeStatus: string): "active" | "past_due" | "cancelled" | "trialing" {
+export function mapStripeStatus(stripeStatus: string): "active" | "past_due" | "cancelled" | "trialing" {
   switch (stripeStatus) {
     case "active": return "active";
     case "past_due": return "past_due";
     case "canceled": return "cancelled";
     case "trialing": return "trialing";
-    default: return "active";
+    // Incomplete/unpaid/paused subscriptions are not fully active — treat as past_due
+    // so access is restricted without fully cancelling the subscription.
+    case "incomplete":
+    case "incomplete_expired":
+    case "unpaid":
+    case "paused":
+      return "past_due";
+    default:
+      console.warn(`[mapStripeStatus] Unknown Stripe status "${stripeStatus}" — defaulting to past_due`);
+      return "past_due";
   }
 }
 
@@ -2616,7 +2792,13 @@ async function downgradeToFree(uid: string): Promise<void> {
   await db.collection(USERS_COLLECTION).doc(uid).update({
     "subscription.plan": "free",
     "subscription.status": "cancelled",
+    // Reset to free plan limits. creditsUsed is zeroed because this function is only
+    // called when the subscription has actually ended (customer.subscription.deleted webhook,
+    // or syncSubscription confirming no active sub after the paid period has expired).
+    // Users who cancelled but are still in their paid period are protected by the
+    // stillInPaidPeriod guard in syncSubscription.
     "subscription.creditsTotal": creditsTotal,
+    "subscription.creditsUsed": 0,
     "subscription.stripeSubscriptionId": null,
     "subscription.cancelAtPeriodEnd": false,
     "subscription.currentPeriodStart": null,
@@ -2625,9 +2807,9 @@ async function downgradeToFree(uid: string): Promise<void> {
   });
 }
 
-async function resetCredits(uid: string, invoice: { period_start: number; period_end: number }): Promise<void> {
-  const userSnap = await db.collection(USERS_COLLECTION).doc(uid).get();
-  const plan = (userSnap.data()?.subscription?.plan ?? "free") as import("./types").SubscriptionPlan;
+// plan is passed in from the invoice's subscription price to avoid a race with
+// customer.subscription.updated firing at the same time and writing a different plan.
+async function resetCredits(uid: string, invoice: { period_start: number; period_end: number }, plan: import("./types").SubscriptionPlan): Promise<void> {
   const creditsTotal = await getPlanCredits(plan);
   await db.collection(USERS_COLLECTION).doc(uid).update({
     "subscription.creditsUsed": 0,
@@ -2657,6 +2839,27 @@ export const stripeWebhook = functions.https.onRequest(async (req, res) => {
   }
 
   try {
+    // ── Idempotency guard ─────────────────────────────────────────────────────
+    // Stripe delivers webhooks at-least-once. Use the event ID as a dedup key
+    // with a 24-hour TTL so duplicate deliveries are silently acknowledged.
+    const eventDocRef = db.collection("processedWebhookEvents").doc(event.id);
+    const alreadyProcessed = await db.runTransaction(async (tx) => {
+      const snap = await tx.get(eventDocRef);
+      if (snap.exists) return true;
+      tx.set(eventDocRef, {
+        type: event.type,
+        processedAt: admin.firestore.FieldValue.serverTimestamp(),
+        // TTL field — configure a Firestore TTL policy on this field to auto-delete after 24h
+        expiresAt: Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000),
+      });
+      return false;
+    });
+    if (alreadyProcessed) {
+      console.log(`[stripeWebhook] Duplicate event ${event.id} (${event.type}) — skipping`);
+      res.status(200).json({ received: true });
+      return;
+    }
+
     switch (event.type) {
       case "checkout.session.completed": {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2680,6 +2883,19 @@ export const stripeWebhook = functions.https.onRequest(async (req, res) => {
           current_period_start: item.current_period_start,
           current_period_end: item.current_period_end,
         }, "active");
+
+        // Cancel the old subscription if this was an upgrade from an existing plan
+        const oldSubId = session.metadata?.existingSubscriptionId as string | undefined;
+        if (oldSubId && oldSubId !== stripeSubscriptionId) {
+          try {
+            await getStripe().subscriptions.cancel(oldSubId);
+            console.log(`[stripeWebhook] checkout.session.completed: cancelled old subscription ${oldSubId} after upgrade`);
+          } catch (err) {
+            // Non-fatal — old sub may already be cancelled
+            console.warn(`[stripeWebhook] checkout.session.completed: failed to cancel old subscription ${oldSubId}`, err);
+          }
+        }
+
         console.log(`[stripeWebhook] checkout.session.completed uid=${uid} plan=${plan}`);
         break;
       }
@@ -2719,8 +2935,13 @@ export const stripeWebhook = functions.https.onRequest(async (req, res) => {
         if (invoice.billing_reason !== "subscription_cycle") break;
         const uid = await lookupUidByCustomerId(invoice.customer as string);
         if (!uid) { throw new Error(`[stripeWebhook] invoice.payment_succeeded: uid not found for customer=${invoice.customer}`); }
-        await resetCredits(uid, { period_start: invoice.period_start, period_end: invoice.period_end });
-        console.log(`[stripeWebhook] invoice.payment_succeeded (renewal) uid=${uid} credits reset`);
+        // Resolve the plan from the invoice's subscription price — avoids a race
+        // with customer.subscription.updated firing simultaneously.
+        const invoicePriceId: string | undefined = invoice.lines?.data?.[0]?.price?.id;
+        const priceToplanRenewal = await buildPriceIdToPlanMap();
+        const renewalPlan = (invoicePriceId ? (priceToplanRenewal.get(invoicePriceId) ?? "free") : "free") as SubscriptionPlan;
+        await resetCredits(uid, { period_start: invoice.period_start, period_end: invoice.period_end }, renewalPlan);
+        console.log(`[stripeWebhook] invoice.payment_succeeded (renewal) uid=${uid} plan=${renewalPlan} credits reset`);
         break;
       }
 
@@ -2752,20 +2973,33 @@ export const stripeWebhook = functions.https.onRequest(async (req, res) => {
         const charge = event.data.object as any;
         const uid = await lookupUidByCustomerId(charge.customer as string);
         if (!uid) { throw new Error(`[stripeWebhook] charge.refunded: uid not found for customer=${charge.customer}`); }
-        // Restore credits proportional to the refund amount relative to the charge amount
-        const userSnap = await db.collection(USERS_COLLECTION).doc(uid).get();
-        const userData = userSnap.data();
-        if (!userData) break;
-        const creditsTotal: number = userData.subscription?.creditsTotal ?? 0;
-        const creditsUsed: number = userData.subscription?.creditsUsed ?? 0;
-        const refundFraction = charge.amount > 0 ? (charge.amount_refunded as number) / (charge.amount as number) : 0;
-        const creditsToRestore = Math.round(creditsTotal * refundFraction);
-        const newCreditsUsed = Math.max(0, creditsUsed - creditsToRestore);
-        await db.collection(USERS_COLLECTION).doc(uid).update({
-          "subscription.creditsUsed": newCreditsUsed,
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        });
-        console.log(`[stripeWebhook] charge.refunded uid=${uid} refundFraction=${refundFraction.toFixed(2)} creditsRestored=${creditsToRestore}`);
+
+        const isFullRefund = charge.amount > 0 && charge.amount_refunded >= charge.amount;
+
+        if (isFullRefund) {
+          // Full refund → downgrade to free immediately and zero out credits.
+          // The subscription deletion webhook may also fire, but downgradeToFree is idempotent.
+          await downgradeToFree(uid);
+          console.log(`[stripeWebhook] charge.refunded (full) uid=${uid} → downgraded to free, credits zeroed`);
+        } else {
+          // Partial refund → atomically restore credits proportional to the refund fraction.
+          const refundFraction = charge.amount > 0 ? (charge.amount_refunded as number) / (charge.amount as number) : 0;
+          const userRef = db.collection(USERS_COLLECTION).doc(uid);
+          await db.runTransaction(async (tx) => {
+            const snap = await tx.get(userRef);
+            if (!snap.exists) return;
+            const data = snap.data()!;
+            const creditsTotal: number = data.subscription?.creditsTotal ?? 0;
+            const creditsUsed: number = data.subscription?.creditsUsed ?? 0;
+            const creditsToRestore = Math.round(creditsTotal * refundFraction);
+            const newCreditsUsed = Math.max(0, creditsUsed - creditsToRestore);
+            tx.update(userRef, {
+              "subscription.creditsUsed": newCreditsUsed,
+              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            console.log(`[stripeWebhook] charge.refunded (partial) uid=${uid} refundFraction=${refundFraction.toFixed(2)} creditsRestored=${creditsToRestore}`);
+          });
+        }
         break;
       }
 

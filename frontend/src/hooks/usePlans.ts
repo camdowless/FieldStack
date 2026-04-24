@@ -17,6 +17,8 @@ interface UsePlansResult {
 }
 
 let _cachedPlans: PlanConfig[] | null = null;
+let _cacheTimestamp = 0;
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 export function usePlans(): UsePlansResult {
   const [plans, setPlans] = useState<PlanConfig[]>(_cachedPlans ?? []);
@@ -24,7 +26,8 @@ export function usePlans(): UsePlansResult {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (_cachedPlans !== null) return; // already loaded
+    const isStale = _cachedPlans !== null && Date.now() - _cacheTimestamp > CACHE_TTL_MS;
+    if (_cachedPlans !== null && !isStale) return; // fresh cache, nothing to do
 
     let cancelled = false;
     (async () => {
@@ -33,6 +36,7 @@ export function usePlans(): UsePlansResult {
         const snap = await getDocs(q);
         const result = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as PlanConfig));
         _cachedPlans = result;
+        _cacheTimestamp = Date.now();
         if (!cancelled) setPlans(result);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load plans");

@@ -14,6 +14,11 @@ service cloud.firestore {
       allow write: if false; // server-side only via Admin SDK
     }
 
+    // Webhook deduplication — server-side only
+    match /processedWebhookEvents/{eventId} {
+      allow read, write: if false; // Admin SDK only
+    }
+
     // Plan configuration — readable by all authenticated users, writable only via Admin SDK
     match /plans/{planId} {
       allow read: if request.auth != null;

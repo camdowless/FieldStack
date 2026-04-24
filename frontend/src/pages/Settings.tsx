@@ -20,7 +20,7 @@ import {
   Mail,
   KeyRound,
   Sun,
-  Palette,
+  Moon,
   CheckCircle2,
   AlertCircle,
 } from "lucide-react";
@@ -194,21 +194,21 @@ const Settings = () => {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="p-2 rounded-lg bg-muted">
-                      {theme === "gradient" ? (
-                        <Palette className="w-4 h-4 text-muted-foreground" />
+                      {theme === "dark" ? (
+                        <Moon className="w-4 h-4 text-muted-foreground" />
                       ) : (
                         <Sun className="w-4 h-4 text-muted-foreground" />
                       )}
                     </div>
                     <div>
-                      <p className="text-sm font-medium">Gradient Theme</p>
-                      <p className="text-xs text-muted-foreground">Switch between light and gradient UI.</p>
+                      <p className="text-sm font-medium">Dark Theme</p>
+                      <p className="text-xs text-muted-foreground">Switch between light and dark UI.</p>
                     </div>
                   </div>
                   <Switch
-                    checked={theme === "gradient"}
+                    checked={theme === "dark"}
                     onCheckedChange={toggleTheme}
-                    aria-label="Toggle gradient theme"
+                    aria-label="Toggle dark theme"
                   />
                 </div>
 

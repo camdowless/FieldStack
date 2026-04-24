@@ -139,6 +139,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (profileTimeoutId) { clearTimeout(profileTimeoutId); profileTimeoutId = null; }
 
+        // Fire-and-forget sync: reconcile Stripe → Firestore on page load.
+        // Throttled to once every 5 minutes to avoid hammering Stripe on every refresh.
+        u.getIdToken().then((token) => {
+          const lastSync = parseInt(sessionStorage.getItem("lastSubSync") ?? "0", 10);
+          const fiveMinutes = 5 * 60 * 1000;
+          if (Date.now() - lastSync < fiveMinutes) return;
+          sessionStorage.setItem("lastSubSync", String(Date.now()));
+          fetch("/api/syncSubscription", {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+          }).catch((err) => console.warn("[AuthContext] syncSubscription failed", err));
+        });
+
         // ── Step 2: Poll for role custom claim ──────────────────────────────
         let claimResolved = false;
         let pollCount = 0;

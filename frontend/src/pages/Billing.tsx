@@ -159,8 +159,14 @@ const Billing = () => {
     try {
       const token = await getToken();
       if (!token) { toast.error("Please sign in to upgrade."); return; }
+
+      // Always go through Stripe Checkout for upgrades so the user confirms payment.
+      // Pass the existing subscriptionId so the webhook can cancel it after the new one is created.
       const body: Record<string, string> = { priceId };
       if (promoCode.trim()) body.promoCode = promoCode.trim();
+      if (profile?.subscription?.stripeSubscriptionId) {
+        body.existingSubscriptionId = profile.subscription.stripeSubscriptionId;
+      }
       const res = await fetch("/api/createCheckoutSession", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -171,8 +177,9 @@ const Billing = () => {
       if (data.url) {
         setRedirecting({ show: true, destination: "Stripe Checkout" });
         window.location.href = data.url;
+      } else {
+        toast.error("No checkout URL returned. Please try again.");
       }
-      else toast.error("No checkout URL returned. Please try again.");
     } catch {
       toast.error("Something went wrong. Check your connection and try again.");
     } finally {
@@ -193,7 +200,7 @@ const Billing = () => {
       });
       const data = await res.json();
       if (!res.ok) { toast.error(data.error ?? "Failed to change plan. Please try again."); return; }
-      toast.success(`Downgraded to ${downgradeTarget.plan.name}. Changes take effect immediately.`);
+      toast.success(`Downgraded to ${downgradeTarget.plan.name}. Your plan will change at the end of your current billing cycle.`);
       setDowngradeTarget(null);
     } catch {
       toast.error("Something went wrong. Check your connection and try again.");
@@ -378,7 +385,7 @@ const Billing = () => {
                       </span>
                     </button>
                   </div>
-                  {profile?.subscription.stripeSubscriptionId && (
+                  {profile?.subscription?.stripeSubscriptionId && (
                     <Button variant="outline" size="sm" onClick={handleManageSubscription} disabled={managingPortal}>
                       {managingPortal && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
                       Manage Subscription
@@ -485,7 +492,7 @@ const Billing = () => {
             </div>
 
             {/* Cancel subscription link for paid users */}
-            {profile?.subscription.stripeSubscriptionId && !cancelAtPeriodEnd && (
+            {profile?.subscription?.stripeSubscriptionId && !cancelAtPeriodEnd && (
               <div className="text-center pt-2">
                 <button
                   onClick={openCancelFlow}
