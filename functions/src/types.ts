@@ -171,6 +171,7 @@ export interface HtmlSignals {
 
   // Scripts & tracking
   hasOnlineAds: boolean;
+  hasViewportMeta: boolean;
   hasAgencyFooter: boolean;
 
   // Broken resources
@@ -195,6 +196,7 @@ export interface ScorerInput {
   htmlSignals: HtmlSignals | null;
   lighthousePerformance: number | null;
   lighthouseSeo: number | null;
+  lighthouseMobileFriendly: boolean | null;
   domainAgeYears: number | null;
   isExpiredDomain: boolean;
   // Business signals
@@ -239,6 +241,7 @@ export interface ScoreBreakdown {
   reasons: string[];
   lighthousePerformance: number | null;
   lighthouseSeo: number | null;
+  lighthouseMobileFriendly: boolean | null;
   domainAgeYears: number | null;
   isExpiredDomain: boolean;
   isHttps: boolean | null;
@@ -264,6 +267,8 @@ export interface BusinessData {
   priceLevel: string | null;
   currentStatus: string | null;
   emails: string[];
+  websiteEmails: string[];
+  websitePhones: string[];
   socialLinks: Array<{ type: string; value: string }>;
   totalPhotos: number | null;
   placeTopics: Record<string, number> | null;
@@ -303,6 +308,7 @@ export interface CostBreakdown {
   businessSearch: number;
   instantPages: number;
   lighthouse: number;
+  contactEnrichment: number;
   totalDfs: number;
   firestoreReads: number;
   firestoreWrites: number;

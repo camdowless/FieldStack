@@ -30,6 +30,8 @@ export interface PlanConfig {
   canSaveLeads: boolean;
   /** Whether users on this plan can generate scripts */
   canGenerateScripts: boolean;
+  /** Whether users on this plan get website email/phone enrichment */
+  canEnrichContacts: boolean;
   /** Feature bullet points for billing UI display */
   features: string[];
   /** Display sort order */

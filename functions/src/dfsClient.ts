@@ -133,7 +133,10 @@ const CUSTOM_JS = `(function() {
     var src = document.scripts[i].getAttribute('src') || '';
     if (adDomains.some(function(d) { return src.indexOf(d) >= 0; })) { hasAds = true; break; }
   }
-  return JSON.stringify({ headerText: header, footerText: footer, copyrightYear: match ? parseInt(match[0], 10) : null, hasAds: hasAds });
+  var vp = document.querySelector('meta[name="viewport"]');
+  var vpContent = vp ? (vp.getAttribute('content') || '') : '';
+  var hasViewportMeta = vpContent.indexOf('width=device-width') >= 0;
+  return JSON.stringify({ headerText: header, footerText: footer, copyrightYear: match ? parseInt(match[0], 10) : null, hasAds: hasAds, hasViewportMeta: hasViewportMeta });
 })()`;
 
 export function buildAuthHeader(email: string, password: string): string {
@@ -147,11 +150,12 @@ export interface FooterData {
   footerText: string;
   copyrightYear: number | null;
   hasAds: boolean;
+  hasViewportMeta: boolean;
 }
 
 export function extractFooterData(customJsResponse: string | null | undefined): FooterData {
   if (!customJsResponse) {
-    return { headerText: "", footerText: "", copyrightYear: null, hasAds: false };
+    return { headerText: "", footerText: "", copyrightYear: null, hasAds: false, hasViewportMeta: false };
   }
   try {
     const parsed = JSON.parse(customJsResponse);
@@ -160,9 +164,10 @@ export function extractFooterData(customJsResponse: string | null | undefined): 
       footerText: typeof parsed.footerText === "string" ? parsed.footerText.toLowerCase() : "",
       copyrightYear: typeof parsed.copyrightYear === "number" ? parsed.copyrightYear : null,
       hasAds: parsed.hasAds === true,
+      hasViewportMeta: parsed.hasViewportMeta === true,
     };
   } catch {
-    return { headerText: "", footerText: "", copyrightYear: null, hasAds: false };
+    return { headerText: "", footerText: "", copyrightYear: null, hasAds: false, hasViewportMeta: false };
   }
 }
 
@@ -190,6 +195,8 @@ export function extractBusinessData(b: BusinessRaw): BusinessData {
     priceLevel: b.price_level,
     currentStatus: b.work_time?.work_hours?.current_status ?? null,
     emails,
+    websiteEmails: [],
+    websitePhones: [],
     socialLinks,
     totalPhotos: b.total_photos,
     placeTopics: b.place_topics,
@@ -336,7 +343,7 @@ export function extractHtmlSignals(
   // meaning the server actually issued a 3xx, not just that we changed http→https.
   const redirectedToHttps = !url.startsWith("https://") && isHttps && checks.is_redirect === true;
 
-  const { headerText, footerText, copyrightYear, hasAds: customJsHasAds } = extractFooterData(
+  const { headerText, footerText, copyrightYear, hasAds: customJsHasAds, hasViewportMeta: customJsHasViewport } = extractFooterData(
     typeof page.custom_js_response === "string" ? page.custom_js_response : null
   );
 
@@ -379,6 +386,7 @@ export function extractHtmlSignals(
     headerText,
     footerText,
     hasOnlineAds,
+    hasViewportMeta: customJsHasViewport,
     hasAgencyFooter,
     hasBrokenResources: bool(page.broken_resources),
     hasBrokenLinks: bool(page.broken_links),
@@ -419,6 +427,7 @@ export function uncrawlableSignals(url: string): HtmlSignals {
     headerText: "",
     footerText: "",
     hasOnlineAds: false,
+    hasViewportMeta: false,
     hasAgencyFooter: false,
     hasBrokenResources: false,
     hasBrokenLinks: false,
@@ -455,6 +464,7 @@ export function deadSiteSignals(url: string, statusCode: number | null, deathSta
     headerText: "",
     footerText: "",
     hasOnlineAds: false,
+    hasViewportMeta: false,
     hasAgencyFooter: false,
     hasBrokenResources: false,
     hasBrokenLinks: false,
@@ -916,7 +926,7 @@ export async function fetchInstantPages(
 export async function fetchLighthouse(
   urls: string[],
   authHeader: string
-): Promise<{ scores: ({ performance: number; seo: number } | null)[]; cost: number }> {
+): Promise<{ scores: ({ performance: number; seo: number; hasViewportMeta: boolean } | null)[]; cost: number }> {
   // Same http→https normalization as fetchInstantPages
   const crawlUrls = urls.map((url) =>
     url.startsWith("http://") ? url.replace("http://", "https://") : url
@@ -940,7 +950,7 @@ export async function fetchLighthouse(
   );
 
   const settled = await Promise.allSettled(requests);
-  const results: ({ performance: number; seo: number } | null)[] = [];
+  const results: ({ performance: number; seo: number; hasViewportMeta: boolean } | null)[] = [];
   let totalCost = 0;
 
   for (const outcome of settled) {
@@ -965,6 +975,9 @@ export async function fetchLighthouse(
       const categories = result?.[0]?.categories as
         | Record<string, unknown>
         | undefined;
+      const audits = result?.[0]?.audits as
+        | Record<string, unknown>
+        | undefined;
 
       const performance = (
         categories?.performance as Record<string, unknown> | undefined
@@ -977,11 +990,86 @@ export async function fetchLighthouse(
         continue;
       }
 
-      results.push({ performance, seo });
+      // viewport audit: score=1 means the page has a proper viewport meta tag
+      const viewportAudit = audits?.viewport as Record<string, unknown> | undefined;
+      const hasViewportMeta = viewportAudit?.score === 1;
+
+      results.push({ performance, seo, hasViewportMeta });
     } catch {
       results.push(null);
     }
   }
 
   return { scores: results, cost: totalCost };
+}
+
+// ─── Contact enrichment via on_page/content_parsing/live ─────────────────────
+
+export interface ContactInfo {
+  emails: string[];
+  phones: string[];
+}
+
+/**
+ * Fetch emails and phone numbers scraped from each URL using the DFS
+ * content_parsing/live endpoint. Returns null for any URL that fails.
+ * Runs all requests in parallel — caller should only pass non-parked, live URLs.
+ */
+export async function fetchContactInfo(
+  urls: string[],
+  authHeader: string
+): Promise<{ contacts: (ContactInfo | null)[]; cost: number }> {
+  const crawlUrls = urls.map((url) =>
+    url.startsWith("http://") ? url.replace("http://", "https://") : url
+  );
+
+  const requests = crawlUrls.map((url) =>
+    fetch(`${DFS_BASE}/on_page/content_parsing/live`, {
+      method: "POST",
+      headers: {
+        Authorization: authHeader,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify([{ url }]),
+    })
+  );
+
+  const settled = await Promise.allSettled(requests);
+  const results: (ContactInfo | null)[] = [];
+  let totalCost = 0;
+
+  for (const outcome of settled) {
+    if (outcome.status === "rejected") {
+      results.push(null);
+      continue;
+    }
+
+    const response = outcome.value;
+    if (!response.ok) {
+      results.push(null);
+      continue;
+    }
+
+    try {
+      const data = (await response.json()) as Record<string, unknown>;
+      if (typeof data.cost === "number") totalCost += data.cost;
+
+      const tasks = data.tasks as Array<Record<string, unknown>> | undefined;
+      const result = tasks?.[0]?.result as Array<Record<string, unknown>> | undefined;
+      const item = result?.[0] as Record<string, unknown> | undefined;
+      const contacts = item?.contacts as Record<string, unknown> | undefined;
+
+      const rawEmails = Array.isArray(contacts?.emails) ? (contacts!.emails as unknown[]) : [];
+      const rawPhones = Array.isArray(contacts?.telephones) ? (contacts!.telephones as unknown[]) : [];
+
+      const emails = rawEmails.filter((e): e is string => typeof e === "string" && e.length > 0);
+      const phones = rawPhones.filter((p): p is string => typeof p === "string" && p.length > 0);
+
+      results.push({ emails, phones });
+    } catch {
+      results.push(null);
+    }
+  }
+
+  return { contacts: results, cost: totalCost };
 }

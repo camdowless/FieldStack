@@ -41,6 +41,8 @@ export interface Business {
   reasons?: string[];
   description?: string | null;
   emails?: string[];
+  websiteEmails?: string[];
+  websitePhones?: string[];
   isClaimed?: boolean;
   currentStatus?: string | null;
   additionalCategories?: string[];

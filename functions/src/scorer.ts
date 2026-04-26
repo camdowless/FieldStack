@@ -18,6 +18,7 @@ function buildBreakdown(
     reasons,
     lighthousePerformance: input.lighthousePerformance,
     lighthouseSeo: input.lighthouseSeo,
+    lighthouseMobileFriendly: input.lighthouseMobileFriendly,
     domainAgeYears: input.domainAgeYears,
     isExpiredDomain: input.isExpiredDomain,
     isHttps: input.htmlSignals?.isHttps ?? null,
@@ -399,6 +400,13 @@ export function score(input: ScorerInput): ScoreResult {
       raw += pts;
       reasons.push(`Lighthouse SEO ${(input.lighthouseSeo * 100).toFixed(0)}% (+${pts})`);
     }
+  }
+  // Mobile-friendly: viewport meta tag is the canonical signal (Google mobile-first indexing)
+  // Primary: Lighthouse viewport audit. Fallback: custom_js DOM scan.
+  const mobileFriendly = input.lighthouseMobileFriendly ?? input.htmlSignals?.hasViewportMeta ?? null;
+  if (mobileFriendly === false) {
+    raw += 10;
+    reasons.push("Not mobile-friendly — missing viewport meta tag (+10)");
   }
 
   // Domain age scoring

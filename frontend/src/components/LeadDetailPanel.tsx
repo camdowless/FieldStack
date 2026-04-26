@@ -803,6 +803,40 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
             </Card>
           )}
 
+          {(business.websiteEmails?.length ?? 0) > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2"><Mail className="h-4 w-4" /> Website Emails</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ul className="space-y-1.5">
+                  {business.websiteEmails!.map((e) => (
+                    <li key={e}>
+                      <a href={`mailto:${e}`} className="text-sm text-primary hover:underline">{e}</a>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
+
+          {(business.websitePhones?.length ?? 0) > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base flex items-center gap-2"><Phone className="h-4 w-4" /> Website Phone Numbers</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ul className="space-y-1.5">
+                  {business.websitePhones!.map((p) => (
+                    <li key={p}>
+                      <a href={`tel:${p}`} className="text-sm text-primary hover:underline">{p}</a>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
+
         </TabsContent>
 
         <TabsContent value="scripts" className="space-y-4">

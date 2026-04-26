@@ -22,6 +22,7 @@ export function buildPlanSeedData(): Omit<PlanConfig, "id">[] {
       creditsPerMonth: 3,
       canSaveLeads: false,
       canGenerateScripts: false,
+      canEnrichContacts: false,
       features: [
         "3 searches / month",
         "Basic lead analysis",
@@ -38,6 +39,7 @@ export function buildPlanSeedData(): Omit<PlanConfig, "id">[] {
       creditsPerMonth: 30,
       canSaveLeads: true,
       canGenerateScripts: false,
+      canEnrichContacts: false,
       features: [
         "30 searches / month",
         "Full lead analysis",
@@ -55,11 +57,13 @@ export function buildPlanSeedData(): Omit<PlanConfig, "id">[] {
       creditsPerMonth: 100,
       canSaveLeads: true,
       canGenerateScripts: true,
+      canEnrichContacts: true,
       features: [
         "100 searches / month",
         "Full lead analysis",
         "Save leads",
         "AI script generation",
+        "Website email & phone enrichment",
       ],
       sortOrder: 2,
       active: true,
@@ -73,11 +77,13 @@ export function buildPlanSeedData(): Omit<PlanConfig, "id">[] {
       creditsPerMonth: 250,
       canSaveLeads: true,
       canGenerateScripts: true,
+      canEnrichContacts: true,
       features: [
         "250 searches / month",
         "Full lead analysis",
         "Save leads",
         "AI script generation",
+        "Website email & phone enrichment",
         "Priority support",
       ],
       sortOrder: 3,

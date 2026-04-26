@@ -6,6 +6,7 @@ import {
   searchBusinesses,
   fetchInstantPages,
   fetchLighthouse,
+  fetchContactInfo,
   isParkedDomain,
   extractBusinessData,
   deadSiteSignals,
@@ -396,6 +397,7 @@ export function buildScorerInput(
     htmlSignals?: ScorerInput["htmlSignals"];
     lighthousePerformance?: number | null;
     lighthouseSeo?: number | null;
+    lighthouseMobileFriendly?: boolean | null;
     domainAgeYears?: number | null;
     isExpiredDomain?: boolean;
   } = {}
@@ -419,6 +421,7 @@ export function buildScorerInput(
     htmlSignals: overrides.htmlSignals ?? null,
     lighthousePerformance: overrides.lighthousePerformance ?? null,
     lighthouseSeo: overrides.lighthouseSeo ?? null,
+    lighthouseMobileFriendly: overrides.lighthouseMobileFriendly ?? null,
     domainAgeYears: overrides.domainAgeYears ?? null,
     isExpiredDomain: overrides.isExpiredDomain ?? false,
     phone: b.phone,
@@ -715,7 +718,8 @@ function scoreWithSignals(
   businesses: BusinessRaw[],
   signalsMap: Map<string, import("./types").HtmlSignals>,
   rdapMap: Map<string, import("./rdap").DomainInfo>,
-  lighthouseMap: Map<string, { performance: number; seo: number }>
+  lighthouseMap: Map<string, { performance: number; seo: number; hasViewportMeta: boolean }>,
+  contactMap: Map<string, { emails: string[]; phones: string[] }> = new Map()
 ): ScoredBusiness[] {
   return businesses.map((b) => {
     const url = b.url ?? "";
@@ -729,12 +733,24 @@ function scoreWithSignals(
       htmlSignals,
       lighthousePerformance: lh?.performance ?? null,
       lighthouseSeo: lh?.seo ?? null,
+      lighthouseMobileFriendly: lh?.hasViewportMeta ?? null,
       domainAgeYears: rdap?.ageYears ?? null,
       isExpiredDomain: rdap?.isExpired ?? false,
     });
 
     const { score: s, label, scoring } = score(input);
     const { legitimacyScore, legitimacyBreakdown } = computeLegitimacy(input);
+
+    const businessData = extractBusinessData(b);
+    const contact = contactMap.get(url);
+    if (contact) {
+      // Merge website-scraped emails (deduplicated against GBP emails)
+      const existingEmails = new Set(businessData.emails.map((e) => e.toLowerCase()));
+      businessData.websiteEmails = contact.emails.filter(
+        (e) => !existingEmails.has(e.toLowerCase())
+      );
+      businessData.websitePhones = contact.phones;
+    }
 
     return {
       cid: b.cid,
@@ -750,7 +766,7 @@ function scoreWithSignals(
       scoring,
       legitimacyScore,
       legitimacyBreakdown,
-      businessData: extractBusinessData(b),
+      businessData,
       websiteData: htmlSignals,
     };
   });
@@ -772,6 +788,7 @@ export const processSearchJob = functions
       businessSearch: 0,
       instantPages: 0,
       lighthouse: 0,
+      contactEnrichment: 0,
       totalDfs: 0,
       firestoreReads: 0,
       firestoreWrites: 0,
@@ -793,6 +810,13 @@ export const processSearchJob = functions
       }
 
       const authHeader = buildAuthHeader(DFS_EMAIL, DFS_PASSWORD);
+
+      // ── Look up user's plan for feature gating ──
+      const userSnap = await db.collection(USERS_COLLECTION).doc(uid).get();
+      const userPlan = (userSnap.data()?.subscription as { plan?: string } | undefined)?.plan ?? "free";
+      const allPlans = await getAllPlans();
+      const planConfig = allPlans.get(userPlan);
+      const canEnrichContacts = planConfig?.canEnrichContacts ?? false;
 
       let geo: { lat: number; lng: number };
       try {
@@ -1031,7 +1055,7 @@ export const processSearchJob = functions
       // ── Batch 2: Dead-site businesses ──
       if (deadSite.length > 0) {
         const emptyRdap = new Map<string, import("./rdap").DomainInfo>();
-        const emptyLh = new Map<string, { performance: number; seo: number }>();
+        const emptyLh = new Map<string, { performance: number; seo: number; hasViewportMeta: boolean }>();
         const scored = scoreWithSignals(deadSite, signalsMap, emptyRdap, emptyLh);
         const written = await writeResultsBatch(jobId, uid, scored);
         totalResultsWritten += written;
@@ -1047,7 +1071,7 @@ export const processSearchJob = functions
       // ── Batch 3: Parked businesses ──
       if (parked.length > 0) {
         const emptyRdap = new Map<string, import("./rdap").DomainInfo>();
-        const emptyLh = new Map<string, { performance: number; seo: number }>();
+        const emptyLh = new Map<string, { performance: number; seo: number; hasViewportMeta: boolean }>();
         const scored = scoreWithSignals(parked, signalsMap, emptyRdap, emptyLh);
         const written = await writeResultsBatch(jobId, uid, scored);
         totalResultsWritten += written;
@@ -1082,11 +1106,25 @@ export const processSearchJob = functions
         const { scores: lhScores, cost: lhCost } = await fetchLighthouse(nonParkedUrls, authHeader);
         cost.lighthouse = lhCost;
 
-        const lighthouseMap = new Map<string, { performance: number; seo: number }>();
+        const lighthouseMap = new Map<string, { performance: number; seo: number; hasViewportMeta: boolean }>();
         for (let i = 0; i < nonParkedUrls.length; i++) {
           if (lhScores[i]) {
             lighthouseMap.set(nonParkedUrls[i], lhScores[i]!);
           }
+        }
+
+        // Contact enrichment (plan-gated)
+        const contactMap = new Map<string, { emails: string[]; phones: string[] }>();
+        if (canEnrichContacts) {
+          const { contacts, cost: contactCost } = await fetchContactInfo(nonParkedUrls, authHeader);
+          cost.contactEnrichment = contactCost;
+          for (let i = 0; i < nonParkedUrls.length; i++) {
+            const c = contacts[i];
+            if (c && (c.emails.length > 0 || c.phones.length > 0)) {
+              contactMap.set(nonParkedUrls[i], c);
+            }
+          }
+          console.log(`[Job_Processor] Job ${jobId}: contact enrichment found data for ${contactMap.size}/${nonParkedUrls.length} sites`);
         }
 
         // RDAP domain lookups
@@ -1101,7 +1139,7 @@ export const processSearchJob = functions
           }
         }
 
-        const scored = scoreWithSignals(nonParked, signalsMap, rdapMap, lighthouseMap);
+        const scored = scoreWithSignals(nonParked, signalsMap, rdapMap, lighthouseMap, contactMap);
         const written = await writeResultsBatch(jobId, uid, scored);
         totalResultsWritten += written;
         totalLeadsWritten += countLeads(scored);
@@ -1114,7 +1152,7 @@ export const processSearchJob = functions
       }
 
       // ── Completion ──
-      cost.totalDfs = cost.businessSearch + cost.instantPages + cost.lighthouse;
+      cost.totalDfs = cost.businessSearch + cost.instantPages + cost.lighthouse + cost.contactEnrichment;
 
       console.log(`[Job_Processor] Job ${jobId}: completing with ${totalResultsWritten} results, analyzed=${analyzed}/${totalBusinesses}`);
 
@@ -1257,6 +1295,7 @@ function scorerInputFromCached(biz: ScoredBusiness): ScorerInput {
       headerText: "",
       footerText: "",
       hasOnlineAds: false,
+      hasViewportMeta: false,
       hasAgencyFooter: false,
       hasBrokenResources: false,
       hasBrokenLinks: false,
@@ -1274,6 +1313,7 @@ function scorerInputFromCached(biz: ScoredBusiness): ScorerInput {
     htmlSignals,
     lighthousePerformance: sc?.lighthousePerformance ?? null,
     lighthouseSeo: sc?.lighthouseSeo ?? null,
+    lighthouseMobileFriendly: sc?.lighthouseMobileFriendly ?? null,
     domainAgeYears: sc?.domainAgeYears ?? null,
     isExpiredDomain: sc?.isExpiredDomain ?? false,
     phone: biz.phone,
@@ -1364,7 +1404,7 @@ export const reevaluateBusiness = functions
 
         const signalsMap = new Map([[website, htmlSignals]]);
 
-        let lighthouseMap = new Map<string, { performance: number; seo: number }>();
+        let lighthouseMap = new Map<string, { performance: number; seo: number; hasViewportMeta: boolean }>();
         let rdapMap = new Map<string, import("./rdap").DomainInfo>();
 
         // Only run Lighthouse + RDAP if the site is reachable and not parked

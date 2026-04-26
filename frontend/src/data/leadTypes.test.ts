@@ -9,6 +9,7 @@ const arbScoring: fc.Arbitrary<ApiScoring> = fc.record({
   reasons: fc.array(fc.string({ minLength: 1, maxLength: 40 }), { minLength: 0, maxLength: 5 }),
   lighthousePerformance: fc.option(fc.double({ min: 0, max: 1, noNaN: true }), { nil: null }),
   lighthouseSeo: fc.option(fc.double({ min: 0, max: 1, noNaN: true }), { nil: null }),
+  lighthouseMobileFriendly: fc.option(fc.boolean(), { nil: null }),
   domainAgeYears: fc.option(fc.double({ min: 0, max: 30, noNaN: true }), { nil: null }),
   isExpiredDomain: fc.option(fc.boolean(), { nil: null }),
   isHttps: fc.option(fc.boolean(), { nil: null }),
@@ -41,6 +42,8 @@ const arbBusinessData: fc.Arbitrary<ApiBusinessData> = fc.record({
   priceLevel: fc.option(fc.constantFrom("$", "$$", "$$$", "$$$$"), { nil: null }),
   currentStatus: fc.option(fc.constantFrom("open", "close"), { nil: null }),
   emails: fc.array(fc.emailAddress(), { maxLength: 2 }),
+  websiteEmails: fc.array(fc.emailAddress(), { maxLength: 2 }),
+  websitePhones: fc.array(fc.string({ maxLength: 15 }), { maxLength: 2 }),
   socialLinks: fc.array(
     fc.record({ type: fc.constantFrom("facebook", "instagram", "twitter"), value: fc.webUrl() }),
     { maxLength: 3 },

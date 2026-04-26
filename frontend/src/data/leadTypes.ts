@@ -8,6 +8,7 @@ export interface ApiScoring {
   reasons: string[];
   lighthousePerformance: number | null; // 0–1
   lighthouseSeo: number | null; // 0–1
+  lighthouseMobileFriendly: boolean | null;
   domainAgeYears: number | null;
   isExpiredDomain: boolean | null;
   isHttps: boolean | null;
@@ -31,6 +32,8 @@ export interface ApiBusinessData {
   priceLevel: string | null;
   currentStatus: "open" | "close" | string | null;
   emails: string[];
+  websiteEmails: string[];
+  websitePhones: string[];
   socialLinks: Array<{ type: string; value: string }>;
   totalPhotos: number | null;
   placeTopics: Record<string, number> | null;
@@ -64,6 +67,7 @@ export interface ApiWebsiteData {
   headerText: string | null;
   footerText: string | null;
   hasOnlineAds: boolean | null;
+  hasViewportMeta: boolean | null;
   hasAgencyFooter: boolean | null;
   hasBrokenResources: boolean | null;
   hasBrokenLinks: boolean | null;
@@ -120,7 +124,7 @@ export function normalizeBusiness(api: ApiBusiness): Business {
   const analysis: WebsiteAnalysis = {
     hasWebsite,
     designScore,
-    mobileFriendly: hasWebsite && designScore >= 50, // proxy until real signal
+    mobileFriendly: hasWebsite && (s.lighthouseMobileFriendly ?? wd?.hasViewportMeta ?? null) !== false,
     hasHttps: !!(s.isHttps ?? wd?.isHttps),
     deprecatedHtmlTags: wd?.deprecatedTagCount ?? 0,
     websiteAge: s.domainAgeYears ?? 0,
@@ -155,6 +159,8 @@ export function normalizeBusiness(api: ApiBusiness): Business {
     reasons: s.reasons,
     description: bd.description,
     emails: bd.emails ?? [],
+    websiteEmails: bd.websiteEmails ?? [],
+    websitePhones: bd.websitePhones ?? [],
     isClaimed: bd.isClaimed,
     currentStatus: bd.currentStatus,
     additionalCategories: bd.additionalCategories ?? [],
