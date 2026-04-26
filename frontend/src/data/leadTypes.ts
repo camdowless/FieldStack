@@ -97,6 +97,7 @@ export interface ApiBusiness {
   address: string | null;
   phone: string | null;
   website: string | null;
+  facebookAsWebsite?: boolean;
   rating: number | null;
   reviewCount: number | null;
   category: string;
@@ -116,7 +117,8 @@ export function normalizeBusiness(api: ApiBusiness): Business {
   const wd = api.websiteData;
   const s = api.scoring;
 
-  const hasWebsite = !!api.website;
+  const isFbAsWebsite = !!api.facebookAsWebsite;
+  const hasWebsite = !!api.website && !isFbAsWebsite;
   const seoScore = s.lighthouseSeo != null ? Math.round(s.lighthouseSeo * 100) : 0;
   const designScore = s.lighthousePerformance != null ? Math.round(s.lighthousePerformance * 100) : 0;
   const loadTimeMs = wd?.pageTiming?.timeToInteractive ?? 0;
@@ -132,7 +134,7 @@ export function normalizeBusiness(api: ApiBusiness): Business {
     loadTimeMs,
     isParkedDomain: false,
     isExpiredDomain: !!s.isExpiredDomain,
-    facebookAsWebsite: false,
+    facebookAsWebsite: isFbAsWebsite,
     hasOnlineAds: !!wd?.hasOnlineAds,
     hasMarketingAgency: !!wd?.hasAgencyFooter,
     seoScore,

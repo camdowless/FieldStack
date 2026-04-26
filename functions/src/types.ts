@@ -292,6 +292,7 @@ export interface ScoredBusiness {
   address: string | null;
   phone: string | null;
   website: string | null;
+  facebookAsWebsite?: boolean;
   rating: number | null;
   reviewCount: number | null;
   category: string | null;

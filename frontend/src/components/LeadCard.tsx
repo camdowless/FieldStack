@@ -25,7 +25,7 @@ export function LeadCard({ business, isSaved, onSave, index = 0 }: LeadCardProps
   const planConfig = usePlanConfig(plan);
 
   const flags: string[] = [];
-  if (!analysis.hasWebsite) flags.push("No Website");
+  if (!analysis.hasWebsite && !analysis.facebookAsWebsite) flags.push("No Website");
   if (analysis.hasWebsite && !analysis.mobileFriendly) flags.push("Not Mobile-Friendly");
   if (analysis.hasWebsite && !analysis.hasHttps) flags.push("No HTTPS");
   if (analysis.hasWebsite && !analysis.hasOnlineAds) flags.push("No Ads");
@@ -90,12 +90,29 @@ export function LeadCard({ business, isSaved, onSave, index = 0 }: LeadCardProps
 
           {flags.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t">
-              {flags.slice(0, 4).map((flag) => (
-                <span key={flag} className="inline-flex items-center gap-1 rounded-md bg-destructive/10 px-2 py-0.5 text-xs text-destructive font-medium">
-                  <AlertTriangle className="h-3 w-3" />
-                  {flag}
-                </span>
-              ))}
+              {flags.slice(0, 4).map((flag) => {
+                if (flag === "FB as Website" && analysis.websiteUrl) {
+                  return (
+                    <a
+                      key={flag}
+                      href={analysis.websiteUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="inline-flex items-center gap-1 rounded-md bg-blue-500/10 px-2 py-0.5 text-xs text-blue-600 dark:text-blue-400 font-medium hover:bg-blue-500/20 transition-colors"
+                    >
+                      <Globe className="h-3 w-3" />
+                      Facebook Page
+                    </a>
+                  );
+                }
+                return (
+                  <span key={flag} className="inline-flex items-center gap-1 rounded-md bg-destructive/10 px-2 py-0.5 text-xs text-destructive font-medium">
+                    <AlertTriangle className="h-3 w-3" />
+                    {flag}
+                  </span>
+                );
+              })}
               {flags.length > 4 && (
                 <span className="text-xs text-muted-foreground">+{flags.length - 4} more</span>
               )}

@@ -4,12 +4,12 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   signInWithPopup,
-  sendPasswordResetEmail,
   signOut,
   type User,
 } from "firebase/auth";
 import { doc, onSnapshot } from "firebase/firestore";
 import { auth, googleProvider, firestore } from "@/lib/firebase";
+import { getFunctions, httpsCallable } from "firebase/functions";
 
 export interface Subscription {
   plan: "free" | "soloPro" | "agency" | "pro";
@@ -38,11 +38,14 @@ interface AuthContextValue {
   profile: UserProfile | null;
   role: "user" | "admin" | null;
   loading: boolean;
+  isNewUser: boolean;
+  emailVerified: boolean;
   signIn: (email: string, password: string) => Promise<{ needsVerification?: boolean }>;
   signUp: (email: string, password: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
   resendVerificationEmail: () => Promise<void>;
+  refreshEmailVerified: () => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -57,6 +60,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [role, setRole] = useState<"user" | "admin" | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isNewUser, setIsNewUser] = useState(false);
+  const [emailVerified, setEmailVerified] = useState(false);
 
   useEffect(() => {
     let profileUnsub: (() => void) | null = null;
@@ -99,6 +104,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null);
         setProfile(null);
         setRole(null);
+        setIsNewUser(false);
+        setEmailVerified(false);
         setLoading(false);
         return;
       }
@@ -115,6 +122,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       setUser(u);
+      setEmailVerified(u.emailVerified);
       setLoading(true);
       console.log(`[AuthContext] User set, loading→true. Waiting for Firestore profile doc users/${u.uid}…`);
 
@@ -130,12 +138,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       profileUnsub = onSnapshot(profileRef, async (snap) => {
         if (!snap.exists()) {
           console.log(`[AuthContext] Profile doc users/${u.uid} does not exist yet — waiting…`);
+          setIsNewUser(true);
           return;
         }
 
         const data = snap.data() as UserProfile;
         console.log(`[AuthContext] ✅ Profile doc arrived uid=${u.uid} fields=${JSON.stringify(Object.keys(data))}`);
         setProfile(data);
+        setIsNewUser(false);
 
         if (profileTimeoutId) { clearTimeout(profileTimeoutId); profileTimeoutId = null; }
 
@@ -217,7 +227,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const resendVerificationEmail = async () => {
-    // EMAIL VERIFICATION DISABLED
+    const fns = getFunctions();
+    const callable = httpsCallable(fns, "resendVerificationEmail");
+    await callable({});
+  };
+
+  const refreshEmailVerified = async () => {
+    if (!auth.currentUser) return;
+    await auth.currentUser.reload();
+    const verified = auth.currentUser.emailVerified;
+    setEmailVerified(verified);
   };
 
   const signUp = async (email: string, password: string) => {
@@ -233,7 +252,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const sendPasswordReset = async (email: string) => {
-    await sendPasswordResetEmail(auth, email);
+    const functions = getFunctions();
+    const callable = httpsCallable(functions, "sendPasswordReset");
+    await callable({ email });
   };
 
   const logout = async () => {
@@ -244,7 +265,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, role, loading, signIn, signUp, signInWithGoogle, sendPasswordReset, resendVerificationEmail, logout }}>
+    <AuthContext.Provider value={{ user, profile, role, loading, isNewUser, emailVerified, signIn, signUp, signInWithGoogle, sendPasswordReset, resendVerificationEmail, refreshEmailVerified, logout }}>
       {children}
     </AuthContext.Provider>
   );

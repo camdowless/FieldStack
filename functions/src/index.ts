@@ -19,6 +19,7 @@ import { geocodeLocation, milesToKm, buildLocationCoordinate } from "./geocode";
 import { computeJobId, deleteResultsSubcollection, createOrReuseJob, isJobCancelled, cancelJob, identifyStuckJobs, identifyExpiredJobs } from "./jobHelpers";
 import { Timestamp } from "firebase-admin/firestore";
 import { checkUserRole, checkAdminRole } from "./authHelpers";
+import { sendPasswordResetEmail as sendPasswordResetEmailViaResend, sendVerificationEmailToAddress } from "./emailService";
 import type { Subscription, SubscriptionPlan } from "./types";
 import { getPlanCredits, buildPriceIdToPlanMap, invalidatePlanCache, getAllPlans } from "./plans";
 import { buildPlanSeedData, PLAN_IDS } from "./seedPlans";
@@ -388,6 +389,18 @@ function replyRateLimited(res: functions.Response, resetAtMs: number): void {
 
 // ─── DataForSEO Business Search ───────────────────────────────────────────────
 
+// ─── Facebook URL detection ───────────────────────────────────────────────────
+
+export function isFacebookUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  try {
+    const hostname = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+    return hostname === "facebook.com" || hostname.endsWith(".facebook.com");
+  } catch {
+    return /facebook\.com/i.test(url);
+  }
+}
+
 // Helper: build ScorerInput from a BusinessRaw + optional enrichment data
 // Exported for Job_Processor (Task 3.1)
 export function buildScorerInput(
@@ -472,7 +485,76 @@ export const onUserCreate = functions.auth.user().onCreate(async (user) => {
   //    have — no redundant getUser() call, no silent swallowing of errors.
   await createUserProfile(user);
 
+  // 3. Profile created. Verification email is sent on-demand from the
+  //    VerifyEmailScreen via the resendVerificationEmail callable — we don't
+  //    call generateEmailVerificationLink here to avoid burning Firebase's
+  //    rate limit before the user even clicks "send".
   console.log(`[onUserCreate] COMPLETE uid=${user.uid}`);
+});
+
+// ─── Callable: Send branded password reset email via Resend ──────────────────
+
+export const sendPasswordReset = functions.https.onCall(async (data) => {
+  const email = (data?.email ?? "").trim().toLowerCase();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new functions.https.HttpsError("invalid-argument", "A valid email address is required.");
+  }
+
+  try {
+    const resetLink = await admin.auth().generatePasswordResetLink(email);
+    await sendPasswordResetEmailViaResend(email, resetLink);
+    console.log(`[sendPasswordReset] Reset email sent to ${email}`);
+  } catch (err: any) {
+    // Don't leak whether the email exists — always return success to the client.
+    console.error(`[sendPasswordReset] Error for ${email}:`, err?.message ?? err);
+  }
+
+  // Always return success to prevent email enumeration
+  return { success: true };
+});
+
+// ─── Callable: Resend verification email ─────────────────────────────────────
+
+export const resendVerificationEmail = functions.https.onCall(async (_data, context) => {
+  console.log(`[resendVerificationEmail] Called auth=${!!context.auth} uid=${context.auth?.uid ?? "none"}`);
+
+  if (!context.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Must be signed in.");
+  }
+
+  const uid = context.auth.uid;
+  console.log(`[resendVerificationEmail] Fetching user record uid=${uid}`);
+  const userRecord = await admin.auth().getUser(uid);
+  console.log(`[resendVerificationEmail] emailVerified=${userRecord.emailVerified} email=${userRecord.email ?? "none"}`);
+
+  if (userRecord.emailVerified) {
+    console.log(`[resendVerificationEmail] Already verified, skipping uid=${uid}`);
+    return { success: true };
+  }
+
+  if (!userRecord.email) {
+    throw new functions.https.HttpsError("failed-precondition", "No email address on account.");
+  }
+
+  try {
+    console.log(`[resendVerificationEmail] Generating link for ${userRecord.email}`);
+    const verificationLink = await admin.auth().generateEmailVerificationLink(userRecord.email);
+    console.log(`[resendVerificationEmail] Link generated, calling Resend for ${userRecord.email}`);
+    await sendVerificationEmailToAddress(userRecord.email, verificationLink);
+    console.log(`[resendVerificationEmail] ✅ Sent to ${userRecord.email} uid=${uid}`);
+  } catch (err: any) {
+    const msg: string = err?.errorInfo?.message ?? err?.message ?? "";
+    if (msg.includes("TOO_MANY_ATTEMPTS_TRY_LATER")) {
+      throw new functions.https.HttpsError(
+        "resource-exhausted",
+        "Too many attempts. Please wait a few minutes before requesting another verification email."
+      );
+    }
+    console.error(`[resendVerificationEmail] Failed for uid=${uid}:`, err);
+    throw new functions.https.HttpsError("internal", "Failed to send verification email. Please try again.");
+  }
+
+  return { success: true };
 });
 
 export const dataforseoBusinessSearch = functions
@@ -688,6 +770,7 @@ async function updateJobProgress(
  */
 function scoreNoWebsiteBatch(businesses: BusinessRaw[]): ScoredBusiness[] {
   return businesses.map((b) => {
+    const fbAsWebsite = isFacebookUrl(b.url);
     const input = buildScorerInput(b, { website: null });
     const { score: s, label, scoring } = score(input);
     const { legitimacyScore, legitimacyBreakdown } = computeLegitimacy(input);
@@ -696,7 +779,9 @@ function scoreNoWebsiteBatch(businesses: BusinessRaw[]): ScoredBusiness[] {
       name: b.title,
       address: b.address,
       phone: b.phone,
-      website: null,
+      // Keep the Facebook URL so the frontend can link to it, but it was scored as no-website
+      website: fbAsWebsite ? b.url ?? null : null,
+      facebookAsWebsite: fbAsWebsite || undefined,
       rating: b.rating?.value ?? null,
       reviewCount: b.rating?.votes_count ?? null,
       category: b.category,
@@ -758,6 +843,7 @@ function scoreWithSignals(
       address: b.address,
       phone: b.phone,
       website: b.url,
+      facebookAsWebsite: isFacebookUrl(b.url) || undefined,
       rating: b.rating?.value ?? null,
       reviewCount: b.rating?.votes_count ?? null,
       category: b.category,
@@ -926,8 +1012,9 @@ export const processSearchJob = functions
       }
 
       // Split fresh businesses into: no-website, has-website
-      const noWebsite = freshItems.filter((b) => !b.url);
-      const hasWebsite = freshItems.filter((b) => !!b.url);
+      // Facebook URLs are treated as no-website for scoring purposes
+      const noWebsite = freshItems.filter((b) => !b.url || isFacebookUrl(b.url));
+      const hasWebsite = freshItems.filter((b) => !!b.url && !isFacebookUrl(b.url));
 
       // ── Batch 1: No-website businesses ──
       if (noWebsite.length > 0) {

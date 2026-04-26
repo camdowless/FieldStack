@@ -61,9 +61,9 @@ export function WelcomeModal() {
           <div className="flex items-start gap-3 rounded-lg bg-muted/60 p-4">
             <Zap className="h-5 w-5 text-primary mt-0.5 shrink-0" />
             <div>
-              <p className="text-sm font-semibold">You have {credits} free searches</p>
+              <p className="text-sm font-semibold">You have {credits} free search credits</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Search any city or zip code to find businesses that need your services. Each search uses 1 credit. These don't expire or reset.
+                Search any city or zip code to find businesses that need your services. Larger searches may use more credits. These don't expire or reset.
               </p>
             </div>
           </div>

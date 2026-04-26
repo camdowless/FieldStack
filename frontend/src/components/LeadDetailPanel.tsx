@@ -573,7 +573,20 @@ export function LeadDetailPanel({ business, onUpdate }: LeadDetailPanelProps) {
             </CardHeader>
             <CardContent>
               {!a.hasWebsite ? (
-                <p className="text-sm text-muted-foreground py-2">No website found</p>
+                <div className="py-2 space-y-2">
+                  <p className="text-sm text-muted-foreground">No website found</p>
+                  {a.facebookAsWebsite && a.websiteUrl && (
+                    <a
+                      href={a.websiteUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                    >
+                      <Globe className="h-3.5 w-3.5" />
+                      Facebook page listed as website
+                    </a>
+                  )}
+                </div>
               ) : (
                 <div className="divide-y divide-border">
                   {(() => {

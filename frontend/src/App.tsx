@@ -6,6 +6,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { AppLayout } from "@/components/AppLayout";
+import { VerifyEmailScreen } from "@/components/VerifyEmailScreen";
+import { ProfileSetupScreen } from "@/components/ProfileSetupScreen";
 import { useEffect } from "react";
 import { toast } from "sonner";
 import Login from "./pages/Login";
@@ -53,9 +55,17 @@ import NotFound from "./pages/NotFound.tsx";
 const queryClient = new QueryClient();
 
 function AuthGate() {
-  const { user, loading } = useAuth();
+  const { user, loading, isNewUser, emailVerified } = useAuth();
+
+  // Determine if this is an email/password user who needs verification
+  const isEmailProvider = user?.providerData.some((p) => p.providerId === "password") ?? false;
+  const needsVerification = isEmailProvider && !emailVerified;
 
   if (loading) {
+    // Don't show ProfileSetupScreen for unverified users — they'll hit the verify gate below
+    if (isNewUser && !needsVerification) {
+      return <ProfileSetupScreen />;
+    }
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
@@ -66,10 +76,15 @@ function AuthGate() {
   if (!user) {
     return (
       <Routes>
-        {/* Allow ?mode=signup and ?mode=login deep-links from the marketing site */}
         <Route path="*" element={<Login />} />
       </Routes>
     );
+  }
+
+  // Gate: email/password users must verify before accessing the app.
+  // Google OAuth users are pre-verified — skip the gate for them.
+  if (needsVerification) {
+    return <VerifyEmailScreen />;
   }
 
   return (
