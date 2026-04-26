@@ -31,6 +31,10 @@ export interface UserProfile {
   displayName: string | null;
   photoURL: string | null;
   subscription: Subscription;
+  preferences?: {
+    opportunityScoreMin: number;
+    legitimacyScoreMin: number;
+  };
   createdAt: unknown;
   updatedAt: unknown;
 }

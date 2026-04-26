@@ -116,6 +116,7 @@ type FirestoreUserProfile = Omit<UserProfile, "createdAt" | "updatedAt"> & {
   updatedAt: admin.firestore.FieldValue;
 };
 
+
 /**
  * Build a default subscription object for a given plan.
  * creditsTotal is read from the Firestore plans collection.
@@ -153,6 +154,10 @@ async function buildUserProfile(fields: {
     photoURL: fields.photoURL ?? null,
     role: "user",
     subscription: await buildDefaultSubscription("free"),
+    preferences: {
+      opportunityScoreMin: 25,
+      legitimacyScoreMin: 35,
+    },
     createdAt: now,
     updatedAt: now,
   };

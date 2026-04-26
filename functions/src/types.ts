@@ -396,6 +396,10 @@ export interface UserProfile {
   photoURL: string | null;
   role: "user" | "admin";
   subscription: Subscription;
+  preferences?: {
+    opportunityScoreMin: number;
+    legitimacyScoreMin: number;
+  };
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

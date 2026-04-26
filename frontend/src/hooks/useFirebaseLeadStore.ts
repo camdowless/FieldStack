@@ -4,6 +4,7 @@ import {
   doc,
   query,
   orderBy,
+  limit,
   onSnapshot,
   setDoc,
   updateDoc,
@@ -117,7 +118,7 @@ export function useFirebaseLeadStore() {
     }
 
     const col = collection(firestore, "users", user.uid, "savedLeads");
-    const q = query(col, orderBy("savedAt", "desc"));
+    const q = query(col, orderBy("savedAt", "desc"), limit(100));
 
     const unsub = onSnapshot(
       q,

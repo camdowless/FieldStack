@@ -59,7 +59,15 @@ service cloud.firestore {
       }
 
       allow read: if isOwner();
-      allow write: if false; // server-side only via Admin SDK
+
+      // Allow users to update only the preferences field on their own profile
+      allow update: if isOwner()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["preferences"])
+        && request.resource.data.preferences.keys().hasOnly(["opportunityScoreMin", "legitimacyScoreMin"])
+        && request.resource.data.preferences.opportunityScoreMin is number
+        && request.resource.data.preferences.legitimacyScoreMin is number;
+
+      allow create: if false; // server-side only via Admin SDK
 
       // Allow users to update their own preferences
       match /preferences/{doc} {
