@@ -184,8 +184,6 @@ export function useSearchJob(): UseSearchJobReturn {
           ? { analyzed: d.progress.analyzed ?? 0, total: d.progress.total ?? 0 }
           : null;
 
-        console.log(`[useSearchJob] Job status: ${jobStatus}, progress:`, progress, `resultCount: ${d.resultCount}`);
-
         if (jobStatus === "completed") {
           const resultCount = typeof d.resultCount === "number" ? d.resultCount : 0;
           const cost = d.cost ?? null;
@@ -222,7 +220,6 @@ export function useSearchJob(): UseSearchJobReturn {
         });
         const sorted = sortByScoreDesc(businesses);
         localCountRef.current = sorted.length;
-        console.log(`[useSearchJob] Results snapshot: ${sorted.length} businesses received`);
         setState((s) => ({ ...s, results: sorted }));
         maybeFinalize(uid);
       },
@@ -245,8 +242,7 @@ export function useSearchJob(): UseSearchJobReturn {
       // Force-refresh the token so role claims are present before the Firestore read
       try {
         await user.getIdToken(true);
-      } catch (err) {
-        console.warn("[useSearchJob] Token refresh failed, skipping rehydration:", err);
+      } catch {
         return;
       }
 
@@ -262,7 +258,6 @@ export function useSearchJob(): UseSearchJobReturn {
 
         if (jobStatus === "running") {
           // Job is still going — reattach listeners and restore UI state
-          console.log(`[useSearchJob] Rehydrating in-progress job: ${saved.jobId}`);
           setState((s) => ({ ...s, jobId: saved.jobId, status: "running" }));
           setActiveParams({ keyword: saved.keyword, location: saved.location });
           attachListeners(saved.jobId, user.uid);
@@ -270,8 +265,7 @@ export function useSearchJob(): UseSearchJobReturn {
           // Job already finished while we were away — just clear storage
           clearActiveJob(user.uid);
         }
-      } catch (err) {
-        console.warn("[useSearchJob] Rehydration check failed:", err);
+      } catch {
         clearActiveJob(user.uid);
       }
     });
@@ -293,27 +287,12 @@ export function useSearchJob(): UseSearchJobReturn {
         retryAfter: null,
       });
 
-      // Get auth token — always force-refreshes to ensure role claim is present
-      console.log(`[useSearchJob] startSearch — requesting auth token. auth.currentUser=${auth.currentUser?.uid ?? "null"}`);
       const token = await getAuthToken();
       if (!token) {
         console.error("[useSearchJob] ❌ getAuthToken() returned null — user is not authenticated. Cannot search.");
         setState((s) => ({ ...s, status: "failed", error: "You must be signed in to search." }));
         return;
       }
-      console.log(`[useSearchJob] ✅ Token obtained length=${token.length} prefix=${token.slice(0, 20)}…`);
-
-      // Decode the JWT payload (no verification — just for logging)
-      try {
-        const payloadB64 = token.split(".")[1];
-        const payload = JSON.parse(atob(payloadB64));
-        console.log(`[useSearchJob] JWT payload: uid=${payload.sub} role="${payload.role ?? "MISSING"}" exp=${new Date(payload.exp * 1000).toISOString()} iat=${new Date(payload.iat * 1000).toISOString()}`);
-      } catch {
-        console.warn("[useSearchJob] Could not decode JWT payload for logging");
-      }
-
-      // Call Job_Creator
-      console.log(`[useSearchJob] POST /api/search keyword="${params.keyword}" location="${params.location}" radius=${params.radius}`);
       let jobId: string;
       try {
         const res = await fetch("/api/search", {
@@ -324,8 +303,6 @@ export function useSearchJob(): UseSearchJobReturn {
           },
           body: JSON.stringify(params),
         });
-
-        console.log(`[useSearchJob] /api/search response status=${res.status} ok=${res.ok}`);
 
         if (!res.ok) {
           const body = await res.json().catch(() => ({ error: res.statusText }));
@@ -346,7 +323,6 @@ export function useSearchJob(): UseSearchJobReturn {
 
         const data = await res.json();
         jobId = data.jobId;
-        console.log(`[useSearchJob] ✅ Job created jobId=${jobId}`);
       } catch (err) {
         console.error("[useSearchJob] ❌ Network error calling /api/search", err);
         setState((s) => ({
@@ -360,7 +336,6 @@ export function useSearchJob(): UseSearchJobReturn {
       setState((s) => ({ ...s, jobId, status: "running" }));
 
       const uid = auth.currentUser?.uid;
-      console.log(`[useSearchJob] Post-fetch auth.currentUser uid=${uid ?? "null"}`);
       if (!uid) {
         console.error("[useSearchJob] ❌ auth.currentUser is null after successful fetch — auth state was lost mid-request");
         setState((s) => ({ ...s, status: "failed", error: "Authentication lost. Please sign in and try again." }));

@@ -143,7 +143,7 @@ const Index = () => {
   useEffect(() => {
     const justCompleted = prevStatusRef.current !== "completed" && searchJob.status === "completed";
     if (justCompleted && searchJob.cost) {
-      console.log("[search] Cost breakdown:", searchJob.cost);
+      // cost breakdown available in searchJob.cost
     }
     if (justCompleted && searchJob.jobId) {
       updateLeadCount(searchJob.jobId, baseResults.length);

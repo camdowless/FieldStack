@@ -50,7 +50,7 @@ const rawCorsOrigins = process.env.CORS_ORIGIN
 if (rawCorsOrigins.length === 0) {
   console.error("[CORS] ❌ CORS_ORIGIN is not set — all cross-origin requests will be rejected with 401. Set CORS_ORIGIN in functions/.env");
 } else {
-  console.log(`[CORS] Allowed origins: ${rawCorsOrigins.join(", ")}`);
+  // CORS origins configured
 }
 
 const corsHandler = cors({
@@ -63,7 +63,6 @@ const corsHandler = cors({
     if (rawCorsOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      console.warn(`[CORS] ❌ Rejected origin="${origin}" — not in allowed list: [${rawCorsOrigins.join(", ")}]`);
       callback(new Error(`CORS: origin "${origin}" is not allowed`));
     }
   },
@@ -180,15 +179,11 @@ async function createUserProfile(user: admin.auth.UserRecord): Promise<void> {
     photoURL: user.photoURL,
   });
 
-  console.log(`[createUserProfile] attempting write uid=${user.uid} fields=${JSON.stringify({ email: profile.email, displayName: profile.displayName, role: profile.role, plan: profile.subscription.plan, creditsTotal: profile.subscription.creditsTotal })}`);
-
   try {
     await ref.create(profile);
-    console.log(`[createUserProfile] SUCCESS uid=${user.uid} (${user.email ?? "no email"})`);
   } catch (err: unknown) {
     const code = (err as { code?: number }).code;
     if (code === 6) {
-      console.warn(`[createUserProfile] doc already exists uid=${user.uid}, skipping`);
       return;
     }
     console.error(`[createUserProfile] FAILED uid=${user.uid} code=${code}`, err);
@@ -207,8 +202,6 @@ async function ensureUserProfile(uid: string): Promise<void> {
   const snap = await ref.get();
   if (snap.exists) return;
 
-  console.warn(`[user] profile missing for ${uid} — creating via fallback`);
-
   let email: string | null = null;
   let displayName: string | null = null;
   let photoURL: string | null = null;
@@ -225,7 +218,6 @@ async function ensureUserProfile(uid: string): Promise<void> {
 
   try {
     await ref.create(profile);
-    console.log(`[user] created profile for ${uid} via fallback`);
   } catch (err: unknown) {
     const code = (err as { code?: number }).code;
     if (code === 6) {
@@ -255,9 +247,6 @@ export function saveSearchToUser(
       ...search,
       resultCount: search.leadCount,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    })
-    .catch((err) => {
-      console.error("[user] failed to save search:", err);
     });
 
   // Increment running totals on the admin stats doc (fire-and-forget)
