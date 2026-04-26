@@ -5,6 +5,8 @@ import {
   createUserWithEmailAndPassword,
   signInWithPopup,
   signOut,
+  confirmPasswordReset,
+  applyActionCode,
   type User,
 } from "firebase/auth";
 import { doc, onSnapshot } from "firebase/firestore";
@@ -44,6 +46,8 @@ interface AuthContextValue {
   signUp: (email: string, password: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   sendPasswordReset: (email: string) => Promise<void>;
+  confirmPasswordReset: (oobCode: string, newPassword: string) => Promise<void>;
+  applyActionCode: (oobCode: string) => Promise<void>;
   resendVerificationEmail: () => Promise<void>;
   refreshEmailVerified: () => Promise<void>;
   logout: () => Promise<void>;
@@ -257,6 +261,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await callable({ email });
   };
 
+  const confirmPasswordResetFn = async (oobCode: string, newPassword: string) => {
+    await confirmPasswordReset(auth, oobCode, newPassword);
+  };
+
+  const applyActionCodeFn = async (oobCode: string) => {
+    await applyActionCode(auth, oobCode);
+  };
+
   const logout = async () => {
     console.log(`[AuthContext] logout() called — current uid=${auth.currentUser?.uid ?? "null"}`);
     await signOut(auth);
@@ -265,7 +277,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, role, loading, isNewUser, emailVerified, signIn, signUp, signInWithGoogle, sendPasswordReset, resendVerificationEmail, refreshEmailVerified, logout }}>
+    <AuthContext.Provider value={{ user, profile, role, loading, isNewUser, emailVerified, signIn, signUp, signInWithGoogle, sendPasswordReset, confirmPasswordReset: confirmPasswordResetFn, applyActionCode: applyActionCodeFn, resendVerificationEmail, refreshEmailVerified, logout }}>
       {children}
     </AuthContext.Provider>
   );

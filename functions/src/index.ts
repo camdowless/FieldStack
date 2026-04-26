@@ -494,19 +494,43 @@ export const onUserCreate = functions.auth.user().onCreate(async (user) => {
 
 // ─── Callable: Send branded password reset email via Resend ──────────────────
 
-export const sendPasswordReset = functions.https.onCall(async (data) => {
+export const sendPasswordReset = functions.https.onCall(async (data, context) => {
   const email = (data?.email ?? "").trim().toLowerCase();
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new functions.https.HttpsError("invalid-argument", "A valid email address is required.");
   }
 
+  // ── Rate limit: max 3 reset requests per email per hour ──────────────────
+  const db = admin.firestore();
+  const rateLimitRef = db.collection("rateLimits").doc(`pwreset:${email}`);
+  const now = Date.now();
+  const windowMs = 60 * 60 * 1000; // 1 hour
+
+  await db.runTransaction(async (tx) => {
+    const snap = await tx.get(rateLimitRef);
+    const existing = snap.exists ? (snap.data() as { count: number; windowStart: number }) : null;
+
+    if (existing && now - existing.windowStart < windowMs) {
+      if (existing.count >= 3) {
+        throw new functions.https.HttpsError(
+          "resource-exhausted",
+          "Too many reset requests. Please wait before trying again."
+        );
+      }
+      tx.update(rateLimitRef, { count: existing.count + 1 });
+    } else {
+      tx.set(rateLimitRef, { count: 1, windowStart: now });
+    }
+  });
+
   try {
     const resetLink = await admin.auth().generatePasswordResetLink(email);
     await sendPasswordResetEmailViaResend(email, resetLink);
-    console.log(`[sendPasswordReset] Reset email sent to ${email}`);
+    console.log(`[sendPasswordReset] Reset email sent`);
   } catch (err: any) {
+    if (err instanceof functions.https.HttpsError) throw err;
     // Don't leak whether the email exists — always return success to the client.
-    console.error(`[sendPasswordReset] Error for ${email}:`, err?.message ?? err);
+    console.error(`[sendPasswordReset] Error:`, err?.message ?? err);
   }
 
   // Always return success to prevent email enumeration
@@ -539,9 +563,9 @@ export const resendVerificationEmail = functions.https.onCall(async (_data, cont
   try {
     console.log(`[resendVerificationEmail] Generating link for ${userRecord.email}`);
     const verificationLink = await admin.auth().generateEmailVerificationLink(userRecord.email);
-    console.log(`[resendVerificationEmail] Link generated, calling Resend for ${userRecord.email}`);
+    console.log(`[resendVerificationEmail] Link generated, sending…`);
     await sendVerificationEmailToAddress(userRecord.email, verificationLink);
-    console.log(`[resendVerificationEmail] ✅ Sent to ${userRecord.email} uid=${uid}`);
+    console.log(`[resendVerificationEmail] ✅ Sent uid=${uid}`);
   } catch (err: any) {
     const msg: string = err?.errorInfo?.message ?? err?.message ?? "";
     if (msg.includes("TOO_MANY_ATTEMPTS_TRY_LATER")) {
@@ -2475,6 +2499,79 @@ export const createCheckoutSession = functions
   });
 });
 
+// ─── Portal Configuration Cache ──────────────────────────────────────────────
+// We create a portal configuration with subscription updates enabled so that
+// flow_data[type]=subscription_update_confirm works for paid→paid upgrades.
+// The config is cached in Firestore to avoid recreating it on every request.
+
+const PORTAL_CONFIG_DOC = "admin/stripePortalConfigId";
+
+async function getOrCreatePortalConfig(): Promise<string> {
+  // Check Firestore cache first
+  const snap = await db.doc(PORTAL_CONFIG_DOC).get();
+  if (snap.exists && snap.data()?.configId) {
+    const cachedId = snap.data()!.configId as string;
+    // Validate the cached config still has subscription_update enabled with correct proration
+    try {
+      const existing = await getStripe().billingPortal.configurations.retrieve(cachedId);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const subUpdate = (existing.features as any).subscription_update;
+      if (subUpdate?.enabled === true && subUpdate?.proration_behavior === "none") {
+        return cachedId;
+      }
+      console.warn(`[portal] Cached config ${cachedId} has wrong settings — recreating`);
+    } catch (err) {
+      console.warn(`[portal] Could not retrieve cached config ${cachedId} — recreating`, err);
+    }
+  }
+
+  // Build the list of all paid price IDs for the subscription_update products list
+  const allPlans = await getAllPlans();
+  const products: { product: string; prices: string[] }[] = [];
+  const productPriceMap = new Map<string, string[]>();
+
+  for (const plan of allPlans.values()) {
+    if (!plan.stripePriceId) continue; // skip free plan
+    // Fetch the price to get its product ID
+    const price = await getStripe().prices.retrieve(plan.stripePriceId);
+    const productId = typeof price.product === "string" ? price.product : price.product.id;
+    if (!productPriceMap.has(productId)) productPriceMap.set(productId, []);
+    productPriceMap.get(productId)!.push(plan.stripePriceId);
+    if (plan.stripePriceIdAnnual) {
+      productPriceMap.get(productId)!.push(plan.stripePriceIdAnnual);
+    }
+  }
+
+  for (const [product, prices] of productPriceMap) {
+    products.push({ product, prices });
+  }
+
+  const config = await getStripe().billingPortal.configurations.create({
+    business_profile: {
+      headline: "Manage your subscription",
+    },
+    features: {
+      subscription_update: {
+        enabled: true,
+        default_allowed_updates: ["price"],
+        proration_behavior: "none",
+        products,
+      },
+      subscription_cancel: {
+        enabled: true,
+        mode: "at_period_end",
+      },
+      payment_method_update: { enabled: true },
+      invoice_history: { enabled: true },
+    },
+  });
+
+  // Cache the config ID in Firestore
+  await db.doc(PORTAL_CONFIG_DOC).set({ configId: config.id, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+  console.log(`[portal] Created portal config ${config.id}`);
+  return config.id;
+}
+
 export const createPortalSession = functions
   .https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
@@ -2495,18 +2592,62 @@ export const createPortalSession = functions
       return;
     }
 
-    const stripeCustomerId: string | null = userSnap.data()?.subscription?.stripeCustomerId ?? null;
+    const userData = userSnap.data()!;
+    const stripeCustomerId: string | null = userData.subscription?.stripeCustomerId ?? null;
     if (!stripeCustomerId) {
       res.status(400).json({ error: "No active subscription to manage" });
       return;
     }
 
-    const session = await getStripe().billingPortal.sessions.create({
+    const { priceId } = req.body ?? {};
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sessionParams: any = {
       customer: stripeCustomerId,
       return_url: `${FRONTEND_URL}/billing`,
-    });
+    };
 
-    res.status(200).json({ url: session.url });
+    if (priceId) {
+      // Upgrade flow: deep-link to the subscription_update_confirm screen.
+      // The user sees exactly what they'll be charged (prorated diff) and must
+      // explicitly confirm before any charge occurs.
+      const stripeSubscriptionId: string | null = userData.subscription?.stripeSubscriptionId ?? null;
+      if (!stripeSubscriptionId) {
+        res.status(400).json({ error: "No active subscription to upgrade" });
+        return;
+      }
+
+      const stripeSub = await getStripe().subscriptions.retrieve(stripeSubscriptionId);
+      const itemId = stripeSub.items.data[0]?.id;
+      if (!itemId) {
+        res.status(500).json({ error: "Could not retrieve subscription item" });
+        return;
+      }
+
+      // Ensure portal config with subscription_update enabled exists
+      const configId = await getOrCreatePortalConfig();
+      sessionParams.configuration = configId;
+      sessionParams.flow_data = {
+        type: "subscription_update_confirm",
+        after_completion: {
+          type: "redirect",
+          redirect: { return_url: `${FRONTEND_URL}/billing?upgraded=1` },
+        },
+        subscription_update_confirm: {
+          subscription: stripeSubscriptionId,
+          items: [{ id: itemId, price: priceId, quantity: 1 }],
+        },
+      };
+    }
+
+    try {
+      const session = await getStripe().billingPortal.sessions.create(sessionParams);
+      res.status(200).json({ url: session.url });
+    } catch (err: any) {
+      const stripeMsg = err?.raw?.message ?? err?.message ?? "Unknown Stripe error";
+      console.error(`[createPortalSession] Stripe error: ${stripeMsg}`, err?.raw ?? err);
+      res.status(500).json({ error: stripeMsg });
+    }
   });
 });
 
@@ -2579,14 +2720,6 @@ export const changeSubscription = functions
     }
 
     const uid = decodedToken.uid;
-    const { priceId } = req.body ?? {};
-
-    // Validate priceId
-    const priceToplan = await buildPriceIdToPlanMap();
-    if (!priceId || !priceToplan.has(priceId)) {
-      res.status(400).json({ error: "Invalid plan selected" });
-      return;
-    }
 
     const userSnap = await db.collection(USERS_COLLECTION).doc(uid).get();
     if (!userSnap.exists) {
@@ -2595,50 +2728,49 @@ export const changeSubscription = functions
     }
 
     const userData = userSnap.data()!;
-    const stripeSubscriptionId: string | null = userData.subscription?.stripeSubscriptionId ?? null;
-    if (!stripeSubscriptionId) {
-      res.status(400).json({ error: "No active subscription to change" });
+    const stripeCustomerId: string | null = userData.subscription?.stripeCustomerId ?? null;
+    if (!stripeCustomerId) {
+      res.status(400).json({ error: "No active subscription to manage" });
       return;
     }
 
-    // Guard: changeSubscription is for downgrades only (paid → lower paid).
-    // Upgrades must go through createCheckoutSession so the user confirms payment.
-    // Also block changing to the same plan — that's a no-op.
-    const targetPlan = priceToplan.get(priceId)!;
-    const currentPlan = (userData.subscription?.plan ?? "free") as SubscriptionPlan;
-    const allPlansForChange = await getAllPlans();
-    const currentSortOrder = allPlansForChange.get(currentPlan)?.sortOrder ?? 0;
-    const targetSortOrder = allPlansForChange.get(targetPlan as SubscriptionPlan)?.sortOrder ?? 0;
-    if (targetSortOrder >= currentSortOrder) {
-      res.status(400).json({ error: "Use the upgrade flow to switch to a higher or equal plan." });
-      return;
+    // Redirect to the Stripe Customer Portal's subscription update screen
+    // where the user can pick a lower plan. The portal config has all paid
+    // plans listed, so the user sees downgrade options. Stripe handles
+    // end-of-cycle scheduling natively.
+    try {
+      const configId = await getOrCreatePortalConfig();
+      const stripeSubscriptionId: string | null = userData.subscription?.stripeSubscriptionId ?? null;
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sessionParams: any = {
+        customer: stripeCustomerId,
+        return_url: `${FRONTEND_URL}/billing`,
+        configuration: configId,
+      };
+
+      // If we have a subscription, deep-link to the subscription_update flow
+      // so the user lands directly on the plan picker instead of the generic portal.
+      if (stripeSubscriptionId) {
+        sessionParams.flow_data = {
+          type: "subscription_update",
+          after_completion: {
+            type: "redirect",
+            redirect: { return_url: `${FRONTEND_URL}/billing` },
+          },
+          subscription_update: {
+            subscription: stripeSubscriptionId,
+          },
+        };
+      }
+
+      const session = await getStripe().billingPortal.sessions.create(sessionParams);
+      res.status(200).json({ url: session.url });
+    } catch (err: any) {
+      const stripeMsg = err?.raw?.message ?? err?.message ?? "Unknown Stripe error";
+      console.error(`[changeSubscription] Stripe error: ${stripeMsg}`, err?.raw ?? err);
+      res.status(500).json({ error: stripeMsg });
     }
-
-    // Retrieve current subscription to get the item id
-    const stripeSub = await getStripe().subscriptions.retrieve(stripeSubscriptionId);
-    const itemId = stripeSub.items.data[0]?.id;
-    if (!itemId) {
-      res.status(500).json({ error: "Could not retrieve subscription item" });
-      return;
-    }
-
-    // If subscription was set to cancel at period end, clear that flag first
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const updateParams: any = {
-      items: [{ id: itemId, price: priceId }],
-      // Schedule the change at the end of the current billing period.
-      // The user keeps their current credits and access until then.
-      proration_behavior: "none",
-      billing_cycle_anchor: "unchanged",
-    };
-    if (stripeSub.cancel_at_period_end) {
-      updateParams.cancel_at_period_end = false;
-    }
-
-    await getStripe().subscriptions.update(stripeSubscriptionId, updateParams);
-
-    // Webhook (customer.subscription.updated) will sync Firestore automatically
-    res.status(200).json({ success: true });
   });
 });
 

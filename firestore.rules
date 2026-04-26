@@ -19,6 +19,11 @@ service cloud.firestore {
       allow read, write: if false; // Admin SDK only
     }
 
+    // Rate limit counters — server-side only
+    match /rateLimits/{docId} {
+      allow read, write: if false; // Admin SDK only
+    }
+
     // Plan configuration — readable by all authenticated users, writable only via Admin SDK
     match /plans/{planId} {
       allow read: if request.auth != null;

@@ -17,6 +17,19 @@ const FEATURES = [
   { icon: Star, text: "Save and track your best prospects" },
 ];
 
+function getStrength(pw: string): { score: number; label: string; color: string } {
+  let score = 0;
+  if (pw.length >= 8) score++;
+  if (pw.length >= 12) score++;
+  if (/[A-Z]/.test(pw)) score++;
+  if (/[0-9]/.test(pw)) score++;
+  if (/[^A-Za-z0-9]/.test(pw)) score++;
+  if (score <= 1) return { score, label: "Weak", color: "bg-red-500" };
+  if (score <= 2) return { score, label: "Fair", color: "bg-amber-500" };
+  if (score <= 3) return { score, label: "Good", color: "bg-yellow-400" };
+  return { score, label: "Strong", color: "bg-emerald-500" };
+}
+
 export default function Login() {
   const { signIn, signUp, signInWithGoogle, sendPasswordReset, resendVerificationEmail } = useAuth();
   const [searchParams] = useSearchParams();
@@ -33,6 +46,8 @@ export default function Login() {
   const [error, setError] = useState("");
   const [warning, setWarning] = useState("");
   const [loading, setLoading] = useState(false);
+
+  const signupStrength = getStrength(password);
 
   // Sync view if URL param changes
   useEffect(() => {
@@ -98,6 +113,10 @@ export default function Login() {
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
     if (password !== confirm) {
       setError("Passwords don't match.");
       return;
@@ -110,7 +129,7 @@ export default function Login() {
       if (code === "auth/email-already-in-use") {
         setError("An account with this email already exists.");
       } else if (code === "auth/weak-password") {
-        setError("Password must be at least 6 characters.");
+        setError("Password must be at least 8 characters.");
       } else if (code === "auth/invalid-email") {
         setError("Please enter a valid email address.");
       } else {
@@ -268,11 +287,11 @@ export default function Login() {
                     <Input
                       id="signup-password"
                       type={showPassword ? "text" : "password"}
-                      placeholder="Min. 6 characters"
+                      placeholder="Min. 8 characters"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       required
-                      minLength={6}
+                      minLength={8}
                       autoComplete="new-password"
                       className="h-11 pr-10"
                     />
@@ -286,6 +305,23 @@ export default function Login() {
                       {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
                   </div>
+                  {password.length > 0 && (
+                    <div className="space-y-1 pt-1">
+                      <div className="flex gap-1">
+                        {[1, 2, 3, 4].map((i) => (
+                          <div
+                            key={i}
+                            className={`h-1 flex-1 rounded-full transition-colors duration-300 ${
+                              signupStrength.score >= i ? signupStrength.color : "bg-muted"
+                            }`}
+                          />
+                        ))}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Strength: <span className="font-medium text-foreground">{signupStrength.label}</span>
+                      </p>
+                    </div>
+                  )}
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="signup-confirm">Confirm password</Label>
@@ -296,7 +332,7 @@ export default function Login() {
                     value={confirm}
                     onChange={(e) => setConfirm(e.target.value)}
                     required
-                    minLength={6}
+                    minLength={8}
                     autoComplete="new-password"
                     className="h-11"
                   />

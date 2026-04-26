@@ -96,10 +96,10 @@ export function WelcomeModal() {
 
         {/* Footer */}
         <div className="px-6 pb-6 flex flex-col gap-2">
-          <Button className="w-full gap-2" onClick={handleClose}>
+          <Button variant="outline" className="w-full gap-2" onClick={handleClose}>
             Start Searching <ArrowRight className="h-4 w-4" />
           </Button>
-          <Button variant="ghost" size="sm" className="w-full text-muted-foreground" asChild>
+          <Button size="sm" className="w-full bg-blue-600 hover:bg-blue-700 text-white" asChild>
             <Link to="/billing" onClick={handleClose}>
               View plans &amp; pricing
             </Link>

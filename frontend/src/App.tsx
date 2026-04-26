@@ -49,6 +49,7 @@ import SearchHistory from "./pages/SearchHistory.tsx";
 import Settings from "./pages/Settings.tsx";
 import Billing from "./pages/Billing.tsx";
 import Help from "./pages/Help.tsx";
+import AuthAction from "./pages/AuthAction.tsx";
 const SystemAdmin = lazy(() => import("./pages/SystemAdmin.tsx"));
 import NotFound from "./pages/NotFound.tsx";
 
@@ -62,8 +63,8 @@ function AuthGate() {
   const needsVerification = isEmailProvider && !emailVerified;
 
   if (loading) {
-    // Don't show ProfileSetupScreen for unverified users — they'll hit the verify gate below
-    if (isNewUser && !needsVerification) {
+    // Any new user (email or Google): show the animated setup screen while provisioning
+    if (isNewUser) {
       return <ProfileSetupScreen />;
     }
     return (
@@ -74,11 +75,7 @@ function AuthGate() {
   }
 
   if (!user) {
-    return (
-      <Routes>
-        <Route path="*" element={<Login />} />
-      </Routes>
-    );
+    return <Login />;
   }
 
   // Gate: email/password users must verify before accessing the app.
@@ -115,7 +112,10 @@ const App = () => {
           <Toaster />
           <Sonner />
           <BrowserRouter>
-            <AuthGate />
+            <Routes>
+              <Route path="/auth/action" element={<AuthAction />} />
+              <Route path="*" element={<AuthGate />} />
+            </Routes>
           </BrowserRouter>
         </TooltipProvider>
       </ThemeProvider>

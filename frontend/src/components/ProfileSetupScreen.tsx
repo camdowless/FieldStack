@@ -2,10 +2,9 @@ import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const STEPS = [
-  { id: 1, label: "Creating your account",     icon: "✦",  duration: 1800 },
-  { id: 2, label: "Setting up your profile",   icon: "◈",  duration: 2200 },
-  { id: 3, label: "Configuring your workspace",icon: "⬡",  duration: 2000 },
-  { id: 4, label: "Almost ready",              icon: "◎",  duration: 99999 },
+  { id: 1, label: "Creating your account",     icon: "✦",  duration: 1620 },
+  { id: 2, label: "Configuring your workspace",icon: "⬡",  duration: 1800 },
+  { id: 3, label: "Almost ready",              icon: "◎",  duration: 99999 },
 ];
 
 function StepRow({ label, icon, state }: { label: string; icon: string; state: "pending" | "active" | "done" }) {

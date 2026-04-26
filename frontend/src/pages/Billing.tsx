@@ -70,7 +70,7 @@ const Billing = () => {
   const [managingPortal, setManagingPortal] = useState(false);
   const [billingInterval, setBillingInterval] = useState<BillingInterval>("monthly");
   const [redirecting, setRedirecting] = useState<{ show: boolean; destination: string }>({ show: false, destination: "secure checkout" });
-  const [promoCode, setPromoCode] = useState("");
+
 
   // Invoice history state
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -115,6 +115,10 @@ const Billing = () => {
       toast.success("Payment successful! Your plan has been upgraded.");
       window.history.replaceState(null, "", window.location.pathname);
     }
+    if (params.has("upgraded")) {
+      toast.success("Plan upgraded! You've been charged only the prorated difference.");
+      window.history.replaceState(null, "", window.location.pathname);
+    }
   }, []);
 
   async function loadInvoices() {
@@ -156,31 +160,46 @@ const Billing = () => {
   async function handleUpgrade(priceId: string) {
     if (upgradingPriceId) return;
     setUpgradingPriceId(priceId);
+    const hasActiveSub = !!profile?.subscription?.stripeSubscriptionId;
+    setRedirecting({ show: true, destination: hasActiveSub ? "Stripe" : "Stripe Checkout" });
     try {
       const token = await getToken();
-      if (!token) { toast.error("Please sign in to upgrade."); return; }
+      if (!token) { setRedirecting({ show: false, destination: "secure checkout" }); toast.error("Please sign in to upgrade."); return; }
 
-      // Always go through Stripe Checkout for upgrades so the user confirms payment.
-      // Pass the existing subscriptionId so the webhook can cancel it after the new one is created.
-      const body: Record<string, string> = { priceId };
-      if (promoCode.trim()) body.promoCode = promoCode.trim();
-      if (profile?.subscription?.stripeSubscriptionId) {
-        body.existingSubscriptionId = profile.subscription.stripeSubscriptionId;
-      }
-      const res = await fetch("/api/createCheckoutSession", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!res.ok) { toast.error(data.error ?? "Failed to start checkout. Please try again."); return; }
-      if (data.url) {
-        setRedirecting({ show: true, destination: "Stripe Checkout" });
-        window.location.href = data.url;
+      if (hasActiveSub) {
+        // Paid → higher paid: open the Stripe portal's upgrade-confirm screen.
+        // The portal shows the prorated amount and requires explicit confirmation.
+        const res = await fetch("/api/createPortalSession", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ priceId }),
+        });
+        const data = await res.json();
+        if (!res.ok) { setRedirecting({ show: false, destination: "secure checkout" }); toast.error(data.error ?? "Failed to open upgrade page. Please try again."); return; }
+        if (data.url) {
+          window.location.href = data.url;
+        } else {
+          setRedirecting({ show: false, destination: "secure checkout" });
+          toast.error("No redirect URL returned. Please try again.");
+        }
       } else {
-        toast.error("No checkout URL returned. Please try again.");
+        // Free → paid: standard Stripe Checkout
+        const res = await fetch("/api/createCheckoutSession", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ priceId }),
+        });
+        const data = await res.json();
+        if (!res.ok) { setRedirecting({ show: false, destination: "secure checkout" }); toast.error(data.error ?? "Failed to start checkout. Please try again."); return; }
+        if (data.url) {
+          window.location.href = data.url;
+        } else {
+          setRedirecting({ show: false, destination: "secure checkout" });
+          toast.error("No checkout URL returned. Please try again.");
+        }
       }
     } catch {
+      setRedirecting({ show: false, destination: "secure checkout" });
       toast.error("Something went wrong. Check your connection and try again.");
     } finally {
       setUpgradingPriceId(null);
@@ -190,19 +209,24 @@ const Billing = () => {
   async function handleDowngradeConfirm() {
     if (!downgradeTarget) return;
     setIsDowngrading(true);
+    setRedirecting({ show: true, destination: "Stripe subscription management" });
     try {
       const token = await getToken();
-      if (!token) { toast.error("Please sign in."); return; }
+      if (!token) { setRedirecting({ show: false, destination: "secure checkout" }); toast.error("Please sign in."); return; }
       const res = await fetch("/api/changeSubscription", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ priceId: downgradeTarget.priceId }),
       });
       const data = await res.json();
-      if (!res.ok) { toast.error(data.error ?? "Failed to change plan. Please try again."); return; }
-      toast.success(`Downgraded to ${downgradeTarget.plan.name}. Your plan will change at the end of your current billing cycle.`);
-      setDowngradeTarget(null);
+      if (!res.ok) { setRedirecting({ show: false, destination: "secure checkout" }); toast.error(data.error ?? "Failed to open subscription management. Please try again."); return; }
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        setRedirecting({ show: false, destination: "secure checkout" });
+        toast.error("No redirect URL returned. Please try again.");
+      }
     } catch {
+      setRedirecting({ show: false, destination: "secure checkout" });
       toast.error("Something went wrong. Check your connection and try again.");
     } finally {
       setIsDowngrading(false);
@@ -212,21 +236,24 @@ const Billing = () => {
   async function handleManageSubscription() {
     if (managingPortal) return;
     setManagingPortal(true);
+    setRedirecting({ show: true, destination: "Stripe billing portal" });
     try {
       const token = await getToken();
-      if (!token) { toast.error("Please sign in to manage your subscription."); return; }
+      if (!token) { setRedirecting({ show: false, destination: "secure checkout" }); toast.error("Please sign in to manage your subscription."); return; }
       const res = await fetch("/api/createPortalSession", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
-      if (!res.ok) { toast.error(data.error ?? "Failed to open billing portal. Please try again."); return; }
+      if (!res.ok) { setRedirecting({ show: false, destination: "secure checkout" }); toast.error(data.error ?? "Failed to open billing portal. Please try again."); return; }
       if (data.url) {
-        setRedirecting({ show: true, destination: "Stripe billing portal" });
         window.location.href = data.url;
+      } else {
+        setRedirecting({ show: false, destination: "secure checkout" });
+        toast.error("No portal URL returned. Please try again.");
       }
-      else toast.error("No portal URL returned. Please try again.");
     } catch {
+      setRedirecting({ show: false, destination: "secure checkout" });
       toast.error("Something went wrong. Check your connection and try again.");
     } finally {
       setManagingPortal(false);
@@ -393,17 +420,6 @@ const Billing = () => {
                   )}
                 </div>
               </div>
-              {/* Promo code input — only shown for free users upgrading */}
-              {plan === "free" && (
-                <div className="flex items-center gap-2 mb-4 max-w-xs">
-                  <Input
-                    placeholder="Promo code (optional)"
-                    value={promoCode}
-                    onChange={(e) => setPromoCode(e.target.value)}
-                    className="h-8 text-sm"
-                  />
-                </div>
-              )}
               {plansLoading ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-64 w-full" />)}
@@ -434,7 +450,7 @@ const Billing = () => {
                     function handlePlanAction() {
                       if (!activePriceId && !isFree) return;
                       if (isDowngradeToFree) {
-                        openCancelFlow();
+                        return;
                       } else if (isDowngrade && activePriceId) {
                         setDowngradeTarget({ plan: p, priceId: activePriceId });
                       } else if (activePriceId) {
@@ -443,7 +459,7 @@ const Billing = () => {
                     }
 
                     const isLoading = activePriceId ? upgradingPriceId === activePriceId : false;
-                    const isDisabled = isCurrent || isLoading || (!activePriceId && !isFree);
+                    const isDisabled = isCurrent || isDowngradeToFree || isLoading || (!activePriceId && !isFree);
 
                     return (
                       <Card key={p.id} className={isCurrent ? "border-primary ring-1 ring-primary" : ""}>
@@ -479,7 +495,7 @@ const Billing = () => {
                             onClick={handlePlanAction}
                           >
                             {isCurrent ? (cancelAtPeriodEnd ? "Cancelling" : "Current Plan")
-                              : isDowngradeToFree ? "Cancel Plan"
+                              : isDowngradeToFree ? "Free Plan"
                               : isDowngrade ? "Downgrade"
                               : "Upgrade"}
                           </Button>
@@ -491,17 +507,7 @@ const Billing = () => {
               )}
             </div>
 
-            {/* Cancel subscription link for paid users */}
-            {profile?.subscription?.stripeSubscriptionId && !cancelAtPeriodEnd && (
-              <div className="text-center pt-2">
-                <button
-                  onClick={openCancelFlow}
-                  className="text-xs text-muted-foreground hover:text-destructive underline-offset-2 hover:underline transition-colors"
-                >
-                  Cancel subscription
-                </button>
-              </div>
-            )}
+
           </div>
         </TabsContent>
 
@@ -515,8 +521,25 @@ const Billing = () => {
             </CardHeader>
             <CardContent>
               {invoicesLoading ? (
-                <div className="space-y-3">
-                  {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}
+                <div className="space-y-0">
+                  {[...Array(4)].map((_, i) => (
+                    <div key={i}>
+                      <div className="flex items-center justify-between py-3 gap-4">
+                        <div className="min-w-0 space-y-1.5">
+                          <Skeleton className="h-4 w-28" />
+                          <Skeleton className="h-3 w-40" />
+                        </div>
+                        <div className="flex items-center gap-3 shrink-0">
+                          <div className="text-right space-y-1.5">
+                            <Skeleton className="h-4 w-16 ml-auto" />
+                            <Skeleton className="h-4 w-10 ml-auto" />
+                          </div>
+                          <Skeleton className="h-4 w-4 rounded" />
+                        </div>
+                      </div>
+                      {i < 3 && <Separator />}
+                    </div>
+                  ))}
                 </div>
               ) : invoices.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No invoices yet.</p>
@@ -569,15 +592,15 @@ const Billing = () => {
           <AlertDialogHeader>
             <AlertDialogTitle>Downgrade to {downgradeTarget?.plan.name}?</AlertDialogTitle>
             <AlertDialogDescription>
-              Your plan will change immediately and you'll be prorated. You'll lose access to features not included in the {downgradeTarget?.plan.name} plan, and your credit limit will drop to {downgradeTarget?.plan.creditsPerMonth} searches/month.
+              Your plan will change at the end of your current billing cycle — no refund will be issued. Until then, you'll keep your current credits and features. After the cycle ends, your plan will switch to {downgradeTarget?.plan.name} with {downgradeTarget?.plan.creditsPerMonth} searches/month.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDowngrading}>Keep current plan</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDowngradeConfirm} disabled={isDowngrading} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+            <AlertDialogAction onClick={handleDowngradeConfirm} disabled={isDowngrading} className="bg-transparent border border-input text-foreground hover:bg-muted shadow-none">
               {isDowngrading && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
               Downgrade
             </AlertDialogAction>
+            <AlertDialogCancel disabled={isDowngrading} className="bg-blue-600 text-white hover:bg-blue-700 border-0">Keep current plan</AlertDialogCancel>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
