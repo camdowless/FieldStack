@@ -5,16 +5,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { Search, MapPin, TrendingUp, Star, CheckCircle2, Eye, EyeOff } from "lucide-react";
+import { Zap, Shield, Star, CheckCircle2, Eye, EyeOff } from "lucide-react";
 import { motion } from "framer-motion";
 
 type View = "signup" | "login" | "forgot" | "forgot-sent";
 
 const FEATURES = [
-  { icon: Search, text: "Find businesses with weak online presence" },
-  { icon: TrendingUp, text: "AI-scored leads ranked by opportunity" },
-  { icon: MapPin, text: "Search any city, zip code, or radius" },
-  { icon: Star, text: "Save and track your best prospects" },
+  { icon: Zap, text: "Get started in minutes with a free account" },
+  { icon: Shield, text: "Secure authentication and data handling" },
+  { icon: Star, text: "Flexible plans that grow with your product" },
 ];
 
 function getStrength(pw: string): { score: number; label: string; color: string } {
@@ -172,19 +171,19 @@ export default function Login() {
         {/* Logo */}
         <div className="relative z-10 flex items-center gap-2.5">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/20">
-            <Search className="h-4.5 w-4.5 text-white" />
+            <Zap className="h-4.5 w-4.5 text-white" />
           </div>
-          <span className="text-xl font-bold tracking-tight">GimmeLeads</span>
+          <span className="text-xl font-bold tracking-tight">SaaS Template</span>
         </div>
 
         {/* Main copy */}
         <div className="relative z-10 space-y-8">
           <div>
             <h1 className="text-4xl font-bold leading-tight mb-4">
-              Find your next client<br />in 60 seconds.
+              Build your SaaS<br />faster.
             </h1>
             <p className="text-white/75 text-lg leading-relaxed">
-              Search any city or zip code. We analyze thousands of businesses and surface the ones that need your services most.
+              Authentication, billing, and subscription management — all wired up and ready to go.
             </p>
           </div>
 
@@ -235,11 +234,9 @@ export default function Login() {
           {/* Mobile logo */}
           <div className="lg:hidden flex items-center justify-center gap-2 mb-8">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg gradient-bg">
-              <Search className="h-4 w-4 text-white" />
+              <Zap className="h-4 w-4 text-white" />
             </div>
-            <span className="text-xl font-bold">
-              Gimme<span className="gradient-text">Leads</span>
-            </span>
+            <span className="text-xl font-bold">SaaS Template</span>
           </div>
 
           {/* ── SIGNUP VIEW ── */}
@@ -355,9 +352,9 @@ export default function Login() {
               </p>
               <p className="text-center text-xs text-muted-foreground">
                 By signing up, you agree to our{" "}
-                <a href="https://gimmeleads.io/tos.html" target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:text-foreground">Terms</a>
+                <a href="/tos.html" target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:text-foreground">Terms</a>
                 {" "}and{" "}
-                <a href="https://gimmeleads.io/privacy.html" target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:text-foreground">Privacy Policy</a>.
+                <a href="/privacy.html" target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:text-foreground">Privacy Policy</a>.
               </p>
             </div>
           )}

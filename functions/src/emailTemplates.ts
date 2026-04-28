@@ -58,15 +58,15 @@ const BASE_STYLES = `
 const LOGO_SVG = `
   <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white"
     stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
   </svg>`;
 
 const FOOTER_HTML = `
   <div class="footer">
     <p>
-      © ${new Date().getFullYear()} GimmeLeads · <a href="https://gimmeleads.io">gimmeleads.io</a><br/>
-      <a href="https://gimmeleads.io/privacy.html">Privacy Policy</a> ·
-      <a href="https://gimmeleads.io/tos.html">Terms of Service</a>
+      © ${new Date().getFullYear()} Your Company · <a href="https://yourapp.com">yourapp.com</a><br/>
+      <a href="https://yourapp.com/privacy.html">Privacy Policy</a> ·
+      <a href="https://yourapp.com/tos.html">Terms of Service</a>
     </p>
   </div>`;
 
@@ -82,7 +82,7 @@ function layout(body: string): string {
   <div class="wrapper">
     <div class="logo-bar">
       <div class="logo-icon">${LOGO_SVG}</div>
-      <div class="logo-name">GimmeLeads</div>
+      <div class="logo-name">SaaS Template</div>
     </div>
     <div class="card">
       <div class="card-accent"></div>
@@ -108,7 +108,7 @@ export function verificationEmailHtml(link: string): string {
     <h1>Verify your email address</h1>
     <p class="subtitle">
       Thanks for signing up. Click the button below to confirm your email
-      and activate your GimmeLeads account.
+      and activate your account.
     </p>
     <div class="btn-wrap">
       <a href="${link}" class="btn">Verify my email</a>
@@ -138,7 +138,7 @@ export function passwordResetEmailHtml(link: string): string {
     </div>
     <h1>Reset your password</h1>
     <p class="subtitle">
-      We received a request to reset the password for your GimmeLeads account.
+      We received a request to reset the password for your account.
       Click the button below to choose a new one.
     </p>
     <div class="btn-wrap">
@@ -177,7 +177,7 @@ export function mfaEmailHtml(otp: string): string {
     </div>
     <h1>Your sign-in code</h1>
     <p class="subtitle">
-      Use the code below to complete your sign-in to GimmeLeads.
+      Use the code below to complete your sign-in.
     </p>
     <div style="text-align:center;margin-bottom:32px;">
       <div style="font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;

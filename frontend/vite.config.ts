@@ -12,23 +12,16 @@ export default defineConfig(({ mode }) => ({
       overlay: false,
     },
     proxy: {
-      // In dev, proxy /api → Firebase Functions emulator or deployed function
+      // In dev, proxy /api → Firebase Functions emulator or deployed functions
+      // Set VITE_API_TARGET to your deployed functions URL, e.g.:
+      //   https://us-central1-YOUR_PROJECT_ID.cloudfunctions.net
       "/api": {
-        target: process.env.VITE_API_TARGET || "https://us-central1-gimmeleads-10cdd.cloudfunctions.net",
+        target: process.env.VITE_API_TARGET || "http://127.0.0.1:5001",
         changeOrigin: true,
         rewrite: (path: string) => {
-          // Order matters: more specific paths first
-          if (path === "/api/search/cancel") return "/cancelSearchJob";
-          if (path === "/api/search") return "/dataforseoBusinessSearch";
-          if (path === "/api/businesses") return "/getBusinessesByCids";
-          if (path === "/api/recalculate-business-rank") return "/recalculateBusinessRank";
-          if (path.startsWith("/api/ghost-businesses")) return path.replace("/api/ghost-businesses", "/getGhostBusinesses");
           if (path.startsWith("/api/admin-stats")) return path.replace("/api/admin-stats", "/getAdminStats");
           if (path.startsWith("/api/admin-reports")) return path.replace("/api/admin-reports", "/getAdminReports");
           if (path === "/api/update-report-status") return "/updateReportStatus";
-          if (path === "/api/audit-dead-sites") return "/auditDeadSites";
-          if (path === "/api/reevaluate-business") return "/reevaluateBusiness";
-          if (path.startsWith("/api/photos")) return path.replace("/api/photos", "/getBusinessPhotos");
           if (path === "/api/report") return "/submitReport";
           if (path === "/api/createCheckoutSession") return "/createCheckoutSession";
           if (path === "/api/createPortalSession") return "/createPortalSession";

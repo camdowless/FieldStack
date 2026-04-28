@@ -14,9 +14,9 @@ export default function Help() {
           <CardTitle>Getting Started</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <p>Use the <strong className="text-foreground">Search</strong> page to find leads by category and location.</p>
-          <p>Your past searches are saved under <strong className="text-foreground">History</strong>.</p>
-          <p>Leads you save are accessible from the <strong className="text-foreground">Saved</strong> page.</p>
+          <p>Use the <strong className="text-foreground">Home</strong> page to get started.</p>
+          <p>Manage your subscription from the <strong className="text-foreground">Billing</strong> page.</p>
+          <p>Update your account details under <strong className="text-foreground">Settings</strong>.</p>
         </CardContent>
       </Card>
 
@@ -27,10 +27,10 @@ export default function Help() {
         <CardContent className="flex items-center gap-3 text-sm">
           <Mail className="h-4 w-4 text-primary shrink-0" />
           <a
-            href="mailto:support@gimmeleads.io"
+            href="mailto:support@yourapp.com"
             className="text-primary underline underline-offset-4 hover:opacity-80"
           >
-            support@gimmeleads.io
+            support@yourapp.com
           </a>
         </CardContent>
       </Card>

@@ -30,30 +30,13 @@ service cloud.firestore {
       allow write: if false; // server-side only via Admin SDK (seedPlans function)
     }
 
-    match /businesses/{cid} {
-      allow read: if hasUserRole();
-      allow write: if false; // server-side only via Admin SDK
-    }
-
-    match /jobs/{jobId} {
-      allow read: if hasUserRole() && resource.data.uid == request.auth.uid;
-      allow write: if false;
-
-      match /results/{resultId} {
-        allow read: if hasUserRole() && resource.data.uid == request.auth.uid;
-        allow write: if false;
-      }
-    }
-
+    // User reports — server-side only
     match /reports/{reportId} {
       allow read: if false; // admin-only via Admin SDK
       allow write: if false; // server-side only via Admin SDK
     }
 
     match /users/{uid} {
-      // isOwner: authenticated user accessing their own data.
-      // We don't require the role claim here because onUserCreate sets it
-      // asynchronously — the token may not have it yet on first sign-in.
       function isOwner() {
         return request.auth != null && request.auth.uid == uid;
       }
@@ -62,41 +45,12 @@ service cloud.firestore {
 
       // Allow users to update only the preferences field on their own profile
       allow update: if isOwner()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["preferences"])
-        && request.resource.data.preferences.keys().hasOnly(["opportunityScoreMin", "legitimacyScoreMin"])
-        && request.resource.data.preferences.opportunityScoreMin is number
-        && request.resource.data.preferences.legitimacyScoreMin is number;
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["preferences"]);
 
       allow create: if false; // server-side only via Admin SDK
 
-      // Allow users to update their own preferences
       match /preferences/{doc} {
         allow read, write: if isOwner();
-      }
-
-      match /searches/{searchId} {
-        allow read: if isOwner();
-        allow delete: if isOwner();
-        allow create: if false; // server-side only via Admin SDK
-        allow update: if isOwner()
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["leadCount"])
-          && request.resource.data.leadCount is int;
-      }
-
-      match /savedLeads/{cid} {
-        allow read: if isOwner();
-        allow delete: if isOwner();
-
-        function validLeadData() {
-          let d = request.resource.data;
-          return d.notes is string && d.notes.size() <= 2000
-            && d.status in ["saved", "reached-out", "in-conversation", "proposal-sent", "won", "not-interested"]
-            && d.businessName is string && d.businessName.size() <= 200
-            && d.cid is string && d.cid.size() <= 50;
-        }
-
-        allow create: if isOwner() && validLeadData();
-        allow update: if isOwner() && validLeadData();
       }
 
       // Dunning / payment notifications written by server, read-only for the user

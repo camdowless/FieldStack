@@ -13,14 +13,14 @@ export const useTheme = () => useContext(ThemeContext);
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [theme, setTheme] = useState<ThemeMode>(() => {
-    const stored = localStorage.getItem("gimmeleads-theme");
+    const stored = localStorage.getItem("saas-theme");
     // migrate old "gradient" value
     if (stored === "gradient") return "dark";
     return (stored as ThemeMode) || "light";
   });
 
   useEffect(() => {
-    localStorage.setItem("gimmeleads-theme", theme);
+    localStorage.setItem("saas-theme", theme);
     document.documentElement.classList.remove("theme-light", "theme-dark");
     document.documentElement.classList.add(`theme-${theme}`);
   }, [theme]);

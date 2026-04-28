@@ -24,14 +24,10 @@ export interface PlanConfig {
   stripePriceId: string | null;
   /** Stripe Price ID for annual billing — null if not offered */
   stripePriceIdAnnual: string | null;
-  /** Monthly search credit limit */
+  /** Monthly credit limit */
   creditsPerMonth: number;
-  /** Whether users on this plan can save leads */
-  canSaveLeads: boolean;
-  /** Whether users on this plan can generate scripts */
-  canGenerateScripts: boolean;
-  /** Whether users on this plan get website email/phone enrichment */
-  canEnrichContacts: boolean;
+  /** Arbitrary feature flags gating product capabilities by plan */
+  featureFlags: Record<string, boolean>;
   /** Feature bullet points for billing UI display */
   features: string[];
   /** Display sort order */

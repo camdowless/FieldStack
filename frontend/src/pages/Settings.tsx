@@ -4,12 +4,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { Slider } from "@/components/ui/slider";
-import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/hooks/use-toast";
-import { usePreferences } from "@/hooks/usePreferences";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { motion } from "framer-motion";
@@ -31,7 +29,6 @@ const fadeUp = {
 };
 
 const Settings = () => {
-  const { prefs, update } = usePreferences();
   const { user, sendPasswordReset } = useAuth();
   const { theme, toggleTheme } = useTheme();
 
@@ -65,7 +62,7 @@ const Settings = () => {
     <div className="p-6 max-w-2xl">
       <motion.div {...fadeUp} transition={{ duration: 0.3 }} className="mb-6">
         <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-        <p className="text-muted-foreground text-sm mt-1">Manage your profile, security, and search preferences.</p>
+        <p className="text-muted-foreground text-sm mt-1">Manage your profile and security settings.</p>
       </motion.div>
 
       <motion.div {...fadeUp} transition={{ duration: 0.3, delay: 0.05 }}>
@@ -114,12 +111,12 @@ const Settings = () => {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="company">Company / Agency</Label>
+                    <Label htmlFor="company">Company</Label>
                     <Input
                       id="company"
                       value={company}
                       onChange={(e) => setCompany(e.target.value)}
-                      placeholder="Acme Web Services"
+                      placeholder="Acme Inc."
                     />
                   </div>
                 </div>
@@ -190,7 +187,6 @@ const Settings = () => {
           <TabsContent value="preferences">
             <Card>
               <CardContent className="pt-6 space-y-6">
-                {/* Theme */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="p-2 rounded-lg bg-muted">
@@ -210,64 +206,6 @@ const Settings = () => {
                     onCheckedChange={toggleTheme}
                     aria-label="Toggle dark theme"
                   />
-                </div>
-
-                <Separator />
-
-                {/* Opportunity Score */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium">Opportunity Score Minimum</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        Hides businesses scoring below this threshold.
-                      </p>
-                    </div>
-                    <span className="text-sm font-mono font-semibold tabular-nums bg-muted px-2 py-0.5 rounded">
-                      {prefs.opportunityScoreMin}
-                    </span>
-                  </div>
-                  <Slider
-                    min={0}
-                    max={100}
-                    step={5}
-                    value={[prefs.opportunityScoreMin]}
-                    onValueChange={([v]) => update({ opportunityScoreMin: v })}
-                    aria-label="Opportunity score minimum"
-                  />
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>More results</span>
-                    <span>Higher quality</span>
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* Legitimacy Score */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm font-medium">Legitimacy Score Minimum</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        Filters out ghost businesses and unverified listings.
-                      </p>
-                    </div>
-                    <span className="text-sm font-mono font-semibold tabular-nums bg-muted px-2 py-0.5 rounded">
-                      {prefs.legitimacyScoreMin}
-                    </span>
-                  </div>
-                  <Slider
-                    min={0}
-                    max={100}
-                    step={5}
-                    value={[prefs.legitimacyScoreMin]}
-                    onValueChange={([v]) => update({ legitimacyScoreMin: v })}
-                    aria-label="Legitimacy score minimum"
-                  />
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>More results</span>
-                    <span>Stricter filter</span>
-                  </div>
                 </div>
               </CardContent>
             </Card>

@@ -38,7 +38,7 @@ if (!getApps().length) {
   if (credPath) {
     initializeApp({ credential: cert(JSON.parse(readFileSync(credPath, "utf8"))) });
   } else {
-    initializeApp({ projectId: process.env.GCLOUD_PROJECT ?? "gimmeleads-10cdd" });
+    initializeApp({ projectId: process.env.GCLOUD_PROJECT ?? "your-project-id" });
   }
 }
 

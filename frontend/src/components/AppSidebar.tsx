@@ -1,4 +1,4 @@
-import { Search, LayoutDashboard, Settings, LogOut, Sun, Sparkles, CreditCard, HelpCircle, History, ShieldAlert, Zap } from "lucide-react";
+import { Home, Settings, LogOut, Sun, Sparkles, CreditCard, HelpCircle, ShieldAlert, Zap } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -24,9 +24,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const navItems = [
-  { title: "Search", url: "/", icon: Search },
-  { title: "History", url: "/search-history", icon: History },
-  { title: "Saved", url: "/dashboard", icon: LayoutDashboard },
+  { title: "Home", url: "/", icon: Home },
 ];
 
 const accountItems = [
@@ -61,10 +59,10 @@ export function AppSidebar() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg gradient-bg">
-                <Search className="h-5 w-5 text-white" />
+                <Home className="h-5 w-5 text-white" />
               </div>
               <span className="text-lg font-bold tracking-tight whitespace-nowrap">
-                Gimme<span className="gradient-text">Leads</span>
+                <span className="gradient-text">SaaS</span> Template
               </span>
             </div>
             <SidebarTrigger />
@@ -174,7 +172,7 @@ export function AppSidebar() {
             {remaining === 0 && (
               <Button size="sm" className="w-full mt-2 gap-1.5 text-xs h-7" asChild>
                 <Link to="/billing">
-                  <Zap className="h-3 w-3" /> Upgrade for more searches
+                  <Zap className="h-3 w-3" /> Upgrade for more credits
                 </Link>
               </Button>
             )}

@@ -13,34 +13,6 @@
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "rewrites": [
       {
-        "source": "/api/search/cancel",
-        "function": "cancelSearchJob"
-      },
-      {
-        "source": "/api/search",
-        "function": "dataforseoBusinessSearch"
-      },
-      {
-        "source": "/api/businesses",
-        "function": "getBusinessesByCids"
-      },
-      {
-        "source": "/api/recalculate-business-rank",
-        "function": "recalculateBusinessRank"
-      },
-      {
-        "source": "/api/reevaluate-business",
-        "function": "reevaluateBusiness"
-      },
-      {
-        "source": "/api/ghost-businesses",
-        "function": "getGhostBusinesses"
-      },
-      {
-        "source": "/api/photos",
-        "function": "getBusinessPhotos"
-      },
-      {
         "source": "/api/report",
         "function": "submitReport"
       },
@@ -55,10 +27,6 @@
       {
         "source": "/api/update-report-status",
         "function": "updateReportStatus"
-      },
-      {
-        "source": "/api/audit-dead-sites",
-        "function": "auditDeadSites"
       },
       {
         "source": "/api/createCheckoutSession",
@@ -97,5 +65,12 @@
         "destination": "/index.html"
       }
     ]
+  },
+  "emulators": {
+    "auth": { "port": 9099 },
+    "firestore": { "port": 8080 },
+    "functions": { "port": 5001 },
+    "hosting": { "port": 5000 },
+    "ui": { "enabled": true, "port": 4000 }
   }
 }

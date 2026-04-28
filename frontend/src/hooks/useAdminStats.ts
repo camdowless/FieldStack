@@ -23,21 +23,7 @@ export function useAdminStats(): AdminStats {
   }, [user, authLoading]);
 
   return {
-    totalSearches: data?.totalSearches ?? 0,
-    totalResultCount: data?.totalResultCount ?? 0,
-    totalDfsCost: data?.totalDfsCost ?? 0,
-    totalBusinessesIndexed: data?.totalBusinessesIndexed ?? 0,
-    avgCostPerSearch: data?.avgCostPerSearch ?? 0,
-    avgResultsPerSearch: data?.avgResultsPerSearch ?? 0,
-    breakdown: data?.breakdown ?? {
-      totalBusinessSearch: 0,
-      totalInstantPages: 0,
-      totalLighthouse: 0,
-      totalCachedBusinesses: 0,
-      totalFreshBusinesses: 0,
-    },
-    highOpportunityCount: data?.highOpportunityCount ?? 0,
-    pctHighOpportunity: data?.pctHighOpportunity ?? 0,
+    totalUsers: data?.totalUsers ?? 0,
     lastUpdated: data?.lastUpdated ?? null,
     loading,
     error,

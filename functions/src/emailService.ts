@@ -11,7 +11,7 @@ function getResend(): Resend {
   return _resend;
 }
 
-const FROM = "GimmeLeads <noreply@gimmeleads.io>";
+const FROM = process.env.EMAIL_FROM ?? "SaaS Template <noreply@yourapp.com>";
 
 export async function sendVerificationEmail(to: string, link: string): Promise<void> {
   console.log(`[emailService] sendVerificationEmail to=${to} RESEND_API_KEY_SET=${!!process.env.RESEND_API_KEY} FROM=${FROM}`);
@@ -20,7 +20,7 @@ export async function sendVerificationEmail(to: string, link: string): Promise<v
   const result = await getResend().emails.send({
     from: FROM,
     to,
-    subject: "Verify your email – GimmeLeads",
+    subject: "Verify your email",
     html: verificationEmailHtml(link),
   });
   console.log(`[emailService] Resend response id=${result.data?.id ?? "none"} error=${result.error?.message ?? "none"}`);
@@ -37,7 +37,7 @@ export async function sendPasswordResetEmail(to: string, link: string): Promise<
   const result = await getResend().emails.send({
     from: FROM,
     to,
-    subject: "Reset your GimmeLeads password",
+    subject: "Reset your password",
     html: passwordResetEmailHtml(link),
   });
   console.log(`[emailService] Resend response id=${result.data?.id ?? "none"} error=${result.error?.message ?? "none"}`);
@@ -50,7 +50,7 @@ export async function sendMfaEmail(to: string, otp: string): Promise<void> {
   const { error } = await getResend().emails.send({
     from: FROM,
     to,
-    subject: "Your GimmeLeads sign-in code",
+    subject: "Your sign-in code",
     html: mfaEmailHtml(otp),
   });
   if (error) throw new Error(`Resend error: ${error.message}`);

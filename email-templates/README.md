@@ -1,6 +1,6 @@
-# GimmeLeads – Firebase Auth Email Templates
+# SaaS Template – Firebase Auth Email Templates
 
-Three templates matching the GimmeLeads brand (blue gradient, Inter font, clean card layout).
+Three templates matching the SaaS Template brand (blue gradient, Inter font, clean card layout).
 
 ## Files
 
@@ -12,7 +12,7 @@ Three templates matching the GimmeLeads brand (blue gradient, Inter font, clean 
 
 ## How to apply in Firebase Console
 
-1. Go to [Firebase Console](https://console.firebase.google.com) → select **gimmeleads-10cdd**
+1. Go to [Firebase Console](https://console.firebase.google.com) → select **your-project-id**
 2. Navigate to **Authentication → Templates** (left sidebar)
 3. For each template:
    - Click the pencil (edit) icon
@@ -25,9 +25,9 @@ Three templates matching the GimmeLeads brand (blue gradient, Inter font, clean 
 
 | Template | Subject |
 |----------|---------|
-| Email verification | `Verify your email – GimmeLeads` |
-| Password reset | `Reset your GimmeLeads password` |
-| MFA / sign-in code | `Your GimmeLeads sign-in code` |
+| Email verification | `Verify your email – SaaS Template` |
+| Password reset | `Reset your SaaS Template password` |
+| MFA / sign-in code | `Your SaaS Template sign-in code` |
 
 ## Template variables
 
