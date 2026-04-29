@@ -36,6 +36,73 @@ service cloud.firestore {
       allow write: if false; // server-side only via Admin SDK
     }
 
+    // ── Company membership helper ─────────────────────────────────────────────
+    // Reads users/{uid}.companyId and compares to the requested companyId.
+    // NOTE: this incurs a Firestore read per rules evaluation. All heavy data
+    // operations should go through Cloud Functions (Admin SDK) which bypass rules.
+    function isMemberOfCompany(companyId) {
+      return request.auth != null
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.companyId == companyId;
+    }
+
+    // ── Companies ────────────────────────────────────────────────────────────
+    match /companies/{companyId} {
+      allow read: if isMemberOfCompany(companyId);
+      allow create: if request.auth != null
+        && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if isMemberOfCompany(companyId);
+      allow delete: if false; // server-side only
+    }
+
+    // ── Projects ─────────────────────────────────────────────────────────────
+    match /projects/{projectId} {
+      allow read: if request.auth != null
+        && isMemberOfCompany(resource.data.companyId);
+      allow create: if request.auth != null
+        && isMemberOfCompany(request.resource.data.companyId);
+      allow update: if request.auth != null
+        && isMemberOfCompany(resource.data.companyId)
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(["name", "address", "gcName", "gcContact", "gcEmail", "status", "updatedAt"]);
+      allow delete: if false; // server-side only
+
+      // Sub-collections: readable by company members; writes go through Cloud Functions
+      match /scheduleUploads/{uploadId} {
+        allow read: if request.auth != null
+          && isMemberOfCompany(get(/databases/$(database)/documents/projects/$(projectId)).data.companyId);
+        allow write: if false;
+      }
+
+      match /tasks/{taskId} {
+        allow read: if request.auth != null
+          && isMemberOfCompany(get(/databases/$(database)/documents/projects/$(projectId)).data.companyId);
+        allow write: if false;
+      }
+
+      match /orderItems/{itemId} {
+        allow read: if request.auth != null
+          && isMemberOfCompany(get(/databases/$(database)/documents/projects/$(projectId)).data.companyId);
+        // Allow client-side status/PO updates; all other fields are server-only
+        allow update: if request.auth != null
+          && isMemberOfCompany(get(/databases/$(database)/documents/projects/$(projectId)).data.companyId)
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(["status", "poNumber", "vendorName", "notes", "orderedAt", "updatedAt"]);
+        allow create, delete: if false;
+      }
+
+      match /scheduleChanges/{changeId} {
+        allow read: if request.auth != null
+          && isMemberOfCompany(get(/databases/$(database)/documents/projects/$(projectId)).data.companyId);
+        allow write: if false;
+      }
+
+      match /feedEntries/{entryId} {
+        allow read: if request.auth != null
+          && isMemberOfCompany(get(/databases/$(database)/documents/projects/$(projectId)).data.companyId);
+        allow write: if false;
+      }
+    }
+
     match /users/{uid} {
       function isOwner() {
         return request.auth != null && request.auth.uid == uid;

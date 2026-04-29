@@ -1,7 +1,7 @@
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import cors from "cors";
-import { Timestamp } from "firebase-admin/firestore";
+import { Timestamp, FieldValue } from "firebase-admin/firestore";
 import type { UserProfile, Subscription, SubscriptionPlan } from "./types";
 import { checkUserRole, checkAdminRole } from "./authHelpers";
 import { sendPasswordResetEmail as sendPasswordResetEmailViaResend, sendVerificationEmailToAddress } from "./emailService";
@@ -95,8 +95,8 @@ async function verifyAdmin(req: functions.https.Request, functionName?: string):
 const USERS_COLLECTION = "users";
 
 type FirestoreUserProfile = Omit<UserProfile, "createdAt" | "updatedAt"> & {
-  createdAt: admin.firestore.FieldValue;
-  updatedAt: admin.firestore.FieldValue;
+  createdAt: FieldValue;
+  updatedAt: FieldValue;
 };
 
 
@@ -129,7 +129,7 @@ async function buildUserProfile(fields: {
   displayName?: string | null;
   photoURL?: string | null;
 }): Promise<FirestoreUserProfile> {
-  const now = admin.firestore.FieldValue.serverTimestamp();
+  const now = FieldValue.serverTimestamp();
   return {
     uid: fields.uid,
     email: fields.email ?? null,
@@ -388,7 +388,7 @@ export const submitReport = functions.https.onRequest((req, res) => {
       reason,
       details: details ?? null,
       uid: decodedToken.uid,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(),
       status: "open",
     });
 
@@ -593,7 +593,7 @@ export const getAdminStats = functions.https.onRequest((req, res) => {
 
       res.status(200).json({
         totalUsers: userCount.data().count,
-        lastUpdated: admin.firestore.FieldValue.serverTimestamp(),
+        lastUpdated: FieldValue.serverTimestamp(),
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Internal server error";
@@ -763,7 +763,7 @@ async function getOrCreatePortalConfig(): Promise<string> {
   });
 
   // Cache the config ID in Firestore
-  await db.doc(PORTAL_CONFIG_DOC).set({ configId: config.id, createdAt: admin.firestore.FieldValue.serverTimestamp() });
+  await db.doc(PORTAL_CONFIG_DOC).set({ configId: config.id, createdAt: FieldValue.serverTimestamp() });
   console.log(`[portal] Created portal config ${config.id}`);
   return config.id;
 }
@@ -1034,7 +1034,7 @@ export const cancelSubscription = functions
     // Optimistically update Firestore so UI reflects immediately; store reason for analytics
     const update: Record<string, unknown> = {
       "subscription.cancelAtPeriodEnd": true,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
     };
     if (sanitizedReason) {
       update["subscription.cancelReason"] = sanitizedReason;
@@ -1086,7 +1086,7 @@ export const reactivateSubscription = functions
 
     await db.collection(USERS_COLLECTION).doc(uid).update({
       "subscription.cancelAtPeriodEnd": false,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
     });
 
     res.status(200).json({ success: true });
@@ -1238,7 +1238,7 @@ async function updateSubscription(
     "subscription.cancelAtPeriodEnd": stripeSubscription.cancel_at_period_end,
     "subscription.currentPeriodStart": Timestamp.fromMillis(stripeSubscription.current_period_start * 1000),
     "subscription.currentPeriodEnd": Timestamp.fromMillis(stripeSubscription.current_period_end * 1000),
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
   });
 }
 
@@ -1258,7 +1258,7 @@ async function downgradeToFree(uid: string): Promise<void> {
     "subscription.cancelAtPeriodEnd": false,
     "subscription.currentPeriodStart": null,
     "subscription.currentPeriodEnd": null,
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
   });
 }
 
@@ -1271,7 +1271,7 @@ async function resetCredits(uid: string, invoice: { period_start: number; period
     "subscription.creditsTotal": creditsTotal,
     "subscription.currentPeriodStart": Timestamp.fromMillis(invoice.period_start * 1000),
     "subscription.currentPeriodEnd": Timestamp.fromMillis(invoice.period_end * 1000),
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
   });
 }
 
@@ -1303,7 +1303,7 @@ export const stripeWebhook = functions.https.onRequest(async (req, res) => {
       if (snap.exists) return true;
       tx.set(eventDocRef, {
         type: event.type,
-        processedAt: admin.firestore.FieldValue.serverTimestamp(),
+        processedAt: FieldValue.serverTimestamp(),
         // TTL field — configure a Firestore TTL policy on this field to auto-delete after 24h
         expiresAt: Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000),
       });
@@ -1407,7 +1407,7 @@ export const stripeWebhook = functions.https.onRequest(async (req, res) => {
         if (!uid) { throw new Error(`[stripeWebhook] invoice.payment_failed: uid not found for customer=${invoice.customer}`); }
         await db.collection(USERS_COLLECTION).doc(uid).update({
           "subscription.status": "past_due",
-          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
         });
         // Write a dunning notification so the UI can surface a banner
         await db.collection(USERS_COLLECTION).doc(uid).collection("notifications").add({
@@ -1417,7 +1417,7 @@ export const stripeWebhook = functions.https.onRequest(async (req, res) => {
           nextPaymentAttempt: invoice.next_payment_attempt ?? null,
           hostedInvoiceUrl: invoice.hosted_invoice_url ?? null,
           read: false,
-          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          createdAt: FieldValue.serverTimestamp(),
         });
         console.log(`[stripeWebhook] invoice.payment_failed uid=${uid} → past_due + notification written`);
         break;
@@ -1450,7 +1450,7 @@ export const stripeWebhook = functions.https.onRequest(async (req, res) => {
             const newCreditsUsed = Math.max(0, creditsUsed - creditsToRestore);
             tx.update(userRef, {
               "subscription.creditsUsed": newCreditsUsed,
-              updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+              updatedAt: FieldValue.serverTimestamp(),
             });
             console.log(`[stripeWebhook] charge.refunded (partial) uid=${uid} refundFraction=${refundFraction.toFixed(2)} creditsRestored=${creditsToRestore}`);
           });
@@ -1470,6 +1470,12 @@ export const stripeWebhook = functions.https.onRequest(async (req, res) => {
   res.status(200).json({ received: true });
 });
 
+
+// ─── FieldStack domain functions ─────────────────────────────────────────────
+export * from "./fieldstack/projectFunctions";
+export * from "./fieldstack/alertFunctions";
+export * from "./fieldstack/orderFunctions";
+export * from "./fieldstack/scheduleFunctions";
 
 // ─── Admin: Migrate Legacy Subscription Plans ─────────────────────────────────
 
@@ -1496,7 +1502,7 @@ export const seedPlans = functions.https.onRequest((req, res) => {
         const data = seedData[i];
         const ref = db.collection("plans").doc(planId);
         // merge: true preserves any fields not in seed (e.g. manually set stripePriceId)
-        batch.set(ref, { ...data, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+        batch.set(ref, { ...data, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
       }
 
       await batch.commit();

@@ -1,0 +1,382 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Company {
+  id            String        @id @default(cuid())
+  name          String
+  slug          String        @unique
+  plan          CompanyPlan   @default(FREE)
+  stripeCustomerId  String?   @unique
+  stripeSubId       String?
+  trialEndsAt       DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  users         User[]
+  projects      Project[]
+  teamMembers   TeamMember[]
+  leadTimeSettings LeadTimeSetting[]
+  gmailConnection GmailConnection?
+  usageLogs     UsageLog[]
+}
+
+model User {
+  id            String    @id @default(cuid())
+  companyId     String
+  email         String    @unique
+  name          String
+  passwordHash  String?
+  role          UserRole  @default(MEMBER)
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+
+  company       Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+}
+
+model Project {
+  id            String          @id @default(cuid())
+  companyId     String
+  name          String
+  address       String
+  gcName        String
+  gcContact     String?
+  gcEmail       String?
+  gcPlatform          GcPlatform?
+  gcProjectUrl        String?
+  gcProjectId         String?
+  procoreAccessToken  String?
+  procoreRefreshToken String?
+  procoreTokenExpiry  DateTime?
+  procoreLastSync     DateTime?
+  autoSyncEnabled     Boolean     @default(false)
+  status              ProjectStatus   @default(ACTIVE)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  company         Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  scheduleUploads ScheduleUpload[]
+  tasks           Task[]
+  orderItems      OrderItem[]
+  scheduleChanges ScheduleChange[]
+  leadTimeSettings LeadTimeSetting[]
+  taskSteps       TaskStep[]
+  feedEntries     FeedEntry[]
+
+  @@index([companyId])
+}
+
+model ScheduleUpload {
+  id          String    @id @default(cuid())
+  projectId   String
+  uploadedAt  DateTime  @default(now())
+  fileName    String
+  rawText     String    @db.Text
+  version     Int
+  parsedAt    DateTime?
+
+  project     Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks       Task[]
+}
+
+model Task {
+  id                String       @id @default(cuid())
+  projectId         String
+  scheduleUploadId  String
+  taskIdOriginal    String?
+  taskName          String
+  building          String?
+  floor             String?
+  gcInstallDate     DateTime
+  gcInstallDateEnd  DateTime?
+  assignedResource  String?
+  category          TaskCategory @default(OTHER)
+  isOurTask         Boolean      @default(false)
+  createdAt         DateTime     @default(now())
+
+  project           Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  scheduleUpload    ScheduleUpload @relation(fields: [scheduleUploadId], references: [id], onDelete: Cascade)
+  orderItems        OrderItem[]
+  scheduleChanges   ScheduleChange[]
+  taskSteps         TaskStep[]
+}
+
+model OrderItem {
+  id              String      @id @default(cuid())
+  taskId          String
+  projectId       String
+  itemType        ItemType
+  leadTimeWeeks   Int
+  orderByDate     DateTime
+  orderedAt       DateTime?
+  poNumber        String?
+  vendorName      String?
+  notes           String?
+  status          OrderStatus @default(NOT_ORDERED)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  task            Task        @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  project         Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model ScheduleChange {
+  id                  String    @id @default(cuid())
+  projectId           String
+  taskId              String
+  detectedAt          DateTime  @default(now())
+  previousDate        DateTime
+  newDate             DateTime
+  shiftDays           Int
+  notificationsSent   Boolean   @default(false)
+
+  project             Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  task                Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+
+model TeamMember {
+  id                      String    @id @default(cuid())
+  companyId               String
+  name                    String
+  email                   String    @unique
+  role                    TeamRole  @default(SUPERVISOR)
+  notifyOnCritical        Boolean   @default(true)
+  notifyOnOrderReminder   Boolean   @default(true)
+  notifyOnScheduleChange  Boolean   @default(true)
+  createdAt               DateTime  @default(now())
+
+  company                 Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  assignedSteps           TaskStep[]
+
+  @@index([companyId])
+}
+
+model TaskStep {
+  id            String      @id @default(cuid())
+  projectId     String
+  taskId        String?
+  building      String?
+  floor         String?
+  stepType      StepType
+  assignedToId  String?
+  dueDate       DateTime?
+  completedAt   DateTime?
+  status        StepStatus  @default(PENDING)
+  notes         String?
+  track         StepTrack   @default(SCHEDULE)
+  dependsOnId   String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  project       Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  task          Task?       @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  assignedTo    TeamMember? @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
+  dependsOn     TaskStep?   @relation("StepDependency", fields: [dependsOnId], references: [id])
+  blockedSteps  TaskStep[]  @relation("StepDependency")
+  escalations   EscalationLog[]
+
+  @@index([projectId, stepType])
+  @@index([assignedToId, status])
+  @@index([dueDate])
+}
+
+model EscalationLog {
+  id          String          @id @default(cuid())
+  taskStepId  String
+  level       EscalationLevel
+  sentAt      DateTime        @default(now())
+  sentTo      String
+
+  taskStep    TaskStep        @relation(fields: [taskStepId], references: [id], onDelete: Cascade)
+
+  @@index([taskStepId, level])
+}
+
+model LeadTimeSetting {
+  id            String    @id @default(cuid())
+  companyId     String?
+  itemType      ItemType
+  leadTimeWeeks Int
+  isDefault     Boolean   @default(true)
+  projectId     String?
+  label         String?
+
+  company     Company?  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  project     Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([itemType, projectId])
+  @@index([companyId])
+}
+
+enum ProjectStatus {
+  ACTIVE
+  ON_HOLD
+  COMPLETE
+}
+
+enum GcPlatform {
+  PROCORE
+  BUILDERTREND
+  OTHER
+}
+
+enum TaskCategory {
+  CABINET_DELIVERY
+  CABINET_INSTALL
+  COUNTERTOP_SET
+  OTHER
+}
+
+enum ItemType {
+  CABINETS_STANDARD
+  CABINETS_CUSTOM
+  COUNTERTOPS
+  HARDWARE
+}
+
+enum OrderStatus {
+  NOT_ORDERED
+  ORDERED
+  IN_TRANSIT
+  DELIVERED
+  CANCELLED
+}
+
+enum TeamRole {
+  OWNER
+  SUPERVISOR
+  PURCHASING
+  INSTALLER
+  DRAFTING
+}
+
+enum StepType {
+  SHOP_DRAWINGS
+  SUBMISSIONS
+  ORDER_MATERIALS
+  CONFIRM_DELIVERY
+  INSTALL
+  PUNCH_LIST
+}
+
+enum StepStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETE
+  BLOCKED
+}
+
+enum StepTrack {
+  CONTRACT
+  SCHEDULE
+}
+
+enum EscalationLevel {
+  REMINDER
+  OVERDUE
+  CRITICAL
+}
+
+enum CompanyPlan {
+  FREE
+  PRO
+  ENTERPRISE
+}
+
+enum UserRole {
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+model ChatMessage {
+  id          String      @id @default(cuid())
+  companyId   String
+  userId      String
+  role        ChatRole
+  content     String      @db.Text
+  toolCalls   String?     @db.Text  // JSON string of tool calls/results
+  createdAt   DateTime    @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([userId, createdAt])
+}
+
+enum ChatRole {
+  USER
+  ASSISTANT
+}
+
+model GmailConnection {
+  id            String    @id @default(cuid())
+  companyId     String    @unique
+  email         String
+  accessToken   String    @db.Text
+  refreshToken  String    @db.Text
+  tokenExpiry   DateTime
+  lastSyncAt    DateTime?
+  createdAt     DateTime  @default(now())
+
+  company       Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+}
+
+model FeedEntry {
+  id            String      @id @default(cuid())
+  companyId     String
+  projectId     String?
+  type          FeedType
+  title         String
+  summary       String      @db.Text
+  sender        String?
+  senderEmail   String?
+  emailId       String?     @unique
+  emailDate     DateTime?
+  actionNeeded  Boolean     @default(false)
+  actionType    String?
+  confidence    Float?
+  rawSnippet    String?     @db.Text
+  processedAt   DateTime    @default(now())
+
+  project       Project?    @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, processedAt])
+  @@index([projectId, processedAt])
+  @@index([emailId])
+}
+
+enum FeedType {
+  SCHEDULE_UPDATE
+  DELIVERY_CONFIRMATION
+  CHANGE_ORDER
+  RFI
+  MEETING_NOTICE
+  GENERAL_COMMUNICATION
+  PAYMENT
+  ISSUE_REPORT
+}
+
+model UsageLog {
+  id                String   @id @default(cuid())
+  companyId         String
+  action            String
+  model             String
+  inputTokens       Int      @default(0)
+  cacheWriteTokens  Int      @default(0)
+  cacheReadTokens   Int      @default(0)
+  outputTokens      Int      @default(0)
+  costUsd           Float
+  createdAt         DateTime @default(now())
+
+  company           Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, createdAt])
+  @@index([createdAt])
+}

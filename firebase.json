@@ -60,6 +60,16 @@
         "source": "/api/getInvoices",
         "function": "getInvoices"
       },
+      { "source": "/api/fieldstack/provisionCompany",  "function": "provisionCompany" },
+      { "source": "/api/fieldstack/createProject",     "function": "createProject" },
+      { "source": "/api/fieldstack/listProjects",      "function": "listProjects" },
+      { "source": "/api/fieldstack/getProject",        "function": "getProject" },
+      { "source": "/api/fieldstack/updateProject",     "function": "updateProject" },
+      { "source": "/api/fieldstack/deleteProject",     "function": "deleteProject" },
+      { "source": "/api/fieldstack/getProjectAlerts",  "function": "getProjectAlerts" },
+      { "source": "/api/fieldstack/evaluateAlerts",    "function": "evaluateAlerts" },
+      { "source": "/api/fieldstack/updateOrderItem",   "function": "updateOrderItem" },
+      { "source": "/api/fieldstack/uploadSchedule",    "function": "uploadSchedule" },
       {
         "source": "**",
         "destination": "/index.html"

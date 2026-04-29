@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/alerts/evaluate",
+      "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/alerts/escalate",
+      "schedule": "15 12 * * *"
+    },
+    {
+      "path": "/api/cron/procore-sync",
+      "schedule": "0 11 * * *"
+    }
+  ]
+}

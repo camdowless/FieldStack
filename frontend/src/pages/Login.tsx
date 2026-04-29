@@ -173,17 +173,17 @@ export default function Login() {
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/20">
             <Zap className="h-4.5 w-4.5 text-white" />
           </div>
-          <span className="text-xl font-bold tracking-tight">SaaS Template</span>
+          <span className="text-xl font-bold tracking-tight">FieldStack</span>
         </div>
 
         {/* Main copy */}
         <div className="relative z-10 space-y-8">
           <div>
             <h1 className="text-4xl font-bold leading-tight mb-4">
-              Build your SaaS<br />faster.
+              Construction schedules,<br />under control.
             </h1>
             <p className="text-white/75 text-lg leading-relaxed">
-              Authentication, billing, and subscription management — all wired up and ready to go.
+              Parse schedules, track order timelines, and get alerts before installs slip.
             </p>
           </div>
 
@@ -236,7 +236,7 @@ export default function Login() {
             <div className="flex h-9 w-9 items-center justify-center rounded-lg gradient-bg">
               <Zap className="h-4 w-4 text-white" />
             </div>
-            <span className="text-xl font-bold">SaaS Template</span>
+            <span className="text-xl font-bold">FieldStack</span>
           </div>
 
           {/* ── SIGNUP VIEW ── */}

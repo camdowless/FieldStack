@@ -31,6 +31,7 @@ export interface UserProfile {
   displayName: string | null;
   photoURL: string | null;
   role: "user" | "admin";
+  companyId?: string | null;
   subscription: Subscription;
   preferences?: Record<string, unknown>;
   createdAt: Timestamp;

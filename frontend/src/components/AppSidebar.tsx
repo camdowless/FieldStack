@@ -1,4 +1,4 @@
-import { Home, Settings, LogOut, Sun, Sparkles, CreditCard, HelpCircle, ShieldAlert, Zap } from "lucide-react";
+import { Home, Settings, LogOut, Sun, Sparkles, CreditCard, HelpCircle, ShieldAlert, Zap, FolderOpen } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -24,7 +24,8 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const navItems = [
-  { title: "Home", url: "/", icon: Home },
+  { title: "Projects", url: "/projects", icon: FolderOpen },
+  { title: "Home", url: "/home", icon: Home },
 ];
 
 const accountItems = [
@@ -62,7 +63,7 @@ export function AppSidebar() {
                 <Home className="h-5 w-5 text-white" />
               </div>
               <span className="text-lg font-bold tracking-tight whitespace-nowrap">
-                <span className="gradient-text">SaaS</span> Template
+                <span className="gradient-text">Field</span>Stack
               </span>
             </div>
             <SidebarTrigger />

@@ -6,7 +6,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCredits } from "@/hooks/useCredits";
 
-const WELCOME_KEY = (uid: string) => `saas-welcomed-${uid}`;
+const WELCOME_KEY = (uid: string) => `fieldstack-welcomed-${uid}`;
 
 export function WelcomeModal() {
   const { user, profile, loading } = useAuth();
