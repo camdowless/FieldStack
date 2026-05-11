@@ -10,7 +10,7 @@ export function useCredits() {
 
   const periodEnd = sub?.currentPeriodEnd as { seconds: number } | null | undefined;
   const refreshDate = periodEnd?.seconds
-    ? new Date(periodEnd.seconds * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    ? new Date(periodEnd.seconds * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
     : null;
 
   return {

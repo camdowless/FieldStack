@@ -2,13 +2,21 @@
 /**
  * scripts/seedPlans.mjs
  *
- * Seeds / updates the Firestore `plans` collection with Stripe Price IDs.
- * Edit the PLANS array below with your actual Stripe Price IDs, then run:
+ * Seeds / updates the Firestore `plans` collection with plan configs and Stripe Price IDs.
  *
- *   cd functions && node scripts/seedPlans.mjs
+ * Usage:
+ *   cd functions && node scripts/seedPlans.mjs                              # targets default project
+ *   cd functions && GCLOUD_PROJECT=your-project-id node scripts/seedPlans.mjs
  *
- * Safe to re-run — uses set() with merge, so only the fields listed here
+ * Or use the npm scripts:
+ *   bun run seed:plans          # dev
+ *   bun run seed:plans:prod     # production
+ *
+ * Safe to re-run - uses set() with merge, so only the fields listed here
  * are written. Existing fields not mentioned are preserved.
+ *
+ * SETUP: Replace all "price_REPLACE_ME" values with your actual Stripe Price IDs.
+ * Create prices in your Stripe dashboard first, then paste the IDs here.
  */
 
 import { initializeApp, cert, getApps } from "firebase-admin/app";
@@ -33,18 +41,26 @@ if (existsSync(envPath)) {
   }
 }
 
+const projectId = process.env.GCLOUD_PROJECT ?? "YOUR_PROJECT_ID";
+
 if (!getApps().length) {
   const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
   if (credPath) {
-    initializeApp({ credential: cert(JSON.parse(readFileSync(credPath, "utf8"))) });
+    const credFile = JSON.parse(readFileSync(credPath, "utf8"));
+    if (credFile.type === "service_account") {
+      initializeApp({ credential: cert(credFile), projectId });
+    } else {
+      initializeApp({ projectId });
+    }
   } else {
-    initializeApp({ projectId: process.env.GCLOUD_PROJECT ?? "your-project-id" });
+    initializeApp({ projectId });
   }
 }
 
 const db = getFirestore();
 
-// ─── Edit these with your Stripe Price IDs ────────────────────────────────────
+// ─── Edit these plans to match your product ───────────────────────────────────
+// Plan IDs must match the SubscriptionPlan type in functions/src/types.ts
 
 const PLANS = [
   {
@@ -54,26 +70,33 @@ const PLANS = [
     annualPriceUsdCents: null,
     stripePriceId: null,
     stripePriceIdAnnual: null,
-    creditsPerMonth: 3,
+    creditsPerMonth: 5,
     canSaveLeads: false,
     canGenerateScripts: false,
     canEnrichContacts: false,
-    features: ["3 searches total", "Basic lead analysis"],
+    features: [
+      "5 credits / month",
+      "Basic features",
+    ],
     sortOrder: 0,
     active: true,
   },
   {
-    id: "soloPro",
-    name: "SoloPro",
+    id: "pro",
+    name: "Pro",
     priceUsdCents: 1900,
     annualPriceUsdCents: 15200,           // $152/yr (~$12.67/mo, save 33%)
-    stripePriceId:"price_1TPRMtCJGegnNrTU7jFf8MYs",    // ← monthly Price ID from Stripe
-    stripePriceIdAnnual: "price_1TPRXBCJGegnNrTUrogVAbr8", // ← annual Price ID from Stripe
-    creditsPerMonth: 12,
+    stripePriceId: process.env.STRIPE_PRICE_PRO ?? "price_REPLACE_ME",
+    stripePriceIdAnnual: process.env.STRIPE_PRICE_PRO_ANNUAL ?? "price_REPLACE_ME",
+    creditsPerMonth: 50,
     canSaveLeads: true,
     canGenerateScripts: false,
     canEnrichContacts: false,
-    features: ["12 search credits / month", "Up to 180 leads per month", "Full lead analysis", "Save leads"],
+    features: [
+      "50 credits / month",
+      "All features",
+      "Priority support",
+    ],
     sortOrder: 1,
     active: true,
   },
@@ -82,28 +105,38 @@ const PLANS = [
     name: "Agency",
     priceUsdCents: 4900,
     annualPriceUsdCents: 39200,           // $392/yr (~$32.67/mo, save 33%)
-    stripePriceId: "price_1TPRNYCJGegnNrTUE2C21NOR",    // ← monthly Price ID from Stripe
-    stripePriceIdAnnual: "price_1TPRXqCJGegnNrTUIwaQ9gZN", // ← annual Price ID from Stripe
-    creditsPerMonth: 40,
+    stripePriceId: process.env.STRIPE_PRICE_AGENCY ?? "price_REPLACE_ME",
+    stripePriceIdAnnual: process.env.STRIPE_PRICE_AGENCY_ANNUAL ?? "price_REPLACE_ME",
+    creditsPerMonth: 200,
     canSaveLeads: true,
     canGenerateScripts: true,
     canEnrichContacts: true,
-    features: ["40 search credits / month", "Up to 600 leads per month", "Full lead analysis", "Save leads", "AI script generation"],
+    features: [
+      "200 credits / month",
+      "All features",
+      "Team access",
+      "Priority support",
+    ],
     sortOrder: 2,
     active: true,
   },
   {
-    id: "pro",
-    name: "Pro",
+    id: "enterprise",
+    name: "Enterprise",
     priceUsdCents: 9900,
     annualPriceUsdCents: 79200,           // $792/yr (~$66/mo, save 33%)
-    stripePriceId: "price_1TPRO6CJGegnNrTUEi6lruSV",    // ← monthly Price ID from Stripe
-    stripePriceIdAnnual: "price_1TPRYOCJGegnNrTUz3wIRBJs", // ← annual Price ID from Stripe
-    creditsPerMonth: 100,
+    stripePriceId: process.env.STRIPE_PRICE_ENTERPRISE ?? "price_REPLACE_ME",
+    stripePriceIdAnnual: process.env.STRIPE_PRICE_ENTERPRISE_ANNUAL ?? "price_REPLACE_ME",
+    creditsPerMonth: 1000,
     canSaveLeads: true,
     canGenerateScripts: true,
     canEnrichContacts: true,
-    features: ["100 search credits / month", "Up to 1,500 leads per month", "Full lead analysis", "Save leads", "AI script generation", "Priority support"],
+    features: [
+      "1,000 credits / month",
+      "All features",
+      "Unlimited team access",
+      "Dedicated support",
+    ],
     sortOrder: 3,
     active: true,
   },
@@ -112,29 +145,30 @@ const PLANS = [
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function seed() {
-  // Warn if any price IDs are still placeholders
+  console.log(`Target project: ${projectId}\n`);
+
   const unset = PLANS.filter(
     (p) => p.stripePriceId === "price_REPLACE_ME" || p.stripePriceIdAnnual === "price_REPLACE_ME"
   );
   if (unset.length > 0) {
-    console.warn(`⚠️  The following plans still have placeholder Price IDs:`);
-    for (const p of unset) console.warn(`   - ${p.id}`);
-    console.warn(`   Edit scripts/seedPlans.mjs and replace "price_REPLACE_ME" before running.\n`);
+    console.warn(`Warning: The following plans still have placeholder Price IDs:`);
+    for (const p of unset) console.warn(`  - ${p.id}`);
+    console.warn(`  Edit scripts/seedPlans.mjs and replace "price_REPLACE_ME" before deploying.\n`);
   }
 
-  console.log(`Seeding ${PLANS.length} plans…\n`);
+  console.log(`Seeding ${PLANS.length} plans...\n`);
 
   for (const plan of PLANS) {
     const { id, ...data } = plan;
     const ref = db.collection("plans").doc(id);
     await ref.set(data, { merge: true });
-    console.log(`  ✅  plans/${id} — ${data.name} (${data.priceUsdCents === 0 ? "free" : `$${data.priceUsdCents / 100}/mo`})`);
+    console.log(`  plans/${id} - ${data.name} (${data.priceUsdCents === 0 ? "free" : `$${data.priceUsdCents / 100}/mo`})`);
   }
 
-  console.log(`\n✅  Done. ${PLANS.length} plans written to Firestore.`);
+  console.log(`\nDone. ${PLANS.length} plans written to Firestore (project: ${projectId}).`);
 }
 
 seed().catch((err) => {
-  console.error("❌  Seed failed:", err.message);
+  console.error("Seed failed:", err.message);
   process.exit(1);
 });

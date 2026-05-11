@@ -1,90 +1,25 @@
+/**
+ * FieldStack API client — all calls to Cloud Functions.
+ * Mirrors the old Next.js API routes, now as Firebase Cloud Function calls.
+ */
+
 import { getAuthToken, ApiError } from "@/lib/api";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Base helper ──────────────────────────────────────────────────────────────
 
-export type ProjectStatus = "ACTIVE" | "ON_HOLD" | "COMPLETE";
-export type ItemType = "CABINETS_STANDARD" | "CABINETS_CUSTOM" | "COUNTERTOPS" | "HARDWARE";
-export type OrderStatus = "NOT_ORDERED" | "ORDERED" | "IN_TRANSIT" | "DELIVERED" | "CANCELLED";
-export type AlertLevel = "CRITICAL" | "WARNING" | "INFO" | "ON_TRACK" | "VERIFY";
-export type UploadStatus = "PENDING" | "PARSING" | "DONE" | "FAILED";
-
-export interface ProjectSummary {
-  id: string;
-  companyId: string;
-  name: string;
-  address: string;
-  gcName: string;
-  gcContact: string | null;
-  gcEmail: string | null;
-  status: ProjectStatus;
-  createdAt: number;
-  updatedAt: number;
-  alertCounts: { critical: number; warning: number; info: number };
-  latestUpload: { version: number; uploadedAt: number; status: UploadStatus } | null;
-}
-
-export interface ProjectDetail extends ProjectSummary {
-  // Full project returned by getProject — same shape as summary for now
-}
-
-export interface ComputedAlert {
-  orderItemId: string;
-  taskId: string;
-  level: AlertLevel;
-  title: string;
-  detail: string;
-  projectId: string;
-  itemType: ItemType;
-  orderByDate: number;
-  gcInstallDate: number;
-  orderStatus: OrderStatus;
-  building: string | null;
-  floor: string | null;
-  daysUntilOrderBy: number;
-  taskName: string;
-}
-
-export interface CreateProjectInput {
-  name: string;
-  address: string;
-  gcName: string;
-  gcContact?: string;
-  gcEmail?: string;
-}
-
-export interface UpdateOrderItemInput {
-  status?: OrderStatus;
-  poNumber?: string;
-  vendorName?: string;
-  notes?: string;
-  orderedAt?: number;
-}
-
-// ─── Helper ───────────────────────────────────────────────────────────────────
-
-// In dev, call the Functions emulator directly (bypasses Vite proxy path issues).
-// In production, use relative paths resolved via Firebase Hosting rewrites.
-const EMULATOR_BASE = import.meta.env.DEV
-  ? `http://127.0.0.1:5001/${import.meta.env.VITE_FIREBASE_PROJECT_ID}/us-central1`
-  : null;
-
-function buildUrl(path: string): string {
-  if (!EMULATOR_BASE) return path;
-  // path is like "/api/fieldstack/provisionCompany" — extract the function name
-  const fnName = path.split("/").pop()!;
-  return `${EMULATOR_BASE}/${fnName}`;
-}
-
-async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+async function apiFetch<T>(
+  path: string,
+  options: RequestInit = {}
+): Promise<T> {
   const token = await getAuthToken();
   if (!token) throw new ApiError("You must be signed in.", 401, false);
 
-  const res = await fetch(buildUrl(path), {
+  const res = await fetch(path, {
     ...options,
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
-      ...(options?.headers ?? {}),
+      ...(options.headers ?? {}),
     },
   });
 
@@ -97,97 +32,225 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
-// ─── Company ──────────────────────────────────────────────────────────────────
-
-export async function provisionCompany(companyName: string): Promise<{ companyId: string }> {
-  return apiFetch("/api/fieldstack/provisionCompany", {
-    method: "POST",
-    body: JSON.stringify({ companyName }),
-  });
-}
-
 // ─── Projects ─────────────────────────────────────────────────────────────────
 
-export async function listProjects(): Promise<ProjectSummary[]> {
-  const data = await apiFetch<{ projects: ProjectSummary[] }>("/api/fieldstack/listProjects");
-  return data.projects;
+export async function apiCreateProject(data: {
+  name: string;
+  address: string;
+  gcName: string;
+  gcContact?: string;
+  gcEmail?: string;
+  gcPlatform?: string;
+}): Promise<{ id: string }> {
+  return apiFetch("/api/projects", { method: "POST", body: JSON.stringify(data) });
 }
 
-export async function createProject(input: CreateProjectInput): Promise<{ id: string }> {
-  return apiFetch("/api/fieldstack/createProject", {
-    method: "POST",
-    body: JSON.stringify(input),
-  });
-}
-
-export async function getProject(projectId: string): Promise<ProjectDetail> {
-  const data = await apiFetch<{ project: ProjectDetail }>(
-    `/api/fieldstack/getProject?projectId=${encodeURIComponent(projectId)}`
-  );
-  return data.project;
-}
-
-export async function updateProject(
-  projectId: string,
-  data: Partial<CreateProjectInput & { status: ProjectStatus }>
+export async function apiUpdateProject(
+  id: string,
+  data: Partial<{ name: string; address: string; gcName: string; gcContact: string; gcEmail: string; status: string; gcPlatform: string; autoSyncEnabled: boolean }>
 ): Promise<void> {
-  await apiFetch("/api/fieldstack/updateProject", {
-    method: "POST",
-    body: JSON.stringify({ projectId, ...data }),
-  });
+  return apiFetch(`/api/projects/${id}`, { method: "PATCH", body: JSON.stringify(data) });
 }
 
-export async function deleteProject(projectId: string): Promise<void> {
-  await apiFetch("/api/fieldstack/deleteProject", {
+export async function apiDeleteProject(id: string): Promise<void> {
+  return apiFetch(`/api/projects/${id}`, { method: "DELETE" });
+}
+
+// ─── Schedule Upload ──────────────────────────────────────────────────────────
+
+export async function apiUploadSchedule(
+  projectId: string,
+  file: File
+): Promise<{ tasksCreated: number; orderItemsCreated: number; version: number; changesDetected: number }> {
+  const token = await getAuthToken();
+  if (!token) throw new ApiError("You must be signed in.", 401, false);
+
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("projectId", projectId);
+
+  const res = await fetch("/api/schedules/upload", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: fd,
+  });
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: res.statusText }));
+    throw new ApiError(body?.error ?? `Upload failed (${res.status})`, res.status, res.status >= 500);
+  }
+
+  return res.json();
+}
+
+// ─── Orders ───────────────────────────────────────────────────────────────────
+
+export async function apiUpdateOrder(
+  id: string,
+  data: Partial<{
+    status: string;
+    poNumber: string;
+    vendorName: string;
+    notes: string;
+    orderedAt: string;
+  }>
+): Promise<void> {
+  return apiFetch(`/api/orders/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+}
+
+// ─── Alerts ───────────────────────────────────────────────────────────────────
+
+export async function apiSendAlerts(projectId: string): Promise<{
+  alerts: number;
+  changes: number;
+  resendConfigured: boolean;
+}> {
+  return apiFetch(`/api/alerts/send`, {
     method: "POST",
     body: JSON.stringify({ projectId }),
   });
 }
 
-// ─── Alerts ───────────────────────────────────────────────────────────────────
-
-export async function getProjectAlerts(projectId: string): Promise<ComputedAlert[]> {
-  const data = await apiFetch<{ alerts: ComputedAlert[] }>(
-    `/api/fieldstack/getProjectAlerts?projectId=${encodeURIComponent(projectId)}`
-  );
-  return data.alerts;
+export async function apiSendAlertToMember(params: {
+  email: string;
+  alert: object;
+  projectId: string;
+}): Promise<void> {
+  return apiFetch("/api/alerts/send-to-member", {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
 }
 
-// ─── Orders ───────────────────────────────────────────────────────────────────
+// ─── Chat ─────────────────────────────────────────────────────────────────────
 
-export async function updateOrderItem(
-  orderItemId: string,
-  projectId: string,
-  data: UpdateOrderItemInput
+export async function apiChat(params: {
+  message: string;
+  history: Array<{ role: "user" | "assistant"; content: string }>;
+}): Promise<{ reply: string; requiresConfirmation?: boolean; pendingAction?: object }> {
+  return apiFetch("/api/chat", { method: "POST", body: JSON.stringify(params) });
+}
+
+export async function apiGetChatHistory(): Promise<
+  Array<{ role: "user" | "assistant"; content: string; id: string }>
+> {
+  return apiFetch("/api/chat");
+}
+
+// ─── Briefing ─────────────────────────────────────────────────────────────────
+
+export async function apiGetBriefing(): Promise<{
+  date: string;
+  activeProjects: number;
+  overdue: object[];
+  upcoming: object[];
+  recentChanges: object[];
+  ordersNeeded: object[];
+}> {
+  return apiFetch("/api/briefing");
+}
+
+// ─── Feed ─────────────────────────────────────────────────────────────────────
+
+export async function apiGetFeed(projectId?: string): Promise<object[]> {
+  const qs = projectId ? `?projectId=${projectId}` : "";
+  return apiFetch(`/api/feed${qs}`);
+}
+
+// ─── Gmail ────────────────────────────────────────────────────────────────────
+
+export async function apiGetGmailStatus(): Promise<{
+  connected: boolean;
+  email?: string;
+  lastSyncAt?: string;
+}> {
+  return apiFetch("/api/gmail");
+}
+
+export async function apiScanGmail(hoursBack = 24): Promise<{
+  processed: number;
+  saved: number;
+  skipped: number;
+}> {
+  return apiFetch("/api/gmail/scan", {
+    method: "POST",
+    body: JSON.stringify({ hoursBack }),
+  });
+}
+
+export async function apiDisconnectGmail(): Promise<void> {
+  return apiFetch("/api/gmail", { method: "DELETE" });
+}
+
+// ─── Team ─────────────────────────────────────────────────────────────────────
+
+export async function apiCreateTeamMember(data: {
+  name: string;
+  email: string;
+  role: string;
+  notifyOnCritical?: boolean;
+  notifyOnOrderReminder?: boolean;
+  notifyOnScheduleChange?: boolean;
+}): Promise<{ id: string }> {
+  return apiFetch("/api/team", { method: "POST", body: JSON.stringify(data) });
+}
+
+export async function apiUpdateTeamMember(
+  id: string,
+  data: Partial<{
+    name: string;
+    email: string;
+    role: string;
+    notifyOnCritical: boolean;
+    notifyOnOrderReminder: boolean;
+    notifyOnScheduleChange: boolean;
+  }>
 ): Promise<void> {
-  await apiFetch("/api/fieldstack/updateOrderItem", {
-    method: "POST",
-    body: JSON.stringify({ orderItemId, projectId, ...data }),
+  return apiFetch(`/api/team/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+}
+
+export async function apiDeleteTeamMember(id: string): Promise<void> {
+  return apiFetch(`/api/team/${id}`, { method: "DELETE" });
+}
+
+// ─── Lead Times ───────────────────────────────────────────────────────────────
+
+export async function apiUpdateLeadTimes(
+  settings: Array<{ itemType: string; leadTimeWeeks: number; projectId?: string }>
+): Promise<void> {
+  return apiFetch("/api/settings/lead-times", {
+    method: "PATCH",
+    body: JSON.stringify({ settings }),
   });
 }
 
-// ─── Schedule Upload ──────────────────────────────────────────────────────────
+// ─── Procore ──────────────────────────────────────────────────────────────────
 
-export interface UploadResult {
-  uploadId: string;
-  version: number;
+export async function apiGetProcoreAuthUrl(projectId: string): Promise<{ url: string }> {
+  return apiFetch(`/api/procore/auth-url?projectId=${projectId}`);
+}
+
+export async function apiSyncProcore(projectId: string): Promise<{
   tasksCreated: number;
-  orderItemsCreated: number;
-  alertCount: number;
+  tasksUpdated: number;
+}> {
+  return apiFetch("/api/procore/sync", {
+    method: "POST",
+    body: JSON.stringify({ projectId }),
+  });
 }
 
-/**
- * Triggers parsing of a file already uploaded to Firebase Storage.
- * The frontend uploads the file to Storage first, then calls this with the storagePath.
- */
-export async function triggerScheduleParse(
-  projectId: string,
-  storagePath: string,
-  fileName: string
-): Promise<UploadResult> {
-  const data = await apiFetch<UploadResult>("/api/fieldstack/uploadSchedule", {
+// ─── SMS Briefing ─────────────────────────────────────────────────────────────
+
+export async function apiSendSmsBriefing(phoneNumber: string): Promise<{ sent: boolean }> {
+  return apiFetch("/api/sms-briefing", {
     method: "POST",
-    body: JSON.stringify({ projectId, storagePath, fileName }),
+    body: JSON.stringify({ phoneNumber }),
   });
-  return data;
+}
+
+// ─── My Tasks ─────────────────────────────────────────────────────────────────
+
+export async function apiGetMyTasks(): Promise<object[]> {
+  return apiFetch("/api/my-tasks");
 }

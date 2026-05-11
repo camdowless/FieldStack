@@ -1,8 +1,11 @@
+// Infrastructure types only. Domain-specific types have been removed.
+// Add your product's types in a separate file (e.g. src/items.ts).
+
 import { Timestamp } from "firebase-admin/firestore";
 
 // ─── Subscription ─────────────────────────────────────────────────────────────
 
-export type SubscriptionPlan = "free" | "starter" | "growth" | "pro";
+export type SubscriptionPlan = "free" | "pro" | "agency" | "enterprise";
 export type SubscriptionStatus = "active" | "past_due" | "cancelled" | "trialing";
 
 export interface Subscription {
@@ -30,10 +33,13 @@ export interface UserProfile {
   email: string | null;
   displayName: string | null;
   photoURL: string | null;
+  company?: string | null;
   role: "user" | "admin";
-  companyId?: string | null;
   subscription: Subscription;
-  preferences?: Record<string, unknown>;
+  preferences?: {
+    itemsPerPage: number;
+    // Add your app-specific preferences here
+  };
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

@@ -1,6 +1,6 @@
-# SaaS Template – Firebase Auth Email Templates
+# TEMPLATE_APP – Firebase Auth Email Templates
 
-Three templates matching the SaaS Template brand (blue gradient, Inter font, clean card layout).
+Three templates matching the TEMPLATE_APP brand (blue gradient, Inter font, clean card layout).
 
 ## Files
 
@@ -12,7 +12,7 @@ Three templates matching the SaaS Template brand (blue gradient, Inter font, cle
 
 ## How to apply in Firebase Console
 
-1. Go to [Firebase Console](https://console.firebase.google.com) → select **your-project-id**
+1. Go to [Firebase Console](https://console.firebase.google.com) → select **YOUR_DEV_PROJECT_ID**
 2. Navigate to **Authentication → Templates** (left sidebar)
 3. For each template:
    - Click the pencil (edit) icon
@@ -25,9 +25,9 @@ Three templates matching the SaaS Template brand (blue gradient, Inter font, cle
 
 | Template | Subject |
 |----------|---------|
-| Email verification | `Verify your email – SaaS Template` |
-| Password reset | `Reset your SaaS Template password` |
-| MFA / sign-in code | `Your SaaS Template sign-in code` |
+| Email verification | `Verify your email – TEMPLATE_APP` |
+| Password reset | `Reset your TEMPLATE_APP password` |
+| MFA / sign-in code | `Your TEMPLATE_APP sign-in code` |
 
 ## Template variables
 

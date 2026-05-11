@@ -6,7 +6,8 @@ import { verifyPasswordResetCode } from "firebase/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Search, Eye, EyeOff, CheckCircle2, ShieldCheck, XCircle, Loader2 } from "lucide-react";
+import { config } from "@/lib/config";
+import { LayoutGrid, Eye, EyeOff, CheckCircle2, ShieldCheck, XCircle, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 
 type Stage = "loading" | "reset-form" | "reset-success" | "verify-success" | "error";
@@ -65,8 +66,8 @@ export default function AuthAction() {
     } else if (mode === "verifyEmail") {
       applyActionCode(oobCode)
         .then(() => setStage("verify-success"))
-        .catch((err: any) => {
-          const code: string = err?.code ?? "";
+        .catch((err: unknown) => {
+          const code: string = (err as { code?: string })?.code ?? "";
           if (code === "auth/invalid-action-code" || code === "auth/expired-action-code") {
             setErrorMsg("This verification link has expired or already been used.");
           } else {
@@ -96,8 +97,8 @@ export default function AuthAction() {
     try {
       await confirmPasswordReset(oobCode, password);
       setStage("reset-success");
-    } catch (err: any) {
-      const code: string = err?.code ?? "";
+    } catch (err: unknown) {
+      const code: string = (err as { code?: string })?.code ?? "";
       if (code === "auth/expired-action-code" || code === "auth/invalid-action-code") {
         setFormError("This reset link has expired. Please request a new one.");
       } else if (code === "auth/weak-password") {
@@ -122,10 +123,10 @@ export default function AuthAction() {
         {/* Logo */}
         <div className="flex items-center justify-center gap-2 mb-8">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg gradient-bg">
-            <Search className="h-4 w-4 text-white" />
+            <LayoutGrid className="h-4 w-4 text-white" />
           </div>
-          <span className="text-xl font-bold">
-            Gimme<span className="gradient-text">Leads</span>
+          <span className="text-xl font-bold gradient-text">
+            {config.appName}
           </span>
         </div>
 

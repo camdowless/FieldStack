@@ -1,12 +1,26 @@
-import { Home, Settings, LogOut, Sun, Sparkles, CreditCard, HelpCircle, ShieldAlert, Zap, FolderOpen } from "lucide-react";
+import {
+  LayoutGrid,
+  Settings,
+  LogOut,
+  CreditCard,
+  HelpCircle,
+  ShieldAlert,
+  Zap,
+  Users,
+  CheckSquare,
+  Bot,
+  FolderOpen,
+} from "lucide-react";
 import { NavLink } from "@/components/NavLink";
-import { useTheme } from "@/contexts/ThemeContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCredits } from "@/hooks/useCredits";
+import { useCompany } from "@/contexts/CompanyContext";
+import { useProjects } from "@/hooks/useProjects";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
+import { config } from "@/lib/config";
 import {
   Sidebar,
   SidebarContent,
@@ -24,8 +38,9 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const navItems = [
-  { title: "Projects", url: "/projects", icon: FolderOpen },
-  { title: "Home", url: "/home", icon: Home },
+  { title: "Dashboard", url: "/", icon: LayoutGrid },
+  { title: "My Tasks", url: "/my-tasks", icon: CheckSquare },
+  { title: "Team", url: "/team", icon: Users },
 ];
 
 const accountItems = [
@@ -35,43 +50,53 @@ const accountItems = [
   { title: "System Admin", url: "/admin", icon: ShieldAlert },
 ];
 
-export function AppSidebar() {
+export function AppSidebar({ onOpenChat }: { onOpenChat?: () => void }) {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
-  const { theme, toggleTheme } = useTheme();
   const { logout, user, role, profile } = useAuth();
   const { remaining, max, refreshDate } = useCredits();
+  const { company } = useCompany();
+  const { projects } = useProjects();
+  const location = useLocation();
   const displayName = profile?.displayName ?? user?.displayName ?? user?.email?.split("@")[0] ?? "User";
   const pct = max > 0 ? (remaining / max) * 100 : 0;
   const barColor = pct > 50 ? "bg-green-500" : pct >= 20 ? "bg-amber-500" : "bg-red-500";
 
+  const activeProjects = projects.filter((p) => p.status === "ACTIVE");
+
   return (
     <Sidebar collapsible="icon">
 
-      {/* ── Header ─────────────────────────────────────────── */}
+      {/* Header */}
       <SidebarHeader className="px-3 py-3">
         {collapsed ? (
-          // Collapsed: just the trigger centered
-          <div className="flex justify-center">
+          <div className="flex flex-col items-center gap-2">
+            <div className="h-7 w-7 rounded-md gradient-bg flex items-center justify-center text-white font-bold text-sm">
+              F
+            </div>
             <SidebarTrigger />
           </div>
         ) : (
-          // Expanded: logo + trigger
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg gradient-bg">
-                <Home className="h-5 w-5 text-white" />
+              <div className="h-9 w-9 rounded-md gradient-bg flex items-center justify-center text-white font-bold text-base shrink-0">
+                F
               </div>
-              <span className="text-lg font-bold tracking-tight whitespace-nowrap">
-                <span className="gradient-text">Field</span>Stack
-              </span>
+              <div>
+                <span className="text-base font-bold tracking-tight whitespace-nowrap gradient-text">
+                  FieldStack
+                </span>
+                {company && (
+                  <div className="text-[10px] text-muted-foreground font-mono truncate max-w-28">{company.name}</div>
+                )}
+              </div>
             </div>
             <SidebarTrigger />
           </div>
         )}
       </SidebarHeader>
 
-      {/* ── Nav ────────────────────────────────────────────── */}
+      {/* Nav */}
       <SidebarContent>
         <SidebarGroup>
           {!collapsed && <SidebarGroupLabel>Navigation</SidebarGroupLabel>}
@@ -97,9 +122,64 @@ export function AppSidebar() {
                   </Tooltip>
                 </SidebarMenuItem>
               ))}
+              {/* AI Foreman button */}
+              {onOpenChat && (
+                <SidebarMenuItem>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <SidebarMenuButton asChild>
+                        <button
+                          onClick={onOpenChat}
+                          className={`flex items-center w-full hover:bg-muted/50 rounded-md px-2 py-1.5 text-sm ${collapsed ? "justify-center px-0" : ""}`}
+                        >
+                          <Bot className={`h-4 w-4 shrink-0 ${!collapsed ? "mr-2" : ""}`} />
+                          {!collapsed && <span>AI Foreman</span>}
+                        </button>
+                      </SidebarMenuButton>
+                    </TooltipTrigger>
+                    {collapsed && <TooltipContent side="right">AI Foreman</TooltipContent>}
+                  </Tooltip>
+                </SidebarMenuItem>
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        {/* Active Projects */}
+        {!collapsed && activeProjects.length > 0 && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Active Projects</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {activeProjects.map((p) => {
+                  const isActive = location.pathname.startsWith(`/projects/${p.id}`);
+                  const hasCritical = (p.alertCounts?.critical ?? 0) > 0;
+                  const hasWarning = (p.alertCounts?.warning ?? 0) > 0;
+                  return (
+                    <SidebarMenuItem key={p.id}>
+                      <SidebarMenuButton asChild>
+                        <Link
+                          to={`/projects/${p.id}`}
+                          className={`flex items-center justify-between gap-2 hover:bg-muted/50 rounded-md px-2 py-1.5 ${isActive ? "bg-muted text-primary font-medium" : ""}`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${hasCritical ? "bg-red-500" : hasWarning ? "bg-yellow-500" : "bg-emerald-500"}`} />
+                            <span className="text-xs truncate">{p.name}</span>
+                          </div>
+                          {hasCritical && (
+                            <span className="text-[9px] bg-destructive text-destructive-foreground px-1 rounded-full shrink-0">
+                              {p.alertCounts!.critical}
+                            </span>
+                          )}
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
 
         <SidebarGroup>
           {!collapsed && <SidebarGroupLabel>Account</SidebarGroupLabel>}
@@ -132,11 +212,10 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
 
-      {/* ── Footer ─────────────────────────────────────────── */}
+      {/* Footer */}
       <SidebarFooter className="p-3">
         <Separator className="mb-3" />
 
-        {/* Avatar row */}
         <div className={`flex mb-3 ${collapsed ? "justify-center" : "items-center gap-3 px-2"}`}>
           <Tooltip>
             <TooltipTrigger asChild>
@@ -155,7 +234,7 @@ export function AppSidebar() {
           )}
         </div>
 
-        {/* Credits bar — expanded only */}
+        {/* Credits bar - expanded only */}
         {!collapsed && (
           <div className="px-2 mb-3">
             <Link to="/billing" className="block group rounded-md hover:bg-muted/50 transition-colors -mx-1 px-1 py-1">
@@ -179,7 +258,7 @@ export function AppSidebar() {
             )}
             {remaining > 0 && pct <= 20 && (
               <p className="text-xs text-amber-500 mt-1.5 text-center">
-                Running low —{" "}
+                Running low -{" "}
                 <Link to="/billing" className="underline underline-offset-2 hover:text-amber-600">
                   upgrade
                 </Link>
@@ -188,23 +267,6 @@ export function AppSidebar() {
           </div>
         )}
 
-        {/* Theme toggle */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={toggleTheme}
-              className={`w-full gap-2 ${collapsed ? "justify-center px-0" : "justify-start"}`}
-            >
-              {theme === "light" ? <Sparkles className="h-4 w-4 shrink-0" /> : <Sun className="h-4 w-4 shrink-0" />}
-              {!collapsed && <span>{theme === "light" ? "Bold Theme" : "Light Theme"}</span>}
-            </Button>
-          </TooltipTrigger>
-          {collapsed && <TooltipContent side="right">Toggle Theme</TooltipContent>}
-        </Tooltip>
-
-        {/* Logout */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -219,6 +281,12 @@ export function AppSidebar() {
           </TooltipTrigger>
           {collapsed && <TooltipContent side="right">Log out</TooltipContent>}
         </Tooltip>
+
+        {!collapsed && (
+          <p className="text-[10px] text-muted-foreground/50 text-center mt-1 select-none">
+            v{__APP_VERSION__}
+          </p>
+        )}
       </SidebarFooter>
 
     </Sidebar>

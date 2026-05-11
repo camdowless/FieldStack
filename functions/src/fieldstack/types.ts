@@ -1,147 +1,49 @@
-import { Timestamp } from "firebase-admin/firestore";
+/**
+ * FieldStack Firestore collection paths and type helpers.
+ *
+ * Multi-tenant structure:
+ *   companies/{companyId}
+ *   companies/{companyId}/members/{uid}          ← via companyMembers flat collection
+ *   companies/{companyId}/projects/{projectId}
+ *   companies/{companyId}/projects/{projectId}/tasks/{taskId}
+ *   companies/{companyId}/projects/{projectId}/orderItems/{itemId}
+ *   companies/{companyId}/projects/{projectId}/scheduleChanges/{changeId}
+ *   companies/{companyId}/projects/{projectId}/taskSteps/{stepId}
+ *   companies/{companyId}/projects/{projectId}/feedEntries/{entryId}
+ *   companies/{companyId}/teamMembers/{memberId}
+ *   companies/{companyId}/leadTimeSettings/{settingId}
+ *   companies/{companyId}/chatMessages/{messageId}
+ *   companies/{companyId}/gmailConnection (single doc)
+ *   companyMembers/{companyId}_{uid}             ← flat for querying by uid
+ */
 
-// ─── Enums ────────────────────────────────────────────────────────────────────
+export const COLLECTIONS = {
+  companies: "companies",
+  companyMembers: "companyMembers",
+  projects: (companyId: string) => `companies/${companyId}/projects`,
+  tasks: (companyId: string, projectId: string) => `companies/${companyId}/projects/${projectId}/tasks`,
+  orderItems: (companyId: string, projectId: string) => `companies/${companyId}/projects/${projectId}/orderItems`,
+  scheduleChanges: (companyId: string, projectId: string) => `companies/${companyId}/projects/${projectId}/scheduleChanges`,
+  taskSteps: (companyId: string, projectId: string) => `companies/${companyId}/projects/${projectId}/taskSteps`,
+  feedEntries: (companyId: string, projectId: string) => `companies/${companyId}/projects/${projectId}/feedEntries`,
+  teamMembers: (companyId: string) => `companies/${companyId}/teamMembers`,
+  leadTimeSettings: (companyId: string) => `companies/${companyId}/leadTimeSettings`,
+  chatMessages: (companyId: string) => `companies/${companyId}/chatMessages`,
+  gmailConnection: (companyId: string) => `companies/${companyId}/gmailConnection`,
+} as const;
 
 export type ProjectStatus = "ACTIVE" | "ON_HOLD" | "COMPLETE";
-export type TaskCategory = "CABINET_DELIVERY" | "CABINET_INSTALL" | "COUNTERTOP_SET" | "OTHER";
-export type ItemType = "CABINETS_STANDARD" | "CABINETS_CUSTOM" | "COUNTERTOPS" | "HARDWARE";
 export type OrderStatus = "NOT_ORDERED" | "ORDERED" | "IN_TRANSIT" | "DELIVERED" | "CANCELLED";
-export type AlertLevel = "CRITICAL" | "WARNING" | "INFO" | "ON_TRACK" | "VERIFY";
-export type UploadStatus = "PENDING" | "PARSING" | "DONE" | "FAILED";
+export type ItemType = "CABINETS_STANDARD" | "CABINETS_CUSTOM" | "COUNTERTOPS" | "HARDWARE";
+export type TaskCategory = "CABINET_DELIVERY" | "CABINET_INSTALL" | "COUNTERTOP_SET" | "OTHER";
+export type StepType = "SHOP_DRAWINGS" | "SUBMISSIONS" | "ORDER_MATERIALS" | "CONFIRM_DELIVERY" | "INSTALL" | "PUNCH_LIST";
+export type StepStatus = "PENDING" | "IN_PROGRESS" | "COMPLETE" | "BLOCKED";
+export type TeamRole = "OWNER" | "SUPERVISOR" | "PURCHASING" | "INSTALLER" | "DRAFTING";
+export type UserRole = "ADMIN" | "MEMBER" | "VIEWER";
 
-// ─── Firestore Documents ───────────────────────────────────────────────────────
-
-export interface CompanyDoc {
-  name: string;
-  slug: string;
-  ownerUid: string;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
-}
-
-export interface ProjectDoc {
-  companyId: string;
-  name: string;
-  address: string;
-  gcName: string;
-  gcContact: string | null;
-  gcEmail: string | null;
-  status: ProjectStatus;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
-}
-
-export interface ScheduleUploadDoc {
-  projectId: string;
-  fileName: string;
-  rawText: string;           // "" for PDFs; extracted CSV text for XLSX/text uploads
-  storagePath: string | null; // Firebase Storage path for all uploads
-  version: number;
-  uploadedAt: Timestamp;
-  parsedAt: Timestamp | null;
-  status: UploadStatus;
-  parseResult: { tasksCreated: number; orderItemsCreated: number } | null;
-  errorMessage: string | null;
-}
-
-export interface TaskDoc {
-  projectId: string;
-  scheduleUploadId: string;
-  taskIdOriginal: string | null;
-  taskName: string;
-  building: string | null;
-  floor: string | null;
-  gcInstallDate: Timestamp;
-  gcInstallDateEnd: Timestamp | null;
-  assignedResource: string | null;
-  category: TaskCategory;
-  isOurTask: boolean;
-  createdAt: Timestamp;
-}
-
-export interface OrderItemDoc {
-  projectId: string;
-  taskId: string;
-  itemType: ItemType;
-  leadTimeWeeks: number;
-  orderByDate: Timestamp;
-  orderedAt: Timestamp | null;
-  poNumber: string | null;
-  vendorName: string | null;
-  notes: string | null;
-  status: OrderStatus;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
-  // Denormalized from task for alert queries without joins
-  taskName: string;
-  building: string | null;
-  floor: string | null;
-  gcInstallDate: Timestamp;
-}
-
-export interface ScheduleChangeDoc {
-  projectId: string;
-  taskId: string;
-  taskName: string;
-  building: string | null;
-  floor: string | null;
-  detectedAt: Timestamp;
-  previousDate: Timestamp;
-  newDate: Timestamp;
-  shiftDays: number;
-  notificationsSent: boolean;
-}
-
-export interface FeedEntryDoc {
-  type: string;
-  title: string;
-  summary: string;
-  createdAt: Timestamp;
-  metadata: Record<string, unknown>;
-}
-
-export interface UsageLogDoc {
-  companyId: string;
-  action: string;
-  model: string;
-  inputTokens: number;
-  cacheWriteTokens: number;
-  cacheReadTokens: number;
-  outputTokens: number;
-  costUsd: number;
-  createdAt: Timestamp;
-}
-
-// ─── Computed / Response Types ────────────────────────────────────────────────
-
-export interface ComputedAlert {
-  orderItemId: string;
-  taskId: string;
-  level: AlertLevel;
-  title: string;
-  detail: string;
-  projectId: string;
-  itemType: ItemType;
-  orderByDate: number; // ms epoch
-  gcInstallDate: number; // ms epoch
-  orderStatus: OrderStatus;
-  building: string | null;
-  floor: string | null;
-  daysUntilOrderBy: number;
-  taskName: string;
-}
-
-export interface ProjectSummary {
-  id: string;
-  companyId: string;
-  name: string;
-  address: string;
-  gcName: string;
-  gcContact: string | null;
-  gcEmail: string | null;
-  status: ProjectStatus;
-  createdAt: number; // ms epoch
-  updatedAt: number; // ms epoch
-  alertCounts: { critical: number; warning: number; info: number };
-  latestUpload: { version: number; uploadedAt: number; status: UploadStatus } | null;
-}
+export const DEFAULT_LEAD_TIMES: Array<{ itemType: ItemType; label: string; leadTimeWeeks: number }> = [
+  { itemType: "CABINETS_STANDARD", label: "Standard Stock", leadTimeWeeks: 8 },
+  { itemType: "CABINETS_CUSTOM", label: "Custom/Semi-Custom", leadTimeWeeks: 16 },
+  { itemType: "COUNTERTOPS", label: "Fabricated", leadTimeWeeks: 3 },
+  { itemType: "HARDWARE", label: "Standard", leadTimeWeeks: 4 },
+];

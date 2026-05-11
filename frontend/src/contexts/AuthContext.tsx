@@ -7,14 +7,15 @@ import {
   signOut,
   confirmPasswordReset,
   applyActionCode,
+  updateProfile as firebaseUpdateProfile,
   type User,
 } from "firebase/auth";
-import { doc, onSnapshot } from "firebase/firestore";
+import { doc, onSnapshot, updateDoc, serverTimestamp } from "firebase/firestore";
 import { auth, googleProvider, firestore } from "@/lib/firebase";
 import { getFunctions, httpsCallable } from "firebase/functions";
 
 export interface Subscription {
-  plan: "free" | "soloPro" | "agency" | "pro";
+  plan: "free" | "pro" | "agency" | "enterprise";
   status: "active" | "past_due" | "cancelled" | "trialing";
   creditsUsed: number;
   creditsTotal: number;
@@ -22,6 +23,8 @@ export interface Subscription {
   currentPeriodEnd: unknown;
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
+  /** The Stripe price ID currently active on this subscription (monthly or annual). */
+  stripePriceId: string | null;
   cancelAtPeriodEnd: boolean;
 }
 
@@ -30,11 +33,11 @@ export interface UserProfile {
   email: string | null;
   displayName: string | null;
   photoURL: string | null;
-  companyId?: string | null;
+  company?: string | null;
   subscription: Subscription;
   preferences?: {
-    opportunityScoreMin: number;
-    legitimacyScoreMin: number;
+    itemsPerPage: number;
+    // Add your app-specific preferences here
   };
   createdAt: unknown;
   updatedAt: unknown;
@@ -56,6 +59,10 @@ interface AuthContextValue {
   resendVerificationEmail: () => Promise<void>;
   refreshEmailVerified: () => Promise<void>;
   logout: () => Promise<void>;
+  /** Updates the user's display name and company in Firestore and Firebase Auth. */
+  updateProfile: (data: { displayName?: string; company?: string }) => Promise<void>;
+  /** Permanently deletes the account and all associated data (GDPR/CCPA). */
+  deleteAccount: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -93,16 +100,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     function settle(resolvedRole: "user" | "admin", _reason: string) {
       if (settled) return;
       settled = true;
+      console.log(`[AuthContext] SETTLED role=${resolvedRole} reason=${_reason}`);
       clearTimers();
       setRole(resolvedRole);
       setLoading(false);
     }
 
     const authUnsub = onAuthStateChanged(auth, async (u) => {
+      console.log(`[AuthContext] onAuthStateChanged uid=${u?.uid ?? "null"} email=${u?.email ?? "null"}`);
       teardownProfile();
       settled = false;
 
       if (!u) {
+        console.log(`[AuthContext] No user — clearing state`);
         setUser(null);
         setProfile(null);
         setRole(null);
@@ -115,7 +125,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Validate the cached session token is still live
       try {
         await u.getIdToken(false);
-      } catch {
+        console.log(`[AuthContext] Token validated uid=${u.uid}`);
+      } catch (tokenErr) {
+        console.error(`[AuthContext] Token validation FAILED uid=${u.uid} — signing out`, tokenErr);
         await signOut(auth);
         return;
       }
@@ -133,11 +145,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       profileUnsub = onSnapshot(profileRef, async (snap) => {
         if (!snap.exists()) {
+          console.log(`[AuthContext] Profile doc NOT FOUND uid=${u.uid} — marking isNewUser=true`);
           setIsNewUser(true);
           return;
         }
 
         const data = snap.data() as UserProfile;
+        console.log(`[AuthContext] Profile doc RECEIVED uid=${u.uid} plan=${data.subscription?.plan ?? "unknown"}`);
         setProfile(data);
         setIsNewUser(false);
 
@@ -165,6 +179,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           try {
             const tokenResult = await u.getIdTokenResult(true);
             const claimRole = tokenResult.claims.role as string | undefined;
+            console.log(`[AuthContext] pollForClaim #${pollCount} uid=${u.uid} claimRole=${claimRole ?? "undefined"}`);
 
             if (claimRole === "user" || claimRole === "admin") {
               claimResolved = true;
@@ -172,7 +187,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               if (claimTimeoutId) { clearTimeout(claimTimeoutId); claimTimeoutId = null; }
               settle(claimRole, `claim-poll-attempt-${pollCount}`);
             }
-          } catch {
+          } catch (pollErr) {
+            console.warn(`[AuthContext] pollForClaim #${pollCount} FAILED uid=${u.uid}`, pollErr);
             // Token refresh failed — will retry on next poll interval
           }
         }
@@ -201,52 +217,113 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = async (email: string, password: string): Promise<{ needsVerification?: boolean }> => {
-    await signInWithEmailAndPassword(auth, email, password);
-    return {};
+    console.log(`[AuthContext] signIn attempt email=${email}`);
+    try {
+      const result = await signInWithEmailAndPassword(auth, email, password);
+      console.log(`[AuthContext] signIn SUCCESS uid=${result.user.uid} emailVerified=${result.user.emailVerified}`);
+      return {};
+    } catch (err: unknown) {
+      console.error(`[AuthContext] signIn FAILED email=${email}`, err);
+      throw err;
+    }
   };
 
   const resendVerificationEmail = async () => {
+    console.log(`[AuthContext] resendVerificationEmail called uid=${auth.currentUser?.uid ?? "none"}`);
     const fns = getFunctions();
     const callable = httpsCallable(fns, "resendVerificationEmail");
-    await callable({});
+    try {
+      const result = await callable({});
+      console.log(`[AuthContext] resendVerificationEmail SUCCESS`, result.data);
+    } catch (err: unknown) {
+      console.error(`[AuthContext] resendVerificationEmail FAILED`, err);
+      throw err;
+    }
   };
 
   const refreshEmailVerified = async () => {
     if (!auth.currentUser) return;
     await auth.currentUser.reload();
     const verified = auth.currentUser.emailVerified;
+    console.log(`[AuthContext] refreshEmailVerified uid=${auth.currentUser.uid} verified=${verified}`);
     setEmailVerified(verified);
   };
 
   const signUp = async (email: string, password: string) => {
-    await createUserWithEmailAndPassword(auth, email, password);
+    console.log(`[AuthContext] signUp attempt email=${email}`);
+    try {
+      const result = await createUserWithEmailAndPassword(auth, email, password);
+      console.log(`[AuthContext] signUp SUCCESS uid=${result.user.uid} email=${result.user.email}`);
+    } catch (err: unknown) {
+      console.error(`[AuthContext] signUp FAILED email=${email}`, err);
+      throw err;
+    }
   };
 
   const signInWithGoogle = async () => {
-    await signInWithPopup(auth, googleProvider);
+    console.log(`[AuthContext] signInWithGoogle attempt`);
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      console.log(`[AuthContext] signInWithGoogle SUCCESS uid=${result.user.uid} email=${result.user.email} isNewUser=${result.user.metadata.creationTime === result.user.metadata.lastSignInTime}`);
+    } catch (err: unknown) {
+      console.error(`[AuthContext] signInWithGoogle FAILED`, err);
+      throw err;
+    }
   };
 
   const sendPasswordReset = async (email: string) => {
+    console.log(`[AuthContext] sendPasswordReset email=${email}`);
     const functions = getFunctions();
     const callable = httpsCallable(functions, "sendPasswordReset");
     await callable({ email });
+    console.log(`[AuthContext] sendPasswordReset dispatched`);
   };
 
   const confirmPasswordResetFn = async (oobCode: string, newPassword: string) => {
+    console.log(`[AuthContext] confirmPasswordReset called`);
     await confirmPasswordReset(auth, oobCode, newPassword);
+    console.log(`[AuthContext] confirmPasswordReset SUCCESS`);
   };
 
   const applyActionCodeFn = async (oobCode: string) => {
+    console.log(`[AuthContext] applyActionCode called`);
     await applyActionCode(auth, oobCode);
+    console.log(`[AuthContext] applyActionCode SUCCESS`);
   };
 
   const logout = async () => {
+    console.log(`[AuthContext] logout uid=${auth.currentUser?.uid ?? "none"}`);
+    await signOut(auth);
+    console.log(`[AuthContext] logout COMPLETE`);
+    window.history.replaceState(null, "", "/");
+  };
+
+  const updateUserProfile = async (data: { displayName?: string; company?: string }) => {
+    if (!auth.currentUser) throw new Error("Not authenticated");
+    console.log(`[AuthContext] updateProfile uid=${auth.currentUser.uid}`, data);
+    const updates: Record<string, unknown> = { updatedAt: serverTimestamp() };
+    if (data.displayName !== undefined) updates.displayName = data.displayName;
+    if (data.company !== undefined) updates.company = data.company;
+    await updateDoc(doc(firestore, "users", auth.currentUser.uid), updates);
+    if (data.displayName !== undefined) {
+      await firebaseUpdateProfile(auth.currentUser, { displayName: data.displayName });
+    }
+    console.log(`[AuthContext] updateProfile SUCCESS`);
+  };
+
+  const deleteAccount = async () => {
+    console.log(`[AuthContext] deleteAccount uid=${auth.currentUser?.uid ?? "none"}`);
+    const fns = getFunctions();
+    const callable = httpsCallable(fns, "deleteUserAccount");
+    await callable({ confirm: true });
+    console.log(`[AuthContext] deleteAccount server-side COMPLETE — signing out locally`);
+    // Auth account is now deleted server-side; sign out locally to clear state.
     await signOut(auth);
     window.history.replaceState(null, "", "/");
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, role, loading, isNewUser, emailVerified, signIn, signUp, signInWithGoogle, sendPasswordReset, confirmPasswordReset: confirmPasswordResetFn, applyActionCode: applyActionCodeFn, resendVerificationEmail, refreshEmailVerified, logout }}>
+    <AuthContext.Provider value={{ user, profile, role, loading, isNewUser, emailVerified, signIn, signUp, signInWithGoogle, sendPasswordReset, confirmPasswordReset: confirmPasswordResetFn, applyActionCode: applyActionCodeFn, resendVerificationEmail, refreshEmailVerified, logout, updateProfile: updateUserProfile, deleteAccount }}>
       {children}
     </AuthContext.Provider>
   );

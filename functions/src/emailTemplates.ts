@@ -1,3 +1,14 @@
+// Email templates for verification, password reset, and MFA.
+// APP_NAME and APP_URL are read from environment variables at render time.
+
+function getAppName(): string {
+  return process.env.APP_NAME ?? "App";
+}
+
+function getAppUrl(): string {
+  return process.env.APP_URL ?? "https://example.com";
+}
+
 // ─── Shared layout ────────────────────────────────────────────────────────────
 
 const BASE_STYLES = `
@@ -10,11 +21,6 @@ const BASE_STYLES = `
   }
   .wrapper { max-width: 560px; margin: 48px auto; padding: 0 16px 48px; }
   .logo-bar { text-align: center; padding: 32px 0 24px; }
-  .logo-icon {
-    display: inline-flex; align-items: center; justify-content: center;
-    width: 44px; height: 44px; border-radius: 12px;
-    background: linear-gradient(135deg, #3b82f6, #0ea5e9); margin-bottom: 10px;
-  }
   .logo-name { font-size: 18px; font-weight: 700; color: #1a1f2e; letter-spacing: -0.3px; }
   .card {
     background: #ffffff; border-radius: 16px; border: 1px solid #e5e7eb; overflow: hidden;
@@ -55,22 +61,22 @@ const BASE_STYLES = `
   .footer a { color: #9ca3af; text-decoration: underline; }
 `;
 
-const LOGO_SVG = `
-  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white"
-    stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-  </svg>`;
-
-const FOOTER_HTML = `
+function footerHtml(): string {
+  const appName = getAppName();
+  const appUrl = getAppUrl();
+  return `
   <div class="footer">
     <p>
-      © ${new Date().getFullYear()} Your Company · <a href="https://yourapp.com">yourapp.com</a><br/>
-      <a href="https://yourapp.com/privacy.html">Privacy Policy</a> ·
-      <a href="https://yourapp.com/tos.html">Terms of Service</a>
+      &copy; ${new Date().getFullYear()} ${appName} &middot; <a href="${appUrl}">${appUrl.replace(/^https?:\/\//, "")}</a><br/>
+      <a href="${appUrl}/privacy">Privacy Policy</a> &middot;
+      <a href="${appUrl}/terms">Terms of Service</a>
     </p>
   </div>`;
+}
 
 function layout(body: string): string {
+  const appName = getAppName();
+  const appUrl = getAppUrl();
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -81,14 +87,15 @@ function layout(body: string): string {
 <body>
   <div class="wrapper">
     <div class="logo-bar">
-      <div class="logo-icon">${LOGO_SVG}</div>
-      <div class="logo-name">SaaS Template</div>
+      <a href="${appUrl}" style="display:inline-flex;align-items:center;gap:10px;text-decoration:none;">
+        <span class="logo-name">${appName}</span>
+      </a>
     </div>
     <div class="card">
       <div class="card-accent"></div>
       <div class="card-body">${body}</div>
     </div>
-    ${FOOTER_HTML}
+    ${footerHtml()}
   </div>
 </body>
 </html>`;
@@ -97,6 +104,7 @@ function layout(body: string): string {
 // ─── Email Verification ───────────────────────────────────────────────────────
 
 export function verificationEmailHtml(link: string): string {
+  const appName = getAppName();
   return layout(`
     <div class="icon-wrap">
       <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#3b82f6"
@@ -108,7 +116,7 @@ export function verificationEmailHtml(link: string): string {
     <h1>Verify your email address</h1>
     <p class="subtitle">
       Thanks for signing up. Click the button below to confirm your email
-      and activate your account.
+      and activate your ${appName} account.
     </p>
     <div class="btn-wrap">
       <a href="${link}" class="btn">Verify my email</a>
@@ -128,6 +136,7 @@ export function verificationEmailHtml(link: string): string {
 // ─── Password Reset ───────────────────────────────────────────────────────────
 
 export function passwordResetEmailHtml(link: string): string {
+  const appName = getAppName();
   return layout(`
     <div class="icon-wrap">
       <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#3b82f6"
@@ -138,7 +147,7 @@ export function passwordResetEmailHtml(link: string): string {
     </div>
     <h1>Reset your password</h1>
     <p class="subtitle">
-      We received a request to reset the password for your account.
+      We received a request to reset the password for your ${appName} account.
       Click the button below to choose a new one.
     </p>
     <div class="btn-wrap">
@@ -160,7 +169,7 @@ export function passwordResetEmailHtml(link: string): string {
     <hr class="divider"/>
     <p class="note">
       <strong>Didn't request this?</strong> Your password has not been changed.
-      You can safely ignore this email — your account is secure.
+      You can safely ignore this email - your account is secure.
     </p>
   `);
 }
@@ -168,6 +177,7 @@ export function passwordResetEmailHtml(link: string): string {
 // ─── MFA / OTP ────────────────────────────────────────────────────────────────
 
 export function mfaEmailHtml(otp: string): string {
+  const appName = getAppName();
   return layout(`
     <div class="icon-wrap">
       <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#3b82f6"
@@ -177,7 +187,7 @@ export function mfaEmailHtml(otp: string): string {
     </div>
     <h1>Your sign-in code</h1>
     <p class="subtitle">
-      Use the code below to complete your sign-in.
+      Use the code below to complete your sign-in to ${appName}.
     </p>
     <div style="text-align:center;margin-bottom:32px;">
       <div style="font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;

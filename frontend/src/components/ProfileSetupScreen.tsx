@@ -131,17 +131,13 @@ export function ProfileSetupScreen() {
               transition={{ duration: 2.4, repeat: Infinity, ease: "easeOut" }}
               className="absolute inset-0 rounded-2xl bg-primary/30"
             />
-            <div className="relative w-16 h-16 rounded-2xl bg-primary flex items-center justify-center shadow-lg shadow-primary/30">
-              <motion.svg
-                width="32" height="32" viewBox="0 0 32 32" fill="none"
-                animate={{ rotate: [0, 5, -5, 0] }}
-                transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-              >
-                <circle cx="16" cy="16" r="6" fill="white" fillOpacity="0.9" />
-                <circle cx="16" cy="16" r="11" stroke="white" strokeOpacity="0.4" strokeWidth="1.5" />
-                <circle cx="16" cy="16" r="15" stroke="white" strokeOpacity="0.15" strokeWidth="1" />
-              </motion.svg>
-            </div>
+            <motion.img
+              src="/app-mark-96.svg"
+              alt="App logo"
+              className="relative w-16 h-16"
+              animate={{ rotate: [0, 5, -5, 0] }}
+              transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+            />
           </div>
         </motion.div>
 

@@ -9,78 +9,199 @@
   },
   "hosting": {
     "public": "frontend/dist",
-    "predeploy": ["cd frontend && ./node_modules/.bin/tsc -b && ./node_modules/.bin/vite build"],
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-    "rewrites": [
-      {
-        "source": "/api/report",
-        "function": "submitReport"
-      },
-      {
-        "source": "/api/admin-stats",
-        "function": "getAdminStats"
-      },
-      {
-        "source": "/api/admin-reports",
-        "function": "getAdminReports"
-      },
-      {
-        "source": "/api/update-report-status",
-        "function": "updateReportStatus"
-      },
-      {
-        "source": "/api/createCheckoutSession",
-        "function": "createCheckoutSession"
-      },
-      {
-        "source": "/api/createPortalSession",
-        "function": "createPortalSession"
-      },
-      {
-        "source": "/api/stripeWebhook",
-        "function": "stripeWebhook"
-      },
-      {
-        "source": "/api/changeSubscription",
-        "function": "changeSubscription"
-      },
-      {
-        "source": "/api/cancelSubscription",
-        "function": "cancelSubscription"
-      },
-      {
-        "source": "/api/reactivateSubscription",
-        "function": "reactivateSubscription"
-      },
-      {
-        "source": "/api/syncSubscription",
-        "function": "syncSubscription"
-      },
-      {
-        "source": "/api/getInvoices",
-        "function": "getInvoices"
-      },
-      { "source": "/api/fieldstack/provisionCompany",  "function": "provisionCompany" },
-      { "source": "/api/fieldstack/createProject",     "function": "createProject" },
-      { "source": "/api/fieldstack/listProjects",      "function": "listProjects" },
-      { "source": "/api/fieldstack/getProject",        "function": "getProject" },
-      { "source": "/api/fieldstack/updateProject",     "function": "updateProject" },
-      { "source": "/api/fieldstack/deleteProject",     "function": "deleteProject" },
-      { "source": "/api/fieldstack/getProjectAlerts",  "function": "getProjectAlerts" },
-      { "source": "/api/fieldstack/evaluateAlerts",    "function": "evaluateAlerts" },
-      { "source": "/api/fieldstack/updateOrderItem",   "function": "updateOrderItem" },
-      { "source": "/api/fieldstack/uploadSchedule",    "function": "uploadSchedule" },
-      {
-        "source": "**",
-        "destination": "/index.html"
-      }
-    ]
-  },
-  "emulators": {
-    "auth": { "port": 9099 },
-    "firestore": { "port": 8080 },
-    "functions": { "port": 5001 },
-    "hosting": { "port": 5000 },
-    "ui": { "enabled": true, "port": 4000 }
+    "headers": [
+        {
+          "source": "**",
+          "headers": [
+            {
+              "key": "X-Content-Type-Options",
+              "value": "nosniff"
+            },
+            {
+              "key": "X-Frame-Options",
+              "value": "DENY"
+            },
+            {
+              "key": "Strict-Transport-Security",
+              "value": "max-age=31536000; includeSubDomains; preload"
+            },
+            {
+              "key": "Referrer-Policy",
+              "value": "strict-origin-when-cross-origin"
+            },
+            {
+              "key": "Permissions-Policy",
+              "value": "camera=(), microphone=(), geolocation=(self), payment=(self)"
+            },
+            {
+              "key": "Content-Security-Policy",
+              "value": "default-src 'self'; script-src 'self' https://apis.google.com https://*.firebaseapp.com https://*.googleapis.com https://js.stripe.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https: blob:; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://api.stripe.com https://maps.googleapis.com https://nominatim.openstreetmap.org https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://*.cloudfunctions.net; frame-src https://js.stripe.com https://*.firebaseapp.com https://accounts.google.com; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests"
+            }
+          ]
+        }
+      ],
+      "rewrites": [
+        {
+          "source": "/api/items/**",
+          "function": "itemsApi"
+        },
+        {
+          "source": "/api/items",
+          "function": "itemsApi"
+        },
+        {
+          "source": "/api/support",
+          "function": "submitSupportTicket"
+        },
+        {
+          "source": "/api/admin-stats",
+          "function": "getAdminStats"
+        },
+        {
+          "source": "/api/createCheckoutSession",
+          "function": "createCheckoutSession"
+        },
+        {
+          "source": "/api/createPortalSession",
+          "function": "createPortalSession"
+        },
+        {
+          "source": "/api/stripeWebhook",
+          "function": "stripeWebhook"
+        },
+        {
+          "source": "/api/changeSubscription",
+          "function": "changeSubscription"
+        },
+        {
+          "source": "/api/cancelSubscription",
+          "function": "cancelSubscription"
+        },
+        {
+          "source": "/api/reactivateSubscription",
+          "function": "reactivateSubscription"
+        },
+        {
+          "source": "/api/syncSubscription",
+          "function": "syncSubscription"
+        },
+        {
+          "source": "/api/triggerBackup",
+          "function": "triggerBackup"
+        },
+        {
+          "source": "/api/getInvoices",
+          "function": "getInvoices"
+        },
+        {
+          "source": "/api/report-error",
+          "function": "reportFrontendError"
+        },
+        {
+          "source": "/api/projects/**",
+          "function": "projectsApi"
+        },
+        {
+          "source": "/api/projects",
+          "function": "projectsApi"
+        },
+        {
+          "source": "/api/schedules/upload",
+          "function": "schedulesUploadApi"
+        },
+        {
+          "source": "/api/orders/**",
+          "function": "ordersApi"
+        },
+        {
+          "source": "/api/alerts/send",
+          "function": "alertsSendApi"
+        },
+        {
+          "source": "/api/alerts/send-to-member",
+          "function": "alertsSendToMemberApi"
+        },
+        {
+          "source": "/api/chat",
+          "function": "chatApi"
+        },
+        {
+          "source": "/api/briefing",
+          "function": "briefingApi"
+        },
+        {
+          "source": "/api/team/**",
+          "function": "teamApi"
+        },
+        {
+          "source": "/api/team",
+          "function": "teamApi"
+        },
+        {
+          "source": "/api/settings/lead-times",
+          "function": "leadTimesApi"
+        },
+        {
+          "source": "/api/gmail/callback",
+          "function": "gmailCallbackApi"
+        },
+        {
+          "source": "/api/gmail/scan",
+          "function": "gmailScanApi"
+        },
+        {
+          "source": "/api/gmail",
+          "function": "gmailApi"
+        },
+        {
+          "source": "/api/sms-briefing",
+          "function": "smsBriefingApi"
+        },
+        {
+          "source": "/api/my-tasks",
+          "function": "myTasksApi"
+        },
+        {
+          "source": "/api/procore/auth-url",
+          "function": "procoreAuthUrlApi"
+        },
+        {
+          "source": "/api/procore/sync",
+          "function": "procoreSyncApi"
+        },
+        {
+          "source": "/api/procore/callback",
+          "function": "procoreCallbackApi"
+        },
+        {
+          "source": "/api/procore/webhook",
+          "function": "procoreWebhookApi"
+        },
+        {
+          "source": "/api/steps/**",
+          "function": "stepsApi"
+        },
+        {
+          "source": "/api/magic-link",
+          "function": "magicLinkApi"
+        },
+        {
+          "source": "/api/alerts/escalate",
+          "function": "escalationApi"
+        },
+        {
+          "source": "/api/gc-draft",
+          "function": "gcDraftApi"
+        },
+        {
+          "source": "/api/projects/from-schedule",
+          "function": "fromScheduleApi"
+        },
+        {
+          "source": "**",
+          "destination": "/index.html"
+        }
+      ]
   }
 }

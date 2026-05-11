@@ -53,8 +53,8 @@ export function SignUpModal({ open, onOpenChange }: SignUpModalProps) {
     try {
       await signUp(email, password);
       setStep("verify");
-    } catch (err: any) {
-      const code = err?.code as string | undefined;
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code;
       if (code === "auth/email-already-in-use") {
         setError("An account with this email already exists.");
       } else if (code === "auth/weak-password") {
@@ -75,8 +75,8 @@ export function SignUpModal({ open, onOpenChange }: SignUpModalProps) {
     try {
       await signInWithGoogle();
       onOpenChange(false);
-    } catch (err: any) {
-      if (err?.code !== "auth/popup-closed-by-user") {
+    } catch (err: unknown) {
+      if ((err as { code?: string })?.code !== "auth/popup-closed-by-user") {
         setError("Google sign-in failed. Please try again.");
       }
     } finally {

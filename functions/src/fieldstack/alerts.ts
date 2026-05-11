@@ -1,119 +1,101 @@
+/**
+ * Alerts Cloud Functions — send alert emails (stub).
+ */
+
+import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
-import type { OrderItemDoc, AlertLevel, ComputedAlert, ItemType, OrderStatus } from "./types";
+import cors from "cors";
+import { verifyCompanyMember, replyUnauthorized, replyBadRequest } from "./middleware";
+import { COLLECTIONS } from "./types";
+import { logger } from "../logger";
 
-const db = () => admin.firestore();
+const db = admin.firestore();
 
-const ITEM_LABELS: Record<ItemType, string> = {
-  CABINETS_STANDARD: "Cabinet order (standard)",
-  CABINETS_CUSTOM: "Cabinet order (custom)",
-  COUNTERTOPS: "Countertop order",
-  HARDWARE: "Hardware order",
-};
+const rawCorsOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim()).filter(Boolean)
+  : [];
 
-/**
- * Returns the alert level for an order item based on its order-by date and status.
- * Mirrors the logic in FieldStack-main/src/lib/alerts.ts.
- */
-export function getAlertLevel(orderByDateMs: number, status: OrderStatus): AlertLevel {
-  if (status === "DELIVERED" || status === "CANCELLED") return "ON_TRACK";
-  if (status === "IN_TRANSIT" || status === "ORDERED") return "VERIFY";
+const corsHandler = cors({
+  origin: (origin, callback) => {
+    if (!origin || rawCorsOrigins.includes(origin)) { callback(null, true); return; }
+    callback(new Error(`CORS: origin "${origin}" not allowed`));
+  },
+  methods: ["POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
+});
 
-  const today = Date.now();
-  const days = Math.floor((orderByDateMs - today) / 86_400_000);
+export const alertsSendApi = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
 
-  if (days < 0) return "CRITICAL";
-  if (days <= 14) return "WARNING";
-  if (days <= 30) return "INFO";
-  return "ON_TRACK";
-}
+    let companyId: string;
+    try {
+      const auth = await verifyCompanyMember(req);
+      companyId = auth.companyId;
+    } catch {
+      replyUnauthorized(res); return;
+    }
 
-/**
- * Computes alerts for all order items in a project.
- * Reads from /projects/{projectId}/orderItems (denormalized — no sub-queries needed).
- * Returns alerts sorted CRITICAL → WARNING → INFO → VERIFY → ON_TRACK.
- */
-export async function computeProjectAlerts(projectId: string): Promise<ComputedAlert[]> {
-  const snap = await db()
-    .collection("projects")
-    .doc(projectId)
-    .collection("orderItems")
-    .orderBy("orderByDate", "asc")
-    .get();
+    const { projectId } = req.body ?? {};
+    if (!projectId) { replyBadRequest(res, "projectId is required."); return; }
 
-  const levelOrder: Record<AlertLevel, number> = {
-    CRITICAL: 0, WARNING: 1, INFO: 2, VERIFY: 3, ON_TRACK: 4,
-  };
+    // TODO: Implement actual alert email sending
+    // Steps:
+    // 1. Load all orderItems for the project
+    // 2. Compute alert levels (CRITICAL/WARNING/INFO)
+    // 3. Load team members with notification preferences
+    // 4. Send emails via Resend to appropriate recipients
+    // 5. Log escalation events
 
-  const alerts: ComputedAlert[] = snap.docs.map((doc) => {
-    const item = doc.data() as OrderItemDoc;
-    const orderByDateMs = item.orderByDate.toMillis();
-    const gcInstallDateMs = item.gcInstallDate.toMillis();
-    const level = getAlertLevel(orderByDateMs, item.status);
-    const daysUntilOrderBy = Math.floor((orderByDateMs - Date.now()) / 86_400_000);
+    const resendConfigured = !!process.env.RESEND_API_KEY;
+    logger.info("alerts/send called (stub)", { companyId, projectId, resendConfigured });
 
-    const location = [item.building, item.floor].filter(Boolean).join(" – ");
-    const itemLabel = ITEM_LABELS[item.itemType];
-
-    const title =
-      level === "CRITICAL"
-        ? `${itemLabel} OVERDUE — ${location}`
-        : level === "WARNING"
-        ? `${itemLabel} due soon — ${location}`
-        : `${itemLabel} upcoming — ${location}`;
-
-    const installDateStr = new Date(gcInstallDateMs).toLocaleDateString("en-US", {
-      month: "short", day: "numeric", year: "numeric",
+    res.json({
+      alerts: 0,
+      changes: 0,
+      resendConfigured,
+      message: resendConfigured
+        ? "Alert sending stub — implement email logic in functions/src/fieldstack/alerts.ts"
+        : "Resend API key not configured. Set RESEND_API_KEY to enable email alerts.",
     });
-    const orderByDateStr = new Date(orderByDateMs).toLocaleDateString("en-US", {
-      month: "short", day: "numeric", year: "numeric",
-    });
-    const detail = `Install: ${installDateStr} · Order by: ${orderByDateStr} · Status: ${item.status.replace(/_/g, " ")}`;
-
-    return {
-      orderItemId: doc.id,
-      taskId: item.taskId,
-      level,
-      title,
-      detail,
-      projectId,
-      itemType: item.itemType,
-      orderByDate: orderByDateMs,
-      gcInstallDate: gcInstallDateMs,
-      orderStatus: item.status,
-      building: item.building,
-      floor: item.floor,
-      daysUntilOrderBy,
-      taskName: item.taskName,
-    };
   });
+});
 
-  return alerts.sort((a, b) => levelOrder[a.level] - levelOrder[b.level]);
-}
+export const alertsSendToMemberApi = functions.https.onRequest((req, res) => {
+  corsHandler(req, res, async () => {
+    if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
 
-/**
- * Returns just the CRITICAL and WARNING counts for a project.
- * Used by listProjects to build the dashboard summary row without returning full alert details.
- */
-export async function computeAlertCountsForProject(
-  projectId: string
-): Promise<{ critical: number; warning: number; info: number }> {
-  const snap = await db()
-    .collection("projects")
-    .doc(projectId)
-    .collection("orderItems")
-    .get();
+    let companyId: string;
+    try {
+      const auth = await verifyCompanyMember(req);
+      companyId = auth.companyId;
+    } catch {
+      replyUnauthorized(res); return;
+    }
 
-  let critical = 0;
-  let warning = 0;
-  let info = 0;
+    const { email, alert, projectId } = req.body ?? {};
+    if (!email || !alert) { replyBadRequest(res, "email and alert are required."); return; }
 
-  for (const doc of snap.docs) {
-    const item = doc.data() as OrderItemDoc;
-    const level = getAlertLevel(item.orderByDate.toMillis(), item.status);
-    if (level === "CRITICAL") critical++;
-    else if (level === "WARNING") warning++;
-    else if (level === "INFO") info++;
-  }
+    // TODO: Send alert email to specific team member via Resend
+    logger.info("alerts/send-to-member called (stub)", { companyId, projectId, email });
 
-  return { critical, warning, info };
-}
+    res.json({ success: true, message: "Alert email stub — configure Resend to enable delivery." });
+  });
+});
+
+// Cron: evaluate all alerts daily (called by Firebase Scheduler)
+export const alertsEvaluateCron = functions.pubsub
+  .schedule("0 7 * * *")
+  .timeZone("UTC")
+  .onRun(async (_context) => {
+    logger.info("alertsEvaluateCron triggered");
+
+    // TODO: Implement daily alert evaluation
+    // 1. Load all active projects across all companies
+    // 2. Compute alerts for each project
+    // 3. Send digest emails to team members
+    // 4. Update escalation levels
+
+    logger.info("alertsEvaluateCron stub — implement in production");
+  });

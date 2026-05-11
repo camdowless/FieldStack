@@ -1,0 +1,8 @@
+node_modules/
+dist/
+# Ignore compiled TypeScript output in functions, not source lib directories
+functions/lib/
+.env
+.env.local
+*.log
+.firebase/

@@ -1,110 +1,183 @@
-# FieldStack
+# Firebase SaaS Template
 
-Construction schedule intelligence — parse schedules, track order timelines, and get alerts before installs slip.
+A production-ready SaaS starter built on Firebase. Ships with auth, billing, email, rate limiting, structured logging, and a full CI/CD pipeline. Copy it, run the initializer, and start building your product.
+
+## What's included
+
+**Auth**
+- Email/password signup with email verification
+- Google OAuth
+- Custom role claims (`user` / `admin`)
+- Password reset via Resend
+- Account deletion (GDPR/CCPA compliant - cancels Stripe sub, deletes Firestore data)
+
+**Billing**
+- Stripe Checkout for new subscriptions
+- Stripe Customer Portal for upgrades, downgrades, and payment method updates
+- Webhook handler with idempotency and Firestore sync
+- Cancel / reactivate flow with retention UI
+- Invoice history
+- Credit-based usage tracking
+- Plan configs stored in Firestore (no hardcoded prices)
+
+**Infrastructure**
+- Firestore-backed rate limiting (per-user, consistent across function instances)
+- Structured JSON logging compatible with Google Cloud Logging
+- Frontend error reporter with deduplication
+- Input sanitization on all API endpoints
+- CORS enforcement via environment variable
+- Support ticket submission via Resend
+
+**Frontend**
+- React 18 + TypeScript + Vite
+- shadcn/ui (50 components) + Tailwind CSS
+- Dark/light theme
+- Collapsible sidebar with credits bar
+- Settings page (profile, security, preferences)
+- Billing page (plans, invoices, cancel/reactivate)
+- Admin panel (stats, dev tools)
+- Error boundary
+
+**Canonical example feature**
+- Full CRUD for an `Items` resource
+- Real-time Firestore subscription
+- Auth-gated Cloud Function API
+- Demonstrates the full stack pattern to copy for your own features
+
+**DevOps**
+- GitHub Actions CI/CD (develop -> staging, master -> production)
+- Workload Identity Federation (no long-lived service account keys in CI)
+- Firebase Hosting with security headers (CSP, HSTS, X-Frame-Options)
+- Vitest test suite (191 tests)
+
+---
 
 ## Stack
 
-- **Frontend**: React + Vite + TypeScript + TailwindCSS + shadcn/ui
-- **Backend**: Firebase Cloud Functions (Node 22, TypeScript)
-- **Database**: Firestore
-- **Auth**: Firebase Authentication (email/password + Google OAuth)
-- **Storage**: Firebase Storage (schedule file uploads)
-- **Billing**: Stripe
-- **AI**: Claude (Anthropic) for schedule parsing
+| | |
+|---|---|
+| Frontend | React 18, TypeScript, Vite |
+| UI | shadcn/ui + Tailwind CSS |
+| Backend | Firebase Cloud Functions (Node 22) |
+| Database | Firestore |
+| Auth | Firebase Auth |
+| Payments | Stripe |
+| Email | Resend |
+| Hosting | Firebase Hosting |
+| CI/CD | GitHub Actions |
+| Tests | Vitest |
 
-## Local Development
+---
 
-### Prerequisites
+## Getting started
 
-- Node.js 22+
-- Firebase CLI: `npm install -g firebase-tools`
-- Firebase project with Auth, Firestore, and Storage enabled
+See [QUICKSTART.md](QUICKSTART.md) for the full setup guide.
 
-### Setup
-
-```bash
-# Install frontend dependencies
-cd frontend && npm install
-
-# Install functions dependencies
-cd ../functions && npm install
-```
-
-Create `frontend/.env.local` with your Firebase config:
-
-```
-VITE_FIREBASE_API_KEY=...
-VITE_FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
-VITE_FIREBASE_PROJECT_ID=your-project
-VITE_FIREBASE_STORAGE_BUCKET=your-project.firebasestorage.app
-VITE_FIREBASE_MESSAGING_SENDER_ID=...
-VITE_FIREBASE_APP_ID=...
-```
-
-Create `functions/.env` with your API keys:
-
-```
-ANTHROPIC_API_KEY=...
-STRIPE_SECRET_KEY=...
-STRIPE_WEBHOOK_SECRET=...
-CORS_ORIGIN=http://localhost:5173
-```
-
-### Run Locally
+The short version:
 
 ```bash
-# Terminal 1 — frontend dev server
-cd frontend && npm run dev
+# 1. Initialize the project (replaces all TEMPLATE_APP placeholders)
+npx ts-node scripts/init-project.ts
 
-# Terminal 2 — Firebase emulators (auth, firestore, functions)
-firebase emulators:start --only auth,firestore,functions
+# 2. Install dependencies
+npm install && npm install --prefix frontend && npm install --prefix functions
+
+# 3. Build and start everything (frontend + functions + Firebase emulators)
+npm run dev
 ```
 
-Frontend: http://localhost:5173  
-Emulator UI: http://localhost:4000
+> **How local dev works:** The Firebase Hosting emulator (port 5002) serves the
+> pre-built `frontend/dist/` folder — it does **not** use the Vite dev server.
+> `npm run dev` builds both the frontend and functions first, then starts all
+> emulators. Re-run it whenever you make code changes, or run
+> `npm run build:frontend` / `npm run build:functions` individually and let the
+> emulators pick up the new files.
 
-### Deploy
+| Service | URL |
+|---|---|
+| App (Firebase Hosting) | http://localhost:5002 |
+| Emulator UI | http://localhost:4000 |
+| Functions | http://localhost:5001 |
+| Firestore | http://localhost:8080 |
+| Auth | http://localhost:9099 |
+
+---
+
+## Project structure
+
+```
+.
+├── frontend/               React SPA
+│   ├── src/
+│   │   ├── components/     UI components (ui/ = shadcn, rest = app-specific)
+│   │   ├── contexts/       AuthContext, ThemeContext
+│   │   ├── hooks/          useCredits, usePlans, useItems, usePreferences
+│   │   ├── lib/            firebase.ts, api.ts, config.ts, errorReporter.ts
+│   │   └── pages/          ItemsPage, Billing, Settings, Help, SystemAdmin
+│   └── public/             Static assets (replace logo files here)
+│
+├── functions/              Firebase Cloud Functions
+│   ├── src/
+│   │   ├── index.ts        All Cloud Functions (auth, billing, items API, admin)
+│   │   ├── types.ts        Shared TypeScript types
+│   │   ├── plans.ts        Firestore-backed plan cache
+│   │   ├── seedPlans.ts    Plan seed data
+│   │   ├── emailService.ts Resend wrapper
+│   │   ├── emailTemplates.ts HTML email templates
+│   │   ├── logger.ts       Structured JSON logger
+│   │   ├── validation.ts   Input sanitization
+│   │   └── authHelpers.ts  Role check utilities
+│   └── scripts/
+│       ├── seedPlans.mjs   Seed plans to Firestore
+│       └── bootstrap-admin.ts  Grant admin role to a user
+│
+├── landing-site/           Static marketing/landing page
+│   └── public/             Pure HTML/CSS - no build step
+│
+├── email-templates/        Standalone HTML email previews (reference only)
+├── firestore.rules         Firestore security rules
+├── firestore.indexes.json  Composite indexes
+├── firebase.json           Firebase project config
+├── .firebaserc             Project aliases
+├── scripts/
+│   └── init-project.ts     Project initializer
+├── QUICKSTART.md           Setup guide
+└── ARCHITECTURE.md         Technical reference
+```
+
+---
+
+## Adding a feature
+
+The `Items` feature is the reference implementation. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full pattern.
+
+Short version: add a Firestore subcollection, a Cloud Function, a rewrite in `firebase.json`, API helpers in `api.ts`, a real-time hook, and a page.
+
+---
+
+## Rebranding
+
+Run `scripts/init-project.ts` - it handles most replacements automatically. Then:
+
+1. Replace logo files in `frontend/public/` and `landing-site/public/`
+2. Update `frontend/src/lib/config.ts` for brand colors
+3. Update `landing-site/public/index.html` with your product copy
+
+---
+
+## Tests
 
 ```bash
-# Build and deploy everything
-firebase deploy
-
-# Deploy only functions
-firebase deploy --only functions
-
-# Deploy only hosting
-cd frontend && npm run build && firebase deploy --only hosting
+bun run test --cwd frontend    # 50 tests
+bun run test --cwd functions   # 141 tests
 ```
 
-## Project Structure
+---
 
-```
-FieldStack/
-├── frontend/          # React SPA
-│   └── src/
-│       ├── components/
-│       │   └── project/   # Project detail tabs
-│       ├── hooks/         # TanStack Query + Firestore listeners
-│       ├── lib/           # Firebase init, API client
-│       └── pages/
-├── functions/         # Cloud Functions
-│   └── src/
-│       └── fieldstack/    # Domain functions (projects, parser, alerts, orders)
-├── firestore.rules
-├── firestore.indexes.json
-└── firebase.json
+## Deploy
+
+```bash
+firebase deploy --project your-project-id
 ```
 
-## Features (Phase 1)
-
-- **Company onboarding** — provision a company on first sign-up
-- **Projects** — create and manage construction projects
-- **Schedule upload** — upload PDF, XLSX, CSV, or TXT schedules; Claude parses tasks and order items
-- **Orders** — track order status (NOT_ORDERED → ORDERED → IN_TRANSIT → DELIVERED)
-- **Alerts** — CRITICAL/WARNING/INFO alerts based on order-by dates vs install dates
-- **Changes** — detect and log schedule date shifts between uploads
-- **Feed** — activity log per project
-
-## Phase 2 (Planned)
-
-AI chat assistant, Gmail integration, Procore sync, team management, escalation workflows, magic links.
+Or push to `master` to trigger the GitHub Actions production deploy. See [QUICKSTART.md](QUICKSTART.md) for the required GitHub Secrets.

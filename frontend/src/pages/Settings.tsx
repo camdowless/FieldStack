@@ -1,13 +1,24 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { Switch } from "@/components/ui/switch";
+import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { toast } from "@/hooks/use-toast";
+import { usePreferences } from "@/hooks/usePreferences";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme } from "@/contexts/ThemeContext";
 import { motion } from "framer-motion";
@@ -20,7 +31,7 @@ import {
   Sun,
   Moon,
   CheckCircle2,
-  AlertCircle,
+  Trash2,
 } from "lucide-react";
 
 const fadeUp = {
@@ -29,16 +40,43 @@ const fadeUp = {
 };
 
 const Settings = () => {
-  const { user, sendPasswordReset } = useAuth();
+  const { prefs, update } = usePreferences();
+  const { user, profile, sendPasswordReset, deleteAccount, updateProfile } = useAuth();
   const { theme, toggleTheme } = useTheme();
 
   const [displayName, setDisplayName] = useState(user?.displayName ?? "");
-  const [company, setCompany] = useState("");
+  const [company, setCompany] = useState(profile?.company ?? "");
+  const [saveLoading, setSaveLoading] = useState(false);
   const [resetSent, setResetSent] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
 
-  const handleSaveProfile = () => {
-    toast({ title: "Profile updated", description: "Your profile changes have been saved." });
+  // Keep local fields in sync if the Firestore profile snapshot updates
+  useEffect(() => {
+    setDisplayName(profile?.displayName ?? user?.displayName ?? "");
+    setCompany(profile?.company ?? "");
+  }, [profile, user]);
+
+  const isGoogleAccount = user?.providerData?.some((p) => p.providerId === "google.com") ?? false;
+
+  // Delete account flow — two-step confirmation
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [deleteStep, setDeleteStep] = useState<1 | 2>(1);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const DELETE_CONFIRM_PHRASE = "delete my account";
+
+  const handleSaveProfile = async () => {
+    setSaveLoading(true);
+    try {
+      await updateProfile({ displayName: displayName.trim(), company: company.trim() });
+      toast({ title: "Profile updated", description: "Your profile changes have been saved." });
+    } catch (err) {
+      console.error("[Settings] Failed to save profile:", err);
+      toast({ title: "Error", description: "Failed to save profile. Please try again.", variant: "destructive" });
+    } finally {
+      setSaveLoading(false);
+    }
   };
 
   const handlePasswordReset = async () => {
@@ -58,11 +96,33 @@ const Settings = () => {
     }
   };
 
+  const handleDeleteAccount = async () => {
+    if (deleteConfirmText.trim().toLowerCase() !== DELETE_CONFIRM_PHRASE) return;
+    setIsDeleting(true);
+    try {
+      await deleteAccount();
+      // deleteAccount signs the user out and redirects — no further action needed here.
+    } catch {
+      toast({
+        title: "Deletion failed",
+        description: "Something went wrong. Please try again or contact support.",
+        variant: "destructive",
+      });
+      setIsDeleting(false);
+    }
+  };
+
+  const openDeleteDialog = () => {
+    setDeleteStep(1);
+    setDeleteConfirmText("");
+    setShowDeleteDialog(true);
+  };
+
   return (
     <div className="p-6 max-w-2xl">
       <motion.div {...fadeUp} transition={{ duration: 0.3 }} className="mb-6">
         <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
-        <p className="text-muted-foreground text-sm mt-1">Manage your profile and security settings.</p>
+        <p className="text-muted-foreground text-sm mt-1">Manage your profile, security, and search preferences.</p>
       </motion.div>
 
       <motion.div {...fadeUp} transition={{ duration: 0.3, delay: 0.05 }}>
@@ -111,12 +171,12 @@ const Settings = () => {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <Label htmlFor="company">Company</Label>
+                    <Label htmlFor="company">Company / Agency</Label>
                     <Input
                       id="company"
                       value={company}
                       onChange={(e) => setCompany(e.target.value)}
-                      placeholder="Acme Inc."
+                      placeholder="Acme Web Services"
                     />
                   </div>
                 </div>
@@ -130,7 +190,9 @@ const Settings = () => {
                 </div>
 
                 <div className="flex justify-end">
-                  <Button onClick={handleSaveProfile} size="sm">Save Profile</Button>
+                  <Button onClick={handleSaveProfile} size="sm" disabled={saveLoading}>
+                    {saveLoading ? "Saving…" : "Save Profile"}
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -140,15 +202,21 @@ const Settings = () => {
           <TabsContent value="security">
             <Card>
               <CardContent className="pt-6 space-y-5">
-                <div className="flex items-start justify-between gap-4">
+                {/* Password reset */}
+                <div className={`flex items-start justify-between gap-4 ${isGoogleAccount ? "opacity-50" : ""}`}>
                   <div className="flex items-start gap-3">
                     <div className="mt-0.5 p-2 rounded-lg bg-muted">
                       <KeyRound className="w-4 h-4 text-muted-foreground" />
                     </div>
                     <div>
-                      <p className="text-sm font-medium">Password</p>
+                      <p className="text-sm font-medium">Password Reset</p>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        We'll send a secure reset link to <span className="font-medium text-foreground">{user?.email}</span>
+                        {isGoogleAccount
+                          ? "Your account is connected through Google — no password to manage."
+                          : resetSent
+                          ? <>Check <span className="font-medium text-foreground">{user?.email}</span> — a reset link is on its way. Follow the link in the email to set a new password.</>
+                          : <>To change your password, we'll send a reset link to <span className="font-medium text-foreground">{user?.email}</span>. Click the link in that email to set a new password.</>
+                        }
                       </p>
                     </div>
                   </div>
@@ -156,12 +224,12 @@ const Settings = () => {
                     variant="outline"
                     size="sm"
                     onClick={handlePasswordReset}
-                    disabled={resetSent || resetLoading || !user?.email}
+                    disabled={isGoogleAccount || resetSent || resetLoading || !user?.email}
                     className="shrink-0"
                   >
                     {resetSent ? (
                       <span className="flex items-center gap-1.5 text-green-600">
-                        <CheckCircle2 className="w-3.5 h-3.5" /> Sent
+                        <CheckCircle2 className="w-3.5 h-3.5" /> Email sent
                       </span>
                     ) : resetLoading ? (
                       "Sending..."
@@ -173,11 +241,27 @@ const Settings = () => {
 
                 <Separator />
 
-                <div className="flex items-start gap-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
-                  <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
-                  <p className="text-xs text-amber-700 dark:text-amber-400">
-                    For your security, always sign out when using shared devices and never share your login credentials.
-                  </p>
+                {/* Delete account */}
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5 p-2 rounded-lg bg-destructive/10">
+                      <Trash2 className="w-4 h-4 text-destructive" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">Delete Account</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Permanently removes your account and all associated data. This cannot be undone.
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={openDeleteDialog}
+                    className="shrink-0"
+                  >
+                    Delete Account
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -187,6 +271,7 @@ const Settings = () => {
           <TabsContent value="preferences">
             <Card>
               <CardContent className="pt-6 space-y-6">
+                {/* Theme */}
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <div className="p-2 rounded-lg bg-muted">
@@ -207,11 +292,107 @@ const Settings = () => {
                     aria-label="Toggle dark theme"
                   />
                 </div>
+
+                <Separator />
+
+                {/* Items per page */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium">Items Per Page</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        How many items to show per page.
+                      </p>
+                    </div>
+                    <span className="text-sm font-mono font-semibold tabular-nums bg-muted px-2 py-0.5 rounded">
+                      {prefs.itemsPerPage}
+                    </span>
+                  </div>
+                  <Slider
+                    min={5}
+                    max={100}
+                    step={5}
+                    value={[prefs.itemsPerPage]}
+                    onValueChange={([v]) => update({ itemsPerPage: v })}
+                    aria-label="Items per page"
+                  />
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>Fewer</span>
+                    <span>More</span>
+                  </div>
+                </div>
+
+                {/* Add your app-specific preferences here */}
               </CardContent>
             </Card>
           </TabsContent>
         </Tabs>
       </motion.div>
+
+      {/* ── DELETE ACCOUNT DIALOG ──────────────────────────────── */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={(open) => { if (!isDeleting) setShowDeleteDialog(open); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+              <Trash2 className="w-5 h-5" />
+              {deleteStep === 1 ? "Are you sure?" : "Confirm deletion"}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-sm">
+                {deleteStep === 1 ? (
+                  <>
+                    <p>Deleting your account will permanently remove:</p>
+                    <ul className="list-disc list-inside space-y-1 text-muted-foreground">
+                      <li>Your profile and account credentials</li>
+                      <li>All search history and saved leads</li>
+                      <li>Your active subscription (no refund)</li>
+                      <li>All billing and usage data</li>
+                    </ul>
+                    <p className="font-medium text-foreground">This action is irreversible.</p>
+                  </>
+                ) : (
+                  <>
+                    <p>
+                      Type <span className="font-mono font-semibold text-foreground">{DELETE_CONFIRM_PHRASE}</span> to confirm.
+                    </p>
+                    <Input
+                      value={deleteConfirmText}
+                      onChange={(e) => setDeleteConfirmText(e.target.value)}
+                      placeholder={DELETE_CONFIRM_PHRASE}
+                      autoFocus
+                      aria-label="Type to confirm account deletion"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && deleteConfirmText.trim().toLowerCase() === DELETE_CONFIRM_PHRASE) {
+                          handleDeleteAccount();
+                        }
+                      }}
+                    />
+                  </>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            {deleteStep === 1 ? (
+              <Button
+                variant="destructive"
+                onClick={() => setDeleteStep(2)}
+              >
+                Continue
+              </Button>
+            ) : (
+              <Button
+                variant="destructive"
+                disabled={deleteConfirmText.trim().toLowerCase() !== DELETE_CONFIRM_PHRASE || isDeleting}
+                onClick={handleDeleteAccount}
+              >
+                {isDeleting ? "Deleting…" : "Delete my account"}
+              </Button>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

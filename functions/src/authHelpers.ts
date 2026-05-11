@@ -1,4 +1,5 @@
 import * as admin from "firebase-admin";
+import { logger } from "./logger";
 
 /**
  * Pure role-checking logic for the "user" role tier.
@@ -27,7 +28,7 @@ export function checkUserRole(decoded: admin.auth.DecodedIdToken): void {
 export function checkAdminRole(decoded: admin.auth.DecodedIdToken, uid: string, functionName?: string): void {
   const role = (decoded as admin.auth.DecodedIdToken & { role?: string }).role;
   if (role !== "admin") {
-    console.warn(`[auth] FORBIDDEN uid=${uid} function=${functionName ?? "unknown"}`);
+    logger.warn("FORBIDDEN", { uid, function_name: functionName ?? "unknown" });
     throw new Error("FORBIDDEN");
   }
 }

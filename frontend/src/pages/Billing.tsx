@@ -76,6 +76,8 @@ const Billing = () => {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [invoicesLoading, setInvoicesLoading] = useState(false);
   const [invoicesLoaded, setInvoicesLoaded] = useState(false);
+  const [invoicesHasMore, setInvoicesHasMore] = useState(false);
+  const [invoicesLoadingMore, setInvoicesLoadingMore] = useState(false);
 
   // Downgrade confirmation state
   const [downgradeTarget, setDowngradeTarget] = useState<{ plan: PlanConfig; priceId: string } | null>(null);
@@ -131,6 +133,7 @@ const Billing = () => {
       const data = await res.json();
       if (res.ok) {
         setInvoices(data.invoices ?? []);
+        setInvoicesHasMore(data.hasMore ?? false);
         setInvoicesLoaded(true);
       } else {
         toast.error(data.error ?? "Failed to load invoices.");
@@ -140,6 +143,31 @@ const Billing = () => {
       toast.error("Failed to load invoices. Check your connection.");
     } finally {
       setInvoicesLoading(false);
+    }
+  }
+
+  async function loadMoreInvoices() {
+    if (invoicesLoadingMore || !invoicesHasMore || invoices.length === 0) return;
+    setInvoicesLoadingMore(true);
+    try {
+      const token = await getToken();
+      if (!token) return;
+      const lastId = invoices[invoices.length - 1].id;
+      const res = await fetch(`/api/getInvoices?startingAfter=${encodeURIComponent(lastId)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setInvoices((prev) => [...prev, ...(data.invoices ?? [])]);
+        setInvoicesHasMore(data.hasMore ?? false);
+      } else {
+        toast.error(data.error ?? "Failed to load more invoices.");
+      }
+    } catch (err) {
+      console.error("[getInvoices loadMore]", err);
+      toast.error("Failed to load more invoices. Check your connection.");
+    } finally {
+      setInvoicesLoadingMore(false);
     }
   }
 
@@ -425,7 +453,16 @@ const Billing = () => {
                   {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-64 w-full" />)}
                 </div>
               ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <>
+                  {/* ROI callout */}
+                  <div className="flex items-start gap-3 rounded-lg border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/30 px-4 py-3 mb-4">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 text-green-600 dark:text-green-400 shrink-0 mt-0.5"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+                    <p className="text-sm text-green-800 dark:text-green-300">
+                      <span className="font-semibold">Upgrade to unlock more credits and features.</span>{" "}
+                      Cancel anytime, no commitment required.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                   {plans.map((p) => {
                     const isCurrent = p.id === plan;
                     const currentIndex = plans.findIndex((pl) => pl.id === plan);
@@ -447,10 +484,29 @@ const Billing = () => {
                     const isFree = p.priceUsdCents === 0 && !p.stripePriceId;
                     const isDowngradeToFree = isFree && currentIndex > 0;
 
+                    // True when the user is on this plan tier but on a different billing interval.
+                    // e.g. on pro monthly but the toggle shows Annual - offer "Switch to Annual".
+                    // We check the stored stripePriceId first; if it's not set yet (existing users),
+                    // we infer the current interval from which of the plan's price IDs matches.
+                    const currentStripePriceId = profile?.subscription?.stripePriceId ?? null;
+                    const inferredOnAnnual =
+                      currentStripePriceId !== null
+                        ? currentStripePriceId === p.stripePriceIdAnnual
+                        : false; // can't infer without stored price ID — assume monthly
+                    const currentIntervalMatchesToggle = currentStripePriceId !== null
+                      ? (isAnnual ? inferredOnAnnual : !inferredOnAnnual)
+                      : !isAnnual; // no stored price ID → assume monthly, so monthly toggle matches
+                    const isIntervalSwitch =
+                      isCurrent &&
+                      activePriceId !== null &&
+                      !currentIntervalMatchesToggle;
+
                     function handlePlanAction() {
                       if (!activePriceId && !isFree) return;
                       if (isDowngradeToFree) {
                         return;
+                      } else if (isIntervalSwitch && activePriceId) {
+                        handleUpgrade(activePriceId);
                       } else if (isDowngrade && activePriceId) {
                         setDowngradeTarget({ plan: p, priceId: activePriceId });
                       } else if (activePriceId) {
@@ -459,7 +515,7 @@ const Billing = () => {
                     }
 
                     const isLoading = activePriceId ? upgradingPriceId === activePriceId : false;
-                    const isDisabled = isCurrent || isDowngradeToFree || isLoading || (!activePriceId && !isFree);
+                    const isDisabled = (isCurrent && !isIntervalSwitch) || isDowngradeToFree || isLoading || (!activePriceId && !isFree);
 
                     return (
                       <Card key={p.id} className={isCurrent ? "border-primary ring-1 ring-primary" : ""}>
@@ -489,12 +545,16 @@ const Billing = () => {
                             ))}
                           </ul>
                           <Button
-                            variant={isCurrent ? "secondary" : isDowngrade || isDowngradeToFree ? "outline" : "default"}
+                            variant={isCurrent && !isIntervalSwitch ? "secondary" : isDowngrade || isDowngradeToFree ? "outline" : "default"}
                             className="w-full"
                             disabled={isDisabled}
                             onClick={handlePlanAction}
                           >
-                            {isCurrent ? (cancelAtPeriodEnd ? "Cancelling" : "Current Plan")
+                            {isLoading && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
+                            {isCurrent && !isIntervalSwitch
+                              ? (cancelAtPeriodEnd ? "Cancelling" : "Current Plan")
+                              : isIntervalSwitch
+                              ? (isAnnual ? "Switch to Annual" : "Switch to Monthly")
                               : isDowngradeToFree ? "Free Plan"
                               : isDowngrade ? "Downgrade"
                               : "Upgrade"}
@@ -504,10 +564,9 @@ const Billing = () => {
                     );
                   })}
                 </div>
+                </>
               )}
             </div>
-
-
           </div>
         </TabsContent>
 
@@ -578,6 +637,17 @@ const Billing = () => {
                       </div>
                     );
                   })}
+                </div>
+              )}
+              {invoicesHasMore && (
+                <div className="flex justify-center pt-4">
+                  <button
+                    onClick={loadMoreInvoices}
+                    disabled={invoicesLoadingMore}
+                    className="text-sm text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                  >
+                    {invoicesLoadingMore ? "Loading…" : "Load more invoices"}
+                  </button>
                 </div>
               )}
             </CardContent>

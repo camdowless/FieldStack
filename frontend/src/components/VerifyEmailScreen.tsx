@@ -1,8 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
-import { Search, Mail, CheckCircle2, Loader2 } from "lucide-react";
+import { Mail, CheckCircle2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+
+// Session-storage key so we don't auto-fire a second email if the component
+// re-mounts (e.g. React StrictMode double-invoke, navigation back, etc.).
+const SESSION_KEY = "verifyEmailAutoSent";
 
 export function VerifyEmailScreen() {
   const { user, resendVerificationEmail, refreshEmailVerified, logout } = useAuth();
@@ -13,10 +17,18 @@ export function VerifyEmailScreen() {
   const [errorMsg, setErrorMsg] = useState("");
   const sentRef = useRef(false);
 
-  // Auto-send once on mount
+  // Auto-send once per session. Using sessionStorage prevents a second call
+  // when the component re-mounts (StrictMode, tab restore, etc.) which would
+  // immediately hit the rate limit and cause a 500 on the very first load.
   useEffect(() => {
     if (sentRef.current) return;
     sentRef.current = true;
+    if (sessionStorage.getItem(SESSION_KEY)) {
+      // Already sent in this session — just show the "resend" state without calling the API
+      setResent(true);
+      setCooldown(60);
+      return;
+    }
     handleResend();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -46,11 +58,15 @@ export function VerifyEmailScreen() {
       await resendVerificationEmail();
       setResent(true);
       setCooldown(60);
+      sessionStorage.setItem(SESSION_KEY, "1");
       toast.success("Verification email sent — check your inbox.");
-    } catch (err: any) {
-      const msg: string = err?.message ?? "";
+    } catch (err: unknown) {
+      const msg: string = (err as { message?: string })?.message ?? "";
       if (msg.includes("Too many attempts") || msg.includes("resource-exhausted") || msg.includes("429")) {
-        const notice = "Firebase rate-limited this email address. Wait ~10 minutes and try again.";
+        const waitMatch = msg.match(/wait (\d+) seconds/i);
+        const notice = waitMatch
+          ? `Too many requests. Please wait ${waitMatch[1]} seconds and try again.`
+          : "Too many requests. Please wait a minute and try again.";
         setErrorMsg(notice);
         toast.error(notice);
       } else {
@@ -75,11 +91,11 @@ export function VerifyEmailScreen() {
       <div className="w-full max-w-sm text-center space-y-6">
         {/* Logo */}
         <div className="flex items-center justify-center gap-2 mb-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg gradient-bg">
-            <Search className="h-4 w-4 text-white" />
+          <div className="h-9 w-9 rounded-md gradient-bg flex items-center justify-center text-white font-bold text-base">
+            A
           </div>
-          <span className="text-xl font-bold">
-            Gimme<span className="gradient-text">Leads</span>
+          <span className="text-xl font-bold gradient-text">
+            TEMPLATE_APP
           </span>
         </div>
 

@@ -7,9 +7,6 @@
  *
  * Stripe Price IDs are read from environment variables so they differ
  * between test and production without code changes.
- *
- * TEMPLATE: Customize plan names, pricing, credits, feature flags,
- * and feature bullet points to match your product.
  */
 
 import type { PlanConfig } from "./plans";
@@ -22,72 +19,69 @@ export function buildPlanSeedData(): Omit<PlanConfig, "id">[] {
       annualPriceUsdCents: null,
       stripePriceId: null,
       stripePriceIdAnnual: null,
-      creditsPerMonth: 10,
-      featureFlags: {},
+      creditsPerMonth: 5,
+      canSaveLeads: false,
+      canGenerateScripts: false,
+      canEnrichContacts: false,
       features: [
-        "10 actions / month",
-        "Core features",
+        "5 credits / month",
+        "Basic features",
       ],
       sortOrder: 0,
       active: true,
     },
     {
-      name: "Starter",
+      name: "Pro",
       priceUsdCents: 1900,
       annualPriceUsdCents: 15200,
-      stripePriceId: process.env.STRIPE_PRICE_STARTER ?? null,
-      stripePriceIdAnnual: process.env.STRIPE_PRICE_STARTER_ANNUAL ?? null,
-      creditsPerMonth: 100,
-      featureFlags: {
-        featureA: true,
-      },
+      stripePriceId: process.env.STRIPE_PRICE_PRO ?? null,
+      stripePriceIdAnnual: process.env.STRIPE_PRICE_PRO_ANNUAL ?? null,
+      creditsPerMonth: 50,
+      canSaveLeads: true,
+      canGenerateScripts: false,
+      canEnrichContacts: false,
       features: [
-        "100 actions / month",
-        "Core features",
-        "Feature A",
+        "50 credits / month",
+        "All features",
+        "Priority support",
       ],
       sortOrder: 1,
       active: true,
     },
     {
-      name: "Growth",
+      name: "Agency",
       priceUsdCents: 4900,
       annualPriceUsdCents: 39200,
-      stripePriceId: process.env.STRIPE_PRICE_GROWTH ?? null,
-      stripePriceIdAnnual: process.env.STRIPE_PRICE_GROWTH_ANNUAL ?? null,
-      creditsPerMonth: 500,
-      featureFlags: {
-        featureA: true,
-        featureB: true,
-      },
+      stripePriceId: process.env.STRIPE_PRICE_AGENCY ?? null,
+      stripePriceIdAnnual: process.env.STRIPE_PRICE_AGENCY_ANNUAL ?? null,
+      creditsPerMonth: 200,
+      canSaveLeads: true,
+      canGenerateScripts: true,
+      canEnrichContacts: true,
       features: [
-        "500 actions / month",
-        "Core features",
-        "Feature A",
-        "Feature B",
+        "200 credits / month",
+        "All features",
+        "Team access",
+        "Priority support",
       ],
       sortOrder: 2,
       active: true,
     },
     {
-      name: "Pro",
+      name: "Enterprise",
       priceUsdCents: 9900,
       annualPriceUsdCents: 79200,
-      stripePriceId: process.env.STRIPE_PRICE_PRO ?? null,
-      stripePriceIdAnnual: process.env.STRIPE_PRICE_PRO_ANNUAL ?? null,
-      creditsPerMonth: 2000,
-      featureFlags: {
-        featureA: true,
-        featureB: true,
-        featureC: true,
-      },
+      stripePriceId: process.env.STRIPE_PRICE_ENTERPRISE ?? null,
+      stripePriceIdAnnual: process.env.STRIPE_PRICE_ENTERPRISE_ANNUAL ?? null,
+      creditsPerMonth: 1000,
+      canSaveLeads: true,
+      canGenerateScripts: true,
+      canEnrichContacts: true,
       features: [
-        "2,000 actions / month",
-        "Core features",
-        "Feature A",
-        "Feature B",
-        "Feature C",
-        "Priority support",
+        "1,000 credits / month",
+        "All features",
+        "Unlimited team access",
+        "Dedicated support",
       ],
       sortOrder: 3,
       active: true,
@@ -95,6 +89,6 @@ export function buildPlanSeedData(): Omit<PlanConfig, "id">[] {
   ];
 }
 
-/** Plan IDs — must match Firestore document IDs */
-export const PLAN_IDS = ["free", "starter", "growth", "pro"] as const;
+/** Plan IDs - must match Firestore document IDs and SubscriptionPlan type */
+export const PLAN_IDS = ["free", "pro", "agency", "enterprise"] as const;
 export type PlanId = typeof PLAN_IDS[number];

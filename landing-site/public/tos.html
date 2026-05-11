@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Terms of Service — TEMPLATE_APP</title>
+<meta name="description" content="TEMPLATE_APP Terms of Service. Read our terms before using the platform." />
+<link rel="canonical" href="https://www.example.com/tos" />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://www.example.com/tos" />
+<meta property="og:title" content="Terms of Service — TEMPLATE_APP" />
+<meta property="og:description" content="TEMPLATE_APP Terms of Service. Read our terms before using the platform." />
+<meta property="og:site_name" content="TEMPLATE_APP" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --paper: #FAF8F3;
+    --paper-2: #F3EFE6;
+    --ink: #14161A;
+    --ink-2: #2A2D33;
+    --muted: #6E6A62;
+    --muted-2: #9B958B;
+    --hairline: #E5DFD3;
+    --hairline-strong: #CFC7B5;
+    --blue: #3B82F6;
+    --blue-deep: #1E5EDC;
+    --blue-wash: #EAF1FE;
+    --blue-ink: #0F3E99;
+    --sage: #5C7A64;
+    --clay: #9A7752;
+    --clay-wash: #F4ECDF;
+    --radius: 10px;
+    --shadow-sm: 0 1px 2px rgba(20,22,26,0.04), 0 1px 0 rgba(20,22,26,0.02);
+    --shadow-md: 0 10px 30px -12px rgba(20,22,26,0.12), 0 2px 6px rgba(20,22,26,0.04);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: 'Geist', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+      radial-gradient(ellipse at 20% 10%, rgba(154, 119, 82, 0.04) 0%, transparent 55%),
+      radial-gradient(ellipse at 85% 90%, rgba(92, 122, 100, 0.035) 0%, transparent 55%);
+    z-index: -1;
+  }
+
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .container { max-width: 1200px; margin: 0 auto; padding: 0 40px; }
+
+  .display {
+    font-family: 'Fraunces', Georgia, serif;
+    font-optical-sizing: auto;
+    font-variation-settings: "opsz" 96, "SOFT" 30;
+    letter-spacing: -0.02em;
+    line-height: 1.02;
+  }
+  .mono { font-family: 'Geist Mono', ui-monospace, monospace; }
+
+  .eyebrow {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--clay);
+  }
+
+  /* Nav */
+  nav {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    background: rgba(250, 248, 243, 0.82);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--hairline);
+  }
+  .nav-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 0;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+    font-size: 17px;
+    letter-spacing: -0.01em;
+    color: inherit;
+    text-decoration: none;
+  }
+  .brand b { font-weight: 700; color: var(--ink); }
+  .brand span { color: var(--blue); font-weight: 600; }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 500;
+    font-family: inherit;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: transform .12s ease, box-shadow .12s ease, background .12s ease;
+    text-decoration: none;
+  }
+  .btn-primary {
+    background: var(--ink);
+    color: var(--paper);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.1) inset, 0 2px 8px rgba(20,22,26,0.15);
+  }
+  .btn-primary:hover { background: #000; transform: translateY(-1px); text-decoration: none; }
+
+  /* Page layout */
+  .tos-wrap {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 72px;
+    padding: 64px 0 120px;
+    align-items: start;
+  }
+
+  /* Sticky TOC */
+  .tos-toc {
+    position: sticky;
+    top: 80px;
+  }
+  .tos-toc-label {
+    font-family: 'Geist Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted-2);
+    margin-bottom: 14px;
+  }
+  .tos-toc ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border-left: 1px solid var(--hairline);
+  }
+  .tos-toc ol li a {
+    display: block;
+    padding: 6px 0 6px 16px;
+    font-size: 13px;
+    color: var(--muted);
+    text-decoration: none;
+    transition: color .12s ease;
+    line-height: 1.4;
+  }
+  .tos-toc ol li a:hover { color: var(--ink); }
+
+  /* Main content */
+  .tos-content {
+    min-width: 0;
+  }
+
+  .tos-header {
+    margin-bottom: 56px;
+    padding-bottom: 40px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .tos-header h1 {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 96, "SOFT" 30;
+    font-size: clamp(36px, 4vw, 52px);
+    font-weight: 400;
+    letter-spacing: -0.025em;
+    line-height: 1.05;
+    margin: 14px 0 16px;
+    color: var(--ink);
+  }
+  .tos-header .updated {
+    font-family: 'Geist Mono', monospace;
+    font-size: 12px;
+    color: var(--muted-2);
+    letter-spacing: 0.04em;
+  }
+
+  /* Sections */
+  .tos-section {
+    padding: 40px 0;
+    border-bottom: 1px solid var(--hairline);
+  }
+  .tos-section:last-child { border-bottom: none; }
+
+  .tos-section-num {
+    font-family: 'Geist Mono', monospace;
+    font-size: 11px;
+    color: var(--clay);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+
+  .tos-section h2 {
+    font-family: 'Fraunces', serif;
+    font-variation-settings: "opsz" 72, "SOFT" 20;
+    font-size: 24px;
+    font-weight: 500;
+    letter-spacing: -0.015em;
+    margin: 0 0 16px;
+    color: var(--ink);
+    line-height: 1.2;
+  }
+
+  .tos-section p {
+    font-size: 15px;
+    line-height: 1.65;
+    color: var(--ink-2);
+    margin: 0 0 14px;
+    max-width: 680px;
+  }
+  .tos-section p:last-child { margin-bottom: 0; }
+
+  .tos-section ul {
+    margin: 12px 0 14px;
+    padding: 0;
+    list-style: none;
+    max-width: 680px;
+  }
+  .tos-section ul li {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--ink-2);
+    margin: 8px 0;
+  }
+  .tos-section ul li::before {
+    content: '';
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--clay);
+    flex-shrink: 0;
+    margin-top: 9px;
+  }
+
+  /* Inline callout box */
+  .tos-note {
+    background: var(--paper-2);
+    border: 1px solid var(--hairline);
+    border-left: 3px solid var(--clay);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    padding: 16px 20px;
+    margin: 16px 0;
+    max-width: 680px;
+  }
+  .tos-note p {
+    margin: 0;
+    font-size: 14px;
+    color: var(--muted);
+  }
+
+  /* Footer */
+  footer {
+    padding: 48px 0 56px;
+    border-top: 1px solid var(--hairline);
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .footer-inner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 20px;
+  }
+  .footer-links { display: flex; gap: 24px; }
+  .footer-links a { color: var(--muted); text-decoration: none; }
+  .footer-links a:hover { color: var(--ink); }
+
+  /* Responsive */
+  @media (max-width: 860px) {
+    .tos-wrap { grid-template-columns: 1fr; gap: 0; padding: 40px 0 80px; }
+    .tos-toc { display: none; }
+    .container { padding: 0 24px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Nav -->
+<nav>
+  <div class="container nav-inner">
+    <a href="/" class="brand">
+      <span><b>Gimme</b><span>Leads</span></span>
+    </a>
+    <a href="https://app.example.com" class="btn btn-primary">Get started</a>
+  </div>
+</nav>
+
+<div class="container">
+  <div class="tos-wrap">
+
+    <!-- Sticky TOC -->
+    <aside class="tos-toc" aria-label="Table of contents">
+      <div class="tos-toc-label">On this page</div>
+      <ol>
+        <li><a href="#acceptance">1. Acceptance of Terms</a></li>
+        <li><a href="#description">2. Description of Service</a></li>
+        <li><a href="#registration">3. Account Registration</a></li>
+        <li><a href="#credits">4. Credits and Searches</a></li>
+        <li><a href="#acceptable-use">5. Acceptable Use</a></li>
+        <li><a href="#data-accuracy">6. Data Accuracy</a></li>
+        <li><a href="#removal">7. Business Listing Removal</a></li>
+        <li><a href="#billing">8. Payment and Billing</a></li>
+        <li><a href="#ip">9. Intellectual Property</a></li>
+        <li><a href="#availability">10. Service Availability</a></li>
+        <li><a href="#liability">11. Limitation of Liability</a></li>
+        <li><a href="#termination">12. Termination</a></li>
+        <li><a href="#changes">13. Changes to Terms</a></li>
+        <li><a href="#governing-law">14. Governing Law</a></li>
+        <li><a href="#contact">15. Contact</a></li>
+      </ol>
+    </aside>
+
+    <!-- Content -->
+    <main class="tos-content">
+      <div class="tos-header">
+        <div class="eyebrow">Legal</div>
+        <h1>Terms of Service</h1>
+        <div class="updated">Last updated: April 23, 2026</div>
+      </div>
+
+      <div id="acceptance" class="tos-section">
+        <div class="tos-section-num">01</div>
+        <h2>Acceptance of Terms</h2>
+        <p>By accessing or using TEMPLATE_APP ("Service"), you agree to be bound by these Terms of Service. If you do not agree, do not use the Service. These terms apply to all users, including visitors, registered users, and paying subscribers. You must be at least 18 years old to use the Service.</p>
+      </div>
+
+      <div id="description" class="tos-section">
+        <div class="tos-section-num">02</div>
+        <h2>Description of Service</h2>
+        <p>TEMPLATE_APP is a lead discovery platform that helps you find potential business clients by searching publicly available business listing data from sources including Google Maps. The Service allows you to:</p>
+        <ul>
+          <li>Search for businesses by location and category</li>
+          <li>View business details such as names, addresses, phone numbers, websites, ratings, and review counts</li>
+          <li>Save leads for follow-up — all through a credit-based system</li>
+        </ul>
+      </div>
+
+      <div id="registration" class="tos-section">
+        <div class="tos-section-num">03</div>
+        <h2>Account Registration</h2>
+        <p>You must create an account to use the Service. You are responsible for providing accurate information and maintaining the security of your account credentials. You are responsible for all activity that occurs under your account.</p>
+      </div>
+
+      <div id="credits" class="tos-section">
+        <div class="tos-section-num">04</div>
+        <h2>Credits and Searches</h2>
+        <p>The Service operates on a credit-based model. Browsing and filtering results is free. Searching for leads consumes credits.</p>
+        <ul>
+          <li>Monthly plan credits are allocated each billing cycle and expire when your plan renews.</li>
+          <li>One-time credit top-ups never expire and remain in your account until used.</li>
+          <li>Viewing a previously searched lead does not consume additional credits.</li>
+        </ul>
+      </div>
+
+      <div id="acceptable-use" class="tos-section">
+        <div class="tos-section-num">05</div>
+        <h2>Acceptable Use</h2>
+        <p>You agree to use the Service only for lawful purposes. You may not:</p>
+        <ul>
+          <li>Use lead data for spam, harassment, or any purpose that violates applicable laws including CAN-SPAM and GDPR</li>
+          <li>Resell, redistribute, or sublicense lead data obtained through the Service without authorization</li>
+          <li>Use automated tools, bots, or scripts to access the Service beyond normal usage patterns</li>
+          <li>Attempt to circumvent credit requirements, rate limits, or security measures</li>
+          <li>Misrepresent your identity or affiliation when using the Service</li>
+        </ul>
+      </div>
+
+      <div id="data-accuracy" class="tos-section">
+        <div class="tos-section-num">06</div>
+        <h2>Data Accuracy</h2>
+        <p>TEMPLATE_APP surfaces business data from public sources. While we strive for accuracy, we do not guarantee that all information is complete, current, or error-free. Businesses may have closed, moved, or changed their contact details since the data was last refreshed. You are responsible for verifying data accuracy before relying on it for outreach or business decisions.</p>
+        <div class="tos-note">
+          <p>If you encounter a verified data issue — such as a permanently closed business, duplicate listing, or clearly incorrect contact information — contact us at <a href="mailto:support@example.com">support@example.com</a> with the lead details and reason. We review requests on a case-by-case basis.</p>
+        </div>
+      </div>
+
+      <div id="removal" class="tos-section">
+        <div class="tos-section-num">07</div>
+        <h2>Business Listing Removal</h2>
+        <p>Business owners may request removal or correction of their listing by contacting us at <a href="mailto:support@example.com">support@example.com</a>. We process removal requests promptly.</p>
+      </div>
+
+      <div id="billing" class="tos-section">
+        <div class="tos-section-num">08</div>
+        <h2>Payment and Billing</h2>
+        <p>Paid subscriptions are billed monthly or annually in advance. You may cancel at any time from your account settings; cancellation takes effect at the end of the current billing period and you retain access until then.</p>
+        <ul>
+          <li>Subscription refunds are available within the first 7 days of a new subscription or renewal. After 7 days, the current billing period is non-refundable.</li>
+          <li>One-time credit pack purchases are non-refundable except for verified system errors.</li>
+          <li>Prices may change with 30 days' notice.</li>
+        </ul>
+      </div>
+
+      <div id="ip" class="tos-section">
+        <div class="tos-section-num">09</div>
+        <h2>Intellectual Property</h2>
+        <p>The Service, including its design, code, and branding, is owned by TEMPLATE_APP and protected by applicable intellectual property laws. Your subscription grants you a limited, non-exclusive, non-transferable license to use the Service for its intended purpose. Lead data you access through the Service may be exported and used in your own workflows, CRM tools, and outreach campaigns.</p>
+      </div>
+
+      <div id="availability" class="tos-section">
+        <div class="tos-section-num">10</div>
+        <h2>Service Availability</h2>
+        <p>We strive for high availability but do not guarantee uninterrupted access. The Service may be temporarily unavailable due to maintenance, updates, or circumstances beyond our control.</p>
+      </div>
+
+      <div id="liability" class="tos-section">
+        <div class="tos-section-num">11</div>
+        <h2>Limitation of Liability</h2>
+        <p>The Service is provided "as is" without warranties of any kind. To the maximum extent permitted by law, TEMPLATE_APP shall not be liable for any indirect, incidental, special, consequential, or punitive damages, including loss of revenue, data, or business opportunities, arising from your use of the Service. Our total liability shall not exceed the amount you paid for the Service in the 12 months preceding the claim.</p>
+      </div>
+
+      <div id="termination" class="tos-section">
+        <div class="tos-section-num">12</div>
+        <h2>Termination</h2>
+        <p>We may suspend or terminate your account if you violate these Terms or engage in activity that harms the Service or other users. Upon termination, your right to use the Service ceases immediately. We will retain your data for 30 days after termination, after which it may be permanently deleted.</p>
+      </div>
+
+      <div id="changes" class="tos-section">
+        <div class="tos-section-num">13</div>
+        <h2>Changes to Terms</h2>
+        <p>We may update these Terms from time to time. We will notify you of material changes via email or through the Service. Continued use after changes take effect constitutes acceptance of the revised Terms.</p>
+      </div>
+
+      <div id="governing-law" class="tos-section">
+        <div class="tos-section-num">14</div>
+        <h2>Governing Law</h2>
+        <p>These Terms are governed by the laws of the United States. Any disputes arising from these Terms or the Service shall be resolved through good-faith negotiation first, and if necessary, through binding arbitration, except where prohibited by law.</p>
+      </div>
+
+      <div id="contact" class="tos-section">
+        <div class="tos-section-num">15</div>
+        <h2>Contact</h2>
+        <p>If you have questions about these Terms, contact us at <a href="mailto:support@example.com">support@example.com</a>.</p>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<!-- Footer -->
+<footer>
+  <div class="container footer-inner">
+    <span>© 2026 TEMPLATE_APP. All rights reserved.</span>
+    <div class="footer-links">
+      <a href="/tos">Terms of Service</a>
+      <a href="mailto:support@example.com">Contact</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -1,163 +1,332 @@
-import { useParams, useSearchParams, Link } from "react-router-dom";
-import { ArrowLeft, Building2 } from "lucide-react";
+/**
+ * ProjectDetail — full project page with tabs:
+ * Overview | Feed | Workflow | Timeline | Orders | Upload | Changes | Settings
+ */
+
+import { useState, useRef } from "react";
+import { useParams, useNavigate, Link } from "react-router-dom";
+import { useProjectData } from "@/hooks/useProjectData";
+import { useTeam } from "@/hooks/useTeam";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useProjectDetail } from "@/hooks/useProjectDetail";
-import { OverviewTab } from "@/components/project/OverviewTab";
-import { UploadTab } from "@/components/project/UploadTab";
-import { OrdersTab } from "@/components/project/OrdersTab";
-import { ChangesTab } from "@/components/project/ChangesTab";
-import { TasksTab } from "@/components/project/TasksTab";
-import { FeedTab } from "@/components/project/FeedTab";
+import { Loader2, ArrowLeft, CheckCircle2, PauseCircle, Trash2, Bot } from "lucide-react";
+import { toast } from "sonner";
+import { motion } from "framer-motion";
+import { Timestamp } from "firebase/firestore";
+import { format } from "date-fns";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { apiUpdateProject, apiDeleteProject, apiUploadSchedule, apiSendAlerts } from "@/lib/fieldstackApi";
+import { alertColor, alertVariant } from "@/lib/alerts";
+import type { Alert, Task, OrderItem, ScheduleChange, TaskStep, FeedEntry } from "@/types/fieldstack";
+import { ITEM_TYPE_LABELS, ORDER_STATUS_LABELS, STEP_TYPE_LABELS, FEED_TYPE_LABELS } from "@/types/fieldstack";
+import { OverviewTab } from "@/components/fieldstack/tabs/OverviewTab";
+import { FeedTab } from "@/components/fieldstack/tabs/FeedTab";
+import { WorkflowTab } from "@/components/fieldstack/tabs/WorkflowTab";
+import { TimelineTab } from "@/components/fieldstack/tabs/TimelineTab";
+import { OrdersTab } from "@/components/fieldstack/tabs/OrdersTab";
+import { UploadTab } from "@/components/fieldstack/tabs/UploadTab";
+import { ChangesTab } from "@/components/fieldstack/tabs/ChangesTab";
+import { ProjectSettingsTab } from "@/components/fieldstack/tabs/ProjectSettingsTab";
 
-const TABS = ["overview", "upload", "orders", "changes", "tasks", "feed"] as const;
-type Tab = (typeof TABS)[number];
+const TABS = ["Overview", "Feed", "Workflow", "Timeline", "Orders", "Upload", "Changes", "Settings"] as const;
+type Tab = typeof TABS[number];
 
-const STATUS_LABELS: Record<string, string> = {
-  ACTIVE: "Active",
-  ON_HOLD: "On hold",
-  COMPLETE: "Complete",
-};
-
-const STATUS_VARIANTS: Record<string, "default" | "secondary" | "outline"> = {
-  ACTIVE: "default",
-  ON_HOLD: "secondary",
-  COMPLETE: "outline",
-};
+function fmt(ts: Timestamp | undefined | null) {
+  if (!ts) return "—";
+  return format(ts.toDate(), "MMM d, yyyy");
+}
 
 export default function ProjectDetail() {
-  const { projectId } = useParams<{ projectId: string }>();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const { project, tasks, orderItems, changes, steps, feed, alerts, loading, ourTasks, criticalAlerts, warningAlerts } = useProjectData(id);
+  const { team } = useTeam();
+  const [tab, setTab] = useState<Tab>("Overview");
+  const [showDelete, setShowDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const [pageDragOver, setPageDragOver] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadResult, setUploadResult] = useState<{ tasksCreated: number; orderItemsCreated: number; version: number } | null>(null);
+  const [uploadError, setUploadError] = useState("");
+  const dragCounter = useRef(0);
 
-  const activeTab = (searchParams.get("tab") as Tab) ?? "overview";
+  async function handleFileDrop(f: File) {
+    if (!id) return;
+    const validExts = [".pdf", ".xlsx", ".xls", ".txt", ".csv"];
+    if (!validExts.some((ext) => f.name.toLowerCase().endsWith(ext))) {
+      toast.error("Unsupported file type. Use PDF, XLSX, or plain text.");
+      return;
+    }
+    setUploading(true);
+    setUploadError("");
+    setUploadResult(null);
+    try {
+      const data = await apiUploadSchedule(id, f);
+      setUploadResult(data);
+      toast.success(`Schedule parsed: ${data.tasksCreated} tasks, ${data.orderItemsCreated} orders`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Upload failed";
+      setUploadError(msg);
+      toast.error(msg);
+    } finally {
+      setUploading(false);
+    }
+  }
 
-  const {
-    project,
-    projectLoading,
-    alerts,
-    alertsLoading,
-    tasks,
-    orderItems,
-    scheduleChanges,
-    feedEntries,
-    scheduleUploads,
-    liveLoading,
-  } = useProjectDetail(projectId ?? "");
+  function onPageDragEnter(e: React.DragEvent) {
+    e.preventDefault();
+    dragCounter.current++;
+    if (e.dataTransfer.types.includes("Files")) setPageDragOver(true);
+  }
+  function onPageDragLeave(e: React.DragEvent) {
+    e.preventDefault();
+    dragCounter.current--;
+    if (dragCounter.current === 0) setPageDragOver(false);
+  }
+  function onPageDragOver(e: React.DragEvent) { e.preventDefault(); }
+  function onPageDrop(e: React.DragEvent) {
+    e.preventDefault();
+    dragCounter.current = 0;
+    setPageDragOver(false);
+    const f = e.dataTransfer.files[0];
+    if (f) handleFileDrop(f);
+  }
 
-  const handleTabChange = (tab: string) => {
-    setSearchParams({ tab }, { replace: true });
-  };
+  async function handleArchive() {
+    if (!project || !id) return;
+    setArchiving(true);
+    const newStatus = project.status === "ACTIVE" ? "ON_HOLD" : "ACTIVE";
+    try {
+      await apiUpdateProject(id, { status: newStatus });
+      toast.success(newStatus === "ON_HOLD" ? "Project put on hold." : "Project reactivated.");
+    } catch (err) {
+      toast.error("Failed to update project status.");
+    } finally {
+      setArchiving(false);
+    }
+  }
 
-  if (projectLoading) {
+  async function handleComplete() {
+    if (!id) return;
+    try {
+      await apiUpdateProject(id, { status: "COMPLETE" });
+      toast.success("Project marked complete.");
+    } catch (err) {
+      toast.error("Failed to update project.");
+    }
+  }
+
+  async function handleDelete() {
+    if (!id) return;
+    setDeleting(true);
+    try {
+      await apiDeleteProject(id);
+      toast.success("Project deleted.");
+      navigate("/");
+    } catch (err) {
+      toast.error("Failed to delete project.");
+      setDeleting(false);
+    }
+  }
+
+  if (loading) {
     return (
-      <div className="flex items-center justify-center h-full py-20">
-        <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
+      <div className="flex items-center justify-center h-64 gap-3 text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin" /> Loading project...
       </div>
     );
   }
 
   if (!project) {
     return (
-      <div className="p-6 text-center">
-        <p className="text-muted-foreground">Project not found.</p>
-        <Link to="/projects" className="text-sm text-primary mt-2 inline-block hover:underline">
-          ← Back to projects
-        </Link>
+      <div className="p-8 text-muted-foreground">
+        Project not found.{" "}
+        <Link to="/" className="underline">Back to dashboard</Link>
       </div>
     );
   }
 
-  const criticalCount = alerts.filter((a) => a.level === "CRITICAL").length;
-  const warningCount = alerts.filter((a) => a.level === "WARNING").length;
-
   return (
-    <div className="p-6 max-w-4xl mx-auto">
-      {/* Back link */}
-      <Link
-        to="/projects"
-        className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-4 w-fit"
-      >
-        <ArrowLeft className="h-3.5 w-3.5" />
-        All projects
-      </Link>
-
-      {/* Project header */}
-      <div className="flex items-start gap-4 mb-6">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/10">
-          <Building2 className="h-5 w-5 text-primary" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-xl font-bold tracking-tight">{project.name}</h1>
-            <Badge variant={STATUS_VARIANTS[project.status] ?? "outline"}>
-              {STATUS_LABELS[project.status] ?? project.status}
-            </Badge>
+    <div
+      className="p-6 relative min-h-full"
+      onDragEnter={onPageDragEnter}
+      onDragLeave={onPageDragLeave}
+      onDragOver={onPageDragOver}
+      onDrop={onPageDrop}
+    >
+      {/* Drop overlay */}
+      {pageDragOver && (
+        <div className="fixed inset-0 z-50 bg-background/90 flex items-center justify-center pointer-events-none">
+          <div className="border-2 border-dashed border-primary rounded-2xl px-20 py-16 text-center bg-primary/5">
+            <div className="text-5xl mb-4 opacity-60">📄</div>
+            <div className="text-lg font-semibold text-primary mb-2">Drop your schedule</div>
+            <div className="text-sm text-muted-foreground">PDF, XLSX, or plain text lookahead</div>
           </div>
-          <p className="text-sm text-muted-foreground mt-0.5">{project.address}</p>
-          <p className="text-sm text-muted-foreground">
-            GC: {project.gcName}
-            {project.gcEmail && <> · <a href={`mailto:${project.gcEmail}`} className="hover:underline">{project.gcEmail}</a></>}
-          </p>
         </div>
+      )}
 
-        {/* Alert summary */}
-        <div className="flex items-center gap-2 shrink-0 flex-wrap">
-          {criticalCount > 0 && (
-            <span className="rounded-full bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400 border border-red-200 px-2 py-0.5 text-xs font-semibold">
-              {criticalCount} Critical
-            </span>
+      {/* Upload toast */}
+      {(uploading || uploadResult || uploadError) && (
+        <div className="fixed bottom-6 right-6 z-40 min-w-72 max-w-sm bg-card border rounded-xl p-4 shadow-xl">
+          {uploading && (
+            <div className="flex items-center gap-3">
+              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              <div>
+                <div className="text-sm font-medium">Parsing schedule with AI...</div>
+                <div className="text-xs text-muted-foreground mt-0.5 font-mono">Using vision to read document layout</div>
+              </div>
+            </div>
           )}
-          {warningCount > 0 && (
-            <span className="rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400 border border-amber-200 px-2 py-0.5 text-xs font-semibold">
-              {warningCount} Warning
-            </span>
+          {uploadResult && !uploading && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm font-medium text-emerald-600">✓ Schedule parsed</span>
+                <button onClick={() => setUploadResult(null)} className="text-muted-foreground hover:text-foreground text-lg leading-none">&times;</button>
+              </div>
+              <div className="text-xs font-mono text-muted-foreground flex gap-4">
+                <span>{uploadResult.tasksCreated} tasks</span>
+                <span>{uploadResult.orderItemsCreated} orders</span>
+                <span>v{uploadResult.version}</span>
+              </div>
+            </div>
+          )}
+          {uploadError && !uploading && (
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm font-medium text-destructive">Upload failed</span>
+                <button onClick={() => setUploadError("")} className="text-muted-foreground hover:text-foreground text-lg leading-none">&times;</button>
+              </div>
+              <div className="text-xs text-muted-foreground">{uploadError}</div>
+            </div>
           )}
         </div>
-      </div>
+      )}
+
+      {/* Header */}
+      <motion.div initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} className="mb-5">
+        <button
+          onClick={() => navigate("/")}
+          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground font-mono mb-3 transition-colors"
+        >
+          <ArrowLeft className="h-3 w-3" /> All Projects
+        </button>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-bold tracking-tight">{project.name}</h1>
+            <p className="text-xs text-muted-foreground font-mono mt-1">
+              {project.address} · GC: {project.gcName}
+              {project.gcContact ? ` · ${project.gcContact}` : ""}
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 mt-1">
+            {project.status === "ACTIVE" && (
+              <Button size="sm" variant="outline" className="gap-1.5 text-emerald-600 border-emerald-400/40 hover:bg-emerald-50 dark:hover:bg-emerald-950" onClick={handleComplete}>
+                <CheckCircle2 className="h-3.5 w-3.5" /> Mark Complete
+              </Button>
+            )}
+            <Button size="sm" variant="outline" onClick={handleArchive} disabled={archiving} className="gap-1.5">
+              <PauseCircle className="h-3.5 w-3.5" />
+              {project.status === "ON_HOLD" ? "Reactivate" : "Hold"}
+            </Button>
+            <Button size="sm" variant="outline" className="gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10" onClick={() => setShowDelete(true)}>
+              <Trash2 className="h-3.5 w-3.5" /> Delete
+            </Button>
+          </div>
+        </div>
+      </motion.div>
 
       {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={handleTabChange}>
-        <TabsList className="flex-wrap h-auto gap-1 mb-4">
-          <TabsTrigger value="overview">
-            Overview
-            {criticalCount + warningCount > 0 && (
-              <span className="ml-1.5 rounded-full bg-red-500 text-white text-xs w-4 h-4 flex items-center justify-center">
-                {Math.min(9, criticalCount + warningCount)}
-              </span>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="upload">Upload</TabsTrigger>
-          <TabsTrigger value="orders">
-            Orders {orderItems.length > 0 && <span className="ml-1 text-muted-foreground text-xs">({orderItems.length})</span>}
-          </TabsTrigger>
-          <TabsTrigger value="changes">
-            Changes {scheduleChanges.length > 0 && <span className="ml-1 text-muted-foreground text-xs">({scheduleChanges.length})</span>}
-          </TabsTrigger>
-          <TabsTrigger value="tasks">
-            Tasks {tasks.length > 0 && <span className="ml-1 text-muted-foreground text-xs">({tasks.length})</span>}
-          </TabsTrigger>
-          <TabsTrigger value="feed">Feed</TabsTrigger>
+      <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
+        <TabsList className="mb-5 flex-wrap h-auto gap-1">
+          {TABS.map((t) => (
+            <TabsTrigger key={t} value={t} className="relative">
+              {t}
+              {t === "Overview" && criticalAlerts.length > 0 && (
+                <span className="ml-1.5 bg-destructive text-destructive-foreground text-[9px] px-1.5 py-0.5 rounded-full font-bold">
+                  {criticalAlerts.length}
+                </span>
+              )}
+            </TabsTrigger>
+          ))}
         </TabsList>
 
-        <TabsContent value="overview">
-          <OverviewTab alerts={alerts} loading={alertsLoading} />
+        <TabsContent value="Overview">
+          <OverviewTab
+            alerts={alerts}
+            criticalAlerts={criticalAlerts}
+            warningAlerts={warningAlerts}
+            ourTasks={ourTasks}
+            changes={changes}
+            projectId={id!}
+            team={team}
+            hasTasks={tasks.length > 0}
+            onFilePicked={handleFileDrop}
+            uploading={uploading}
+          />
         </TabsContent>
-        <TabsContent value="upload">
-          <UploadTab projectId={project.id} uploads={scheduleUploads} />
+
+        <TabsContent value="Feed">
+          <FeedTab projectId={id!} feed={feed} />
         </TabsContent>
-        <TabsContent value="orders">
-          <OrdersTab orderItems={orderItems} projectId={project.id} />
+
+        <TabsContent value="Workflow">
+          <WorkflowTab projectId={id!} steps={steps} team={team} />
         </TabsContent>
-        <TabsContent value="changes">
-          <ChangesTab changes={scheduleChanges} />
+
+        <TabsContent value="Timeline">
+          <TimelineTab tasks={tasks} />
         </TabsContent>
-        <TabsContent value="tasks">
-          <TasksTab tasks={tasks} />
+
+        <TabsContent value="Orders">
+          <OrdersTab tasks={tasks} orderItems={orderItems} />
         </TabsContent>
-        <TabsContent value="feed">
-          <FeedTab entries={feedEntries} />
+
+        <TabsContent value="Upload">
+          <UploadTab projectId={id!} onUploaded={() => setTab("Overview")} />
+        </TabsContent>
+
+        <TabsContent value="Changes">
+          <ChangesTab changes={changes} />
+        </TabsContent>
+
+        <TabsContent value="Settings">
+          <ProjectSettingsTab project={project} />
         </TabsContent>
       </Tabs>
+
+      {/* Delete confirmation */}
+      <AlertDialog open={showDelete} onOpenChange={(v) => { if (!deleting) setShowDelete(v); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete project?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete <strong>{project.name}</strong> and all its tasks, orders, and workflow data. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
+              Delete Project
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

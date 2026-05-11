@@ -1,46 +1,61 @@
-import { defineConfig, loadEnv } from "vite";
+import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
-import { componentTagger } from "lovable-tagger";
+import { readFileSync } from "fs";
+import type { UserConfig } from "vitest/config";
+
+const pkg = JSON.parse(readFileSync(path.resolve(__dirname, "./package.json"), "utf-8"));
+const version = pkg.version ?? "0.0.0";
 
 // https://vitejs.dev/config/
-export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), "");
-  const apiTarget = env.VITE_API_TARGET || "http://127.0.0.1:5001/fieldstack-testing/us-central1";
-
-  return {
+export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
-    port: 8080,
+    port: 5173,
     hmr: {
       overlay: false,
     },
     proxy: {
-      // Proxy /api/* → Firebase Functions emulator (dev) or deployed functions (prod).
-      // Set VITE_API_TARGET in .env.local for the emulator base URL, e.g.:
-      //   http://127.0.0.1:5001/your-project/us-central1
+      // In dev, proxy /api to Firebase Functions emulator or deployed function.
+      // Set VITE_API_TARGET in frontend/.env to point at your emulator:
+      //   VITE_API_TARGET=http://127.0.0.1:5001/YOUR_PROJECT_ID/us-central1
       "/api": {
-        target: apiTarget,
+        target: process.env.VITE_API_TARGET || "http://127.0.0.1:5001/YOUR_PROJECT_ID/us-central1",
         changeOrigin: true,
         rewrite: (path: string) => {
-          // Paths where the function name differs from the URL segment
-          if (path.startsWith("/api/admin-stats")) return "/getAdminStats";
-          if (path.startsWith("/api/admin-reports")) return "/getAdminReports";
-          if (path === "/api/update-report-status") return "/updateReportStatus";
-          if (path === "/api/report") return "/submitReport";
-          if (path.startsWith("/api/fieldstack/")) return path.replace("/api/fieldstack/", "/");
-          // Default: strip /api/ prefix — function name matches the URL segment
-          return path.replace(/^\/api\//, "/");
+          // Map /api/xxx paths to Cloud Function names.
+          // Add entries here when you add new functions.
+          if (path.startsWith("/api/items")) return path.replace("/api/items", "/itemsApi");
+          if (path === "/api/support") return "/submitSupportTicket";
+          if (path.startsWith("/api/admin-stats")) return path.replace("/api/admin-stats", "/getAdminStats");
+          if (path === "/api/createCheckoutSession") return "/createCheckoutSession";
+          if (path === "/api/createPortalSession") return "/createPortalSession";
+          if (path === "/api/stripeWebhook") return "/stripeWebhook";
+          if (path === "/api/changeSubscription") return "/changeSubscription";
+          if (path === "/api/cancelSubscription") return "/cancelSubscription";
+          if (path === "/api/reactivateSubscription") return "/reactivateSubscription";
+          if (path === "/api/syncSubscription") return "/syncSubscription";
+          if (path === "/api/triggerBackup") return "/triggerBackup";
+          if (path.startsWith("/api/getInvoices")) return path.replace("/api/getInvoices", "/getInvoices");
+          if (path === "/api/report-error") return "/reportFrontendError";
+          return path;
         },
       },
     },
   },
-  plugins: [react(), mode === "development" && componentTagger()].filter(Boolean),
+  plugins: [react()],
+  define: {
+    __APP_VERSION__: JSON.stringify(version),
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
     dedupe: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime", "@tanstack/react-query", "@tanstack/query-core"],
   },
-  };
-});
+  test: {
+    environment: "jsdom",
+    globals: true,
+    setupFiles: ["./src/test/setup.ts"],
+  } satisfies UserConfig["test"],
+}));

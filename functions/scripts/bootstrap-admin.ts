@@ -22,7 +22,7 @@ if (!uid) {
   process.exit(1);
 }
 
-admin.initializeApp({ projectId: "search-edc58" });
+admin.initializeApp({ projectId: "YOUR_PROJECT_ID" });
 
 async function run() {
   await admin.auth().setCustomUserClaims(uid, { role: "admin" });

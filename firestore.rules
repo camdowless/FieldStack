@@ -8,100 +8,33 @@ service cloud.firestore {
     return request.auth != null && (request.auth.token.role == "user" || request.auth.token.role == "admin");
   }
 
+  function isAuthenticated() {
+    return request.auth != null;
+  }
+
   match /databases/{database}/documents {
+
+    // ── Platform infrastructure (server-side only) ────────────────────────
+
     match /admin/{document} {
       allow read: if isAdmin();
-      allow write: if false; // server-side only via Admin SDK
+      allow write: if false;
     }
 
-    // Webhook deduplication — server-side only
     match /processedWebhookEvents/{eventId} {
-      allow read, write: if false; // Admin SDK only
+      allow read, write: if false;
     }
 
-    // Rate limit counters — server-side only
     match /rateLimits/{docId} {
-      allow read, write: if false; // Admin SDK only
+      allow read, write: if false;
     }
 
-    // Plan configuration — readable by all authenticated users, writable only via Admin SDK
     match /plans/{planId} {
-      allow read: if request.auth != null;
-      allow write: if false; // server-side only via Admin SDK (seedPlans function)
+      allow read: if isAuthenticated();
+      allow write: if false;
     }
 
-    // User reports — server-side only
-    match /reports/{reportId} {
-      allow read: if false; // admin-only via Admin SDK
-      allow write: if false; // server-side only via Admin SDK
-    }
-
-    // ── Company membership helper ─────────────────────────────────────────────
-    // Reads users/{uid}.companyId and compares to the requested companyId.
-    // NOTE: this incurs a Firestore read per rules evaluation. All heavy data
-    // operations should go through Cloud Functions (Admin SDK) which bypass rules.
-    function isMemberOfCompany(companyId) {
-      return request.auth != null
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.companyId == companyId;
-    }
-
-    // ── Companies ────────────────────────────────────────────────────────────
-    match /companies/{companyId} {
-      allow read: if isMemberOfCompany(companyId);
-      allow create: if request.auth != null
-        && request.resource.data.ownerUid == request.auth.uid;
-      allow update: if isMemberOfCompany(companyId);
-      allow delete: if false; // server-side only
-    }
-
-    // ── Projects ─────────────────────────────────────────────────────────────
-    match /projects/{projectId} {
-      allow read: if request.auth != null
-        && isMemberOfCompany(resource.data.companyId);
-      allow create: if request.auth != null
-        && isMemberOfCompany(request.resource.data.companyId);
-      allow update: if request.auth != null
-        && isMemberOfCompany(resource.data.companyId)
-        && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(["name", "address", "gcName", "gcContact", "gcEmail", "status", "updatedAt"]);
-      allow delete: if false; // server-side only
-
-      // Sub-collections: readable by company members; writes go through Cloud Functions
-      match /scheduleUploads/{uploadId} {
-        allow read: if request.auth != null
-          && isMemberOfCompany(get(/databases/$(database)/documents/projects/$(projectId)).data.companyId);
-        allow write: if false;
-      }
-
-      match /tasks/{taskId} {
-        allow read: if request.auth != null
-          && isMemberOfCompany(get(/databases/$(database)/documents/projects/$(projectId)).data.companyId);
-        allow write: if false;
-      }
-
-      match /orderItems/{itemId} {
-        allow read: if request.auth != null
-          && isMemberOfCompany(get(/databases/$(database)/documents/projects/$(projectId)).data.companyId);
-        // Allow client-side status/PO updates; all other fields are server-only
-        allow update: if request.auth != null
-          && isMemberOfCompany(get(/databases/$(database)/documents/projects/$(projectId)).data.companyId)
-          && request.resource.data.diff(resource.data).affectedKeys()
-               .hasOnly(["status", "poNumber", "vendorName", "notes", "orderedAt", "updatedAt"]);
-        allow create, delete: if false;
-      }
-
-      match /scheduleChanges/{changeId} {
-        allow read: if request.auth != null
-          && isMemberOfCompany(get(/databases/$(database)/documents/projects/$(projectId)).data.companyId);
-        allow write: if false;
-      }
-
-      match /feedEntries/{entryId} {
-        allow read: if request.auth != null
-          && isMemberOfCompany(get(/databases/$(database)/documents/projects/$(projectId)).data.companyId);
-        allow write: if false;
-      }
-    }
+    // ── Firebase Auth user profiles ───────────────────────────────────────
 
     match /users/{uid} {
       function isOwner() {
@@ -110,20 +43,116 @@ service cloud.firestore {
 
       allow read: if isOwner();
 
-      // Allow users to update only the preferences field on their own profile
       allow update: if isOwner()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["preferences"]);
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(["preferences", "displayName", "company", "updatedAt"])
+        && (
+          !("preferences" in request.resource.data.diff(resource.data).affectedKeys())
+          || (
+            request.resource.data.preferences.keys().hasOnly(["itemsPerPage"])
+            && request.resource.data.preferences.itemsPerPage is number
+          )
+        );
 
-      allow create: if false; // server-side only via Admin SDK
+      allow create: if false;
 
       match /preferences/{doc} {
         allow read, write: if isOwner();
       }
 
-      // Dunning / payment notifications written by server, read-only for the user
       match /notifications/{notificationId} {
         allow read: if isOwner();
-        allow write: if false; // server-side only via Admin SDK
+        allow write: if false;
+      }
+
+      match /items/{itemId} {
+        allow read: if isOwner();
+        allow delete: if isOwner();
+        allow create: if false;
+        allow update: if false;
+      }
+    }
+
+    // ── FieldStack Multi-tenant ───────────────────────────────────────────
+
+    // Company membership lookup (flat collection for querying by uid)
+    match /companyMembers/{memberDocId} {
+      // Users can read their own memberships
+      allow read: if isAuthenticated() && resource.data.uid == request.auth.uid;
+      // Server-side only writes
+      allow write: if false;
+    }
+
+    // Company documents
+    match /companies/{companyId} {
+      function isMember() {
+        return isAuthenticated() &&
+          exists(/databases/$(database)/documents/companyMembers/$(companyId + "_" + request.auth.uid));
+      }
+
+      function isCompanyAdmin() {
+        return isAuthenticated() &&
+          get(/databases/$(database)/documents/companyMembers/$(companyId + "_" + request.auth.uid)).data.role == "ADMIN";
+      }
+
+      allow read: if isMember();
+      // Company doc writes are server-side only (via Admin SDK)
+      allow write: if false;
+
+      // Projects
+      match /projects/{projectId} {
+        allow read: if isMember();
+        allow write: if false; // server-side only
+
+        // Project subcollections — readable by company members
+        match /tasks/{taskId} {
+          allow read: if isMember();
+          allow write: if false;
+        }
+
+        match /orderItems/{itemId} {
+          allow read: if isMember();
+          allow write: if false;
+        }
+
+        match /scheduleChanges/{changeId} {
+          allow read: if isMember();
+          allow write: if false;
+        }
+
+        match /taskSteps/{stepId} {
+          allow read: if isMember();
+          allow write: if false;
+        }
+
+        match /feedEntries/{entryId} {
+          allow read: if isMember();
+          allow write: if false;
+        }
+      }
+
+      // Team members
+      match /teamMembers/{memberId} {
+        allow read: if isMember();
+        allow write: if false;
+      }
+
+      // Lead time settings
+      match /leadTimeSettings/{settingId} {
+        allow read: if isMember();
+        allow write: if false;
+      }
+
+      // Chat messages — members can read their company's chat
+      match /chatMessages/{messageId} {
+        allow read: if isMember();
+        allow write: if false;
+      }
+
+      // Gmail connection — admin only read (contains tokens)
+      match /gmailConnection {
+        allow read: if isCompanyAdmin();
+        allow write: if false;
       }
     }
   }

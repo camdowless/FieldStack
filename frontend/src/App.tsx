@@ -5,38 +5,36 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
+import { CompanyProvider, useCompany } from "@/contexts/CompanyContext";
 import { AppLayout } from "@/components/AppLayout";
 import { VerifyEmailScreen } from "@/components/VerifyEmailScreen";
 import { ProfileSetupScreen } from "@/components/ProfileSetupScreen";
-import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { ProtectedAdminRoute } from "@/components/ProtectedAdminRoute";
-import { CompanySetupScreen } from "@/components/company/CompanySetupScreen";
-import { lazy, Suspense } from "react";
 import Login from "./pages/Login";
-import AppHome from "./pages/AppHome";
+import { ProtectedAdminRoute } from "@/components/ProtectedAdminRoute";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { lazy, Suspense } from "react";
 import Settings from "./pages/Settings";
 import Billing from "./pages/Billing";
 import Help from "./pages/Help";
 import AuthAction from "./pages/AuthAction";
 import NotFound from "./pages/NotFound";
-import Projects from "./pages/Projects";
-const ProjectDetail = lazy(() => import("./pages/ProjectDetail"));
+// FieldStack pages
+import Dashboard from "./pages/Dashboard";
+import ProjectDetail from "./pages/ProjectDetail";
+import TeamPage from "./pages/TeamPage";
+import FieldStackSettings from "./pages/FieldStackSettings";
+import MyTasksPage from "./pages/MyTasksPage";
+import CompanySetup from "./pages/CompanySetup";
+import MagicLinkAction from "./pages/MagicLinkAction";
 
 const SystemAdmin = lazy(() => import("./pages/SystemAdmin"));
 
 const queryClient = new QueryClient();
 
-function AuthGate() {
-  const { user, loading, isNewUser, emailVerified, profile } = useAuth();
+function AppRoutes() {
+  const { company, loading: companyLoading } = useCompany();
 
-  const isEmailProvider = user?.providerData.some((p) => p.providerId === "password") ?? false;
-  // const needsVerification = isEmailProvider && !emailVerified;
-  const needsVerification = false; // disabled for local testing
-
-  if (loading) {
-    if (isNewUser) {
-      return <ProfileSetupScreen />;
-    }
+  if (companyLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
@@ -44,35 +42,63 @@ function AuthGate() {
     );
   }
 
-  if (!user) {
-    return <Login />;
-  }
-
-  if (needsVerification) {
-    return <VerifyEmailScreen />;
-  }
-
-  // If the user has a profile but no company yet, show the company onboarding screen.
-  if (profile && !profile.companyId) {
-    return <CompanySetupScreen />;
+  // New user with no company — show onboarding
+  if (!company) {
+    return <CompanySetup />;
   }
 
   return (
     <AppLayout>
       <ErrorBoundary>
         <Routes>
-          <Route path="/" element={<Projects />} />
-          <Route path="/projects" element={<Projects />} />
-          <Route path="/projects/:projectId" element={<Suspense fallback={<div className="flex items-center justify-center py-20"><div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" /></div>}><ProjectDetail /></Suspense>} />
-          <Route path="/home" element={<AppHome />} />
-          <Route path="/settings" element={<Settings />} />
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/projects/:id" element={<ProjectDetail />} />
+          <Route path="/team" element={<TeamPage />} />
+          <Route path="/my-tasks" element={<MyTasksPage />} />
+          <Route path="/settings" element={<FieldStackSettings />} />
           <Route path="/billing" element={<Billing />} />
           <Route path="/help" element={<Help />} />
-          <Route path="/admin" element={<ProtectedAdminRoute element={<Suspense fallback={null}><SystemAdmin /></Suspense>} />} />
+          <Route
+            path="/admin"
+            element={
+              <ProtectedAdminRoute
+                element={
+                  <Suspense fallback={null}>
+                    <SystemAdmin />
+                  </Suspense>
+                }
+              />
+            }
+          />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </ErrorBoundary>
     </AppLayout>
+  );
+}
+
+function AuthGate() {
+  const { user, loading, isNewUser, emailVerified } = useAuth();
+
+  const isEmailProvider = user?.providerData.some((p) => p.providerId === "password") ?? false;
+  const needsVerification = isEmailProvider && !emailVerified;
+
+  if (loading) {
+    if (isNewUser) return <ProfileSetupScreen />;
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
+      </div>
+    );
+  }
+
+  if (!user) return <Login />;
+  if (needsVerification) return <VerifyEmailScreen />;
+
+  return (
+    <CompanyProvider>
+      <AppRoutes />
+    </CompanyProvider>
   );
 }
 
@@ -86,6 +112,7 @@ const App = () => (
           <BrowserRouter>
             <Routes>
               <Route path="/auth/action" element={<AuthAction />} />
+              <Route path="/tasks/action" element={<MagicLinkAction />} />
               <Route path="*" element={<AuthGate />} />
             </Routes>
           </BrowserRouter>

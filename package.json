@@ -1,4 +1,9 @@
 {
+  "scripts": {
+    "dev": "npm run build:frontend && npm run build:functions && firebase emulators:start",
+    "build:frontend": "npm run build --prefix frontend",
+    "build:functions": "npm run build --prefix functions"
+  },
   "dependencies": {
     "firebase-functions": "^7.2.5"
   }

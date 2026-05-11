@@ -1,27 +1,27 @@
 import { Link, useLocation } from "react-router-dom";
-import { Search, LayoutDashboard, Sun, Moon } from "lucide-react";
+import { LayoutGrid, Sun, Moon } from "lucide-react";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { config } from "@/lib/config";
 
 export function Header() {
   const { theme, toggleTheme } = useTheme();
   const location = useLocation();
 
   const navItems = [
-    { to: "/", label: "Search", icon: Search },
-    { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { to: "/", label: "Items", icon: LayoutGrid },
   ];
 
   return (
     <header className="sticky top-0 z-50 border-b bg-card/80 backdrop-blur-lg">
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
         <Link to="/" className="flex items-center gap-2">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg gradient-bg">
-            <Search className="h-5 w-5 text-white" />
+          <div className="h-9 w-9 rounded-md gradient-bg flex items-center justify-center text-white font-bold text-base">
+            {config.appName[0]}
           </div>
-          <span className="text-xl font-bold tracking-tight">
-            Gimme<span className="gradient-text">Leads</span>
+          <span className="text-xl font-bold tracking-tight gradient-text">
+            {config.appName}
           </span>
         </Link>
 

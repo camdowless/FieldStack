@@ -5,15 +5,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { Zap, Shield, Star, CheckCircle2, Eye, EyeOff } from "lucide-react";
+import { config } from "@/lib/config";
+import { LayoutGrid, MapPin, TrendingUp, Star, CheckCircle2, Eye, EyeOff, Zap } from "lucide-react";
 import { motion } from "framer-motion";
 
 type View = "signup" | "login" | "forgot" | "forgot-sent";
 
 const FEATURES = [
-  { icon: Zap, text: "Get started in minutes with a free account" },
-  { icon: Shield, text: "Secure authentication and data handling" },
-  { icon: Star, text: "Flexible plans that grow with your product" },
+  { icon: LayoutGrid, text: "Manage your items and resources" },
+  { icon: TrendingUp, text: "Track progress and activity" },
+  { icon: MapPin, text: "Access from anywhere" },
+  { icon: Star, text: "Save and organize your work" },
 ];
 
 function getStrength(pw: string): { score: number; label: string; color: string } {
@@ -74,8 +76,8 @@ export default function Login() {
     setLoading(true);
     try {
       await signInWithGoogle();
-    } catch (err: any) {
-      if (err?.code !== "auth/popup-closed-by-user") {
+    } catch (err: unknown) {
+      if ((err as { code?: string })?.code !== "auth/popup-closed-by-user") {
         setError("Google sign-in failed. Please try again.");
       }
     } finally {
@@ -93,8 +95,8 @@ export default function Login() {
       if (result.needsVerification) {
         setWarning("Your email isn't verified yet. Check your inbox, or resend below.");
       }
-    } catch (err: any) {
-      const code = err?.code as string | undefined;
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code;
       if (
         code === "auth/invalid-credential" ||
         code === "auth/wrong-password" ||
@@ -123,8 +125,8 @@ export default function Login() {
     setLoading(true);
     try {
       await signUp(email, password);
-    } catch (err: any) {
-      const code = err?.code as string | undefined;
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code;
       if (code === "auth/email-already-in-use") {
         setError("An account with this email already exists.");
       } else if (code === "auth/weak-password") {
@@ -146,8 +148,8 @@ export default function Login() {
     try {
       await sendPasswordReset(resetEmail);
       setView("forgot-sent");
-    } catch (err: any) {
-      const code = err?.code as string | undefined;
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code;
       if (code === "auth/invalid-email") {
         setError("Please enter a valid email address.");
       } else {
@@ -162,61 +164,68 @@ export default function Login() {
     <div className="min-h-screen flex">
       {/* ── Left panel: value prop (hidden on mobile) ── */}
       <div className="hidden lg:flex lg:w-[52%] gradient-bg flex-col justify-between p-12 text-white relative overflow-hidden">
-        {/* Background decoration */}
-        <div className="absolute inset-0 opacity-10">
-          <div className="absolute top-[-20%] right-[-10%] w-[500px] h-[500px] rounded-full bg-white/20 blur-3xl" />
-          <div className="absolute bottom-[-10%] left-[-10%] w-[400px] h-[400px] rounded-full bg-white/10 blur-3xl" />
+        {/* Subtle background orbs */}
+        <div className="absolute inset-0 pointer-events-none">
+          <div className="absolute top-[-15%] right-[-5%] w-[480px] h-[480px] rounded-full bg-white/10 blur-3xl" />
+          <div className="absolute bottom-[-10%] left-[-8%] w-[360px] h-[360px] rounded-full bg-white/8 blur-3xl" />
         </div>
 
         {/* Logo */}
         <div className="relative z-10 flex items-center gap-2.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/20">
-            <Zap className="h-4.5 w-4.5 text-white" />
+          <div className="h-9 w-9 rounded-md bg-white/20 flex items-center justify-center text-white font-bold text-base">
+            {config.appName[0]}
           </div>
-          <span className="text-xl font-bold tracking-tight">FieldStack</span>
+          <span className="text-xl font-bold tracking-tight">{config.appName}</span>
         </div>
 
         {/* Main copy */}
-        <div className="relative z-10 space-y-8">
-          <div>
-            <h1 className="text-4xl font-bold leading-tight mb-4">
-              Construction schedules,<br />under control.
+        <div className="relative z-10 space-y-10">
+          <div className="space-y-4">
+            <div className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1.5 text-xs font-medium text-white/90">
+              <Zap className="h-3.5 w-3.5" />
+              Built for productivity
+            </div>
+            <h1 className="text-4xl font-bold leading-tight tracking-tight">
+              Get more done,<br />faster.
             </h1>
-            <p className="text-white/75 text-lg leading-relaxed">
-              Parse schedules, track order timelines, and get alerts before installs slip.
+            <p className="text-white/70 text-base leading-relaxed max-w-sm">
+              {config.appName} gives you the tools to manage your work and stay on top of what matters.
             </p>
           </div>
 
-          <div className="space-y-4">
+          <div className="space-y-3">
             {FEATURES.map(({ icon: Icon, text }) => (
               <div key={text} className="flex items-center gap-3">
                 <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/15 shrink-0">
                   <Icon className="h-4 w-4 text-white" />
                 </div>
-                <span className="text-white/90 text-sm font-medium">{text}</span>
+                <span className="text-white/85 text-sm font-medium">{text}</span>
               </div>
             ))}
           </div>
 
           {/* Social proof */}
-          <div className="flex items-center gap-3 pt-2">
+          <div className="flex items-center gap-3">
             <div className="flex -space-x-2">
               {["bg-pink-400", "bg-amber-400", "bg-emerald-400", "bg-sky-400"].map((c, i) => (
-                <div key={i} className={`h-8 w-8 rounded-full ${c} border-2 border-white/30 flex items-center justify-center text-xs font-bold text-white`}>
+                <div
+                  key={i}
+                  className={`h-8 w-8 rounded-full ${c} border-2 border-white/30 flex items-center justify-center text-xs font-bold text-white`}
+                >
                   {["J", "M", "R", "S"][i]}
                 </div>
               ))}
             </div>
-            <p className="text-white/75 text-sm">
-              Join <span className="text-white font-semibold">500+</span> freelancers finding clients
+            <p className="text-white/70 text-sm">
+              Join <span className="text-white font-semibold">users</span> already getting things done
             </p>
           </div>
         </div>
 
         {/* Bottom badge */}
         <div className="relative z-10">
-          <div className="inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-sm text-white/90">
-            <CheckCircle2 className="h-4 w-4 text-white" />
+          <div className="inline-flex items-center gap-2 rounded-full bg-white/15 px-4 py-2 text-sm text-white/85">
+            <CheckCircle2 className="h-4 w-4 text-white/90" />
             Free to start · No credit card required
           </div>
         </div>
@@ -233,18 +242,20 @@ export default function Login() {
         >
           {/* Mobile logo */}
           <div className="lg:hidden flex items-center justify-center gap-2 mb-8">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg gradient-bg">
-              <Zap className="h-4 w-4 text-white" />
+            <div className="h-9 w-9 rounded-md gradient-bg flex items-center justify-center text-white font-bold text-base">
+              {config.appName[0]}
             </div>
-            <span className="text-xl font-bold">FieldStack</span>
+            <span className="text-xl font-bold tracking-tight gradient-text">
+              {config.appName}
+            </span>
           </div>
 
           {/* ── SIGNUP VIEW ── */}
           {view === "signup" && (
             <div className="space-y-5">
-              <div className="space-y-1">
-                <h2 className="text-2xl font-bold">Start for free</h2>
-                <p className="text-muted-foreground text-sm">No credit card required. 3 free searches included.</p>
+              <div className="space-y-1.5">
+                <h2 className="text-2xl font-bold tracking-tight">Start for free</h2>
+                <p className="text-muted-foreground text-sm">No credit card required. Free plan available.</p>
               </div>
 
               <Button
@@ -272,7 +283,8 @@ export default function Login() {
                     type="email"
                     placeholder="you@example.com"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(e) => { e.target.setCustomValidity(""); setEmail(e.target.value); }}
+                    onInvalid={(e) => (e.target as HTMLInputElement).setCustomValidity("Please enter a valid email address.")}
                     required
                     autoComplete="email"
                     className="h-11"
@@ -352,9 +364,9 @@ export default function Login() {
               </p>
               <p className="text-center text-xs text-muted-foreground">
                 By signing up, you agree to our{" "}
-                <a href="/tos.html" target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:text-foreground">Terms</a>
+                <a href={`${config.appUrl}/terms`} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:text-foreground">Terms</a>
                 {" "}and{" "}
-                <a href="/privacy.html" target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:text-foreground">Privacy Policy</a>.
+                <a href={`${config.appUrl}/privacy`} target="_blank" rel="noopener noreferrer" className="underline underline-offset-4 hover:text-foreground">Privacy Policy</a>.
               </p>
             </div>
           )}
@@ -362,9 +374,9 @@ export default function Login() {
           {/* ── LOGIN VIEW ── */}
           {view === "login" && (
             <div className="space-y-5">
-              <div className="space-y-1">
-                <h2 className="text-2xl font-bold">Welcome back</h2>
-                <p className="text-muted-foreground text-sm">Sign in to your account to continue.</p>
+              <div className="space-y-1.5">
+                <h2 className="text-2xl font-bold tracking-tight">Welcome back</h2>
+                <p className="text-muted-foreground text-sm">Sign in to continue.</p>
               </div>
 
               <Button
@@ -392,7 +404,8 @@ export default function Login() {
                     type="email"
                     placeholder="you@example.com"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
+                    onChange={(e) => { e.target.setCustomValidity(""); setEmail(e.target.value); }}
+                    onInvalid={(e) => (e.target as HTMLInputElement).setCustomValidity("Please enter a valid email address.")}
                     required
                     autoComplete="email"
                     className="h-11"
@@ -469,10 +482,10 @@ export default function Login() {
           {/* ── FORGOT PASSWORD VIEW ── */}
           {view === "forgot" && (
             <div className="space-y-5">
-              <div className="space-y-1">
-                <h2 className="text-2xl font-bold">Reset your password</h2>
+              <div className="space-y-1.5">
+                <h2 className="text-2xl font-bold tracking-tight">Reset your password</h2>
                 <p className="text-muted-foreground text-sm">
-                  Enter your email and we'll send you a reset link.
+                  Enter your email and we'll send a reset link right over.
                 </p>
               </div>
               <form onSubmit={handlePasswordReset} className="space-y-3">
@@ -483,7 +496,8 @@ export default function Login() {
                     type="email"
                     placeholder="you@example.com"
                     value={resetEmail}
-                    onChange={(e) => setResetEmail(e.target.value)}
+                    onChange={(e) => { e.target.setCustomValidity(""); setResetEmail(e.target.value); }}
+                    onInvalid={(e) => (e.target as HTMLInputElement).setCustomValidity("Please enter a valid email address.")}
                     required
                     autoComplete="email"
                     className="h-11"
@@ -514,12 +528,12 @@ export default function Login() {
                   <CheckCircle2 className="h-7 w-7 text-primary" />
                 </div>
               </div>
-              <div className="space-y-1">
-                <h2 className="text-2xl font-bold">Check your email</h2>
+              <div className="space-y-1.5">
+                <h2 className="text-2xl font-bold tracking-tight">Check your inbox</h2>
                 <p className="text-muted-foreground text-sm">
                   If an account exists for{" "}
                   <span className="font-medium text-foreground">{resetEmail}</span>,
-                  you'll receive a reset link shortly.
+                  you'll get a reset link shortly.
                 </p>
               </div>
               <Button

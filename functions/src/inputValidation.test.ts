@@ -25,7 +25,7 @@ import {
 describe("Property 2: Invalid input rejection", () => {
   // ── Generators ──────────────────────────────────────────────────────────────
 
-  /** Generates a non-empty string that matches the safe regex. */
+  /** Generates a non-empty string that matches the safe regex and is not whitespace-only. */
   const safeChar = fc.stringOf(
     fc.mapToConstant(
       { num: 26, build: (v) => String.fromCharCode(97 + v) },  // a-z
@@ -43,7 +43,7 @@ describe("Property 2: Invalid input rejection", () => {
       { num: 1, build: () => ")" }
     ),
     { minLength: 1, maxLength: 20 }
-  );
+  ).filter((s) => s.trim().length > 0);
 
   /** Characters that are NOT in the safe regex. */
   const unsafeChar = fc.constantFrom(

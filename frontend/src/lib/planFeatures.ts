@@ -9,7 +9,7 @@
  * remain testable without a Firestore dependency.
  */
 
-export type SubscriptionPlan = "free" | "soloPro" | "agency" | "pro";
+export type SubscriptionPlan = "free" | "pro" | "agency" | "enterprise";
 
 export interface PlanConfig {
   id: string;
