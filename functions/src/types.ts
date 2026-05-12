@@ -11,8 +11,6 @@ export type SubscriptionStatus = "active" | "past_due" | "cancelled" | "trialing
 export interface Subscription {
   plan: SubscriptionPlan;
   status: SubscriptionStatus;
-  creditsUsed: number;
-  creditsTotal: number;
   currentPeriodStart: Timestamp | null;
   currentPeriodEnd: Timestamp | null;
   stripeCustomerId: string | null;
@@ -23,7 +21,7 @@ export interface Subscription {
 // ─── Plan configuration ───────────────────────────────────────────────────────
 // Plan limits, pricing, and feature flags live in the Firestore `plans`
 // collection (see functions/src/plans.ts). Do not hardcode plan data here.
-// Use getPlanConfig() / getPlanCredits() from plans.ts at runtime.
+// Use getPlanConfig() from plans.ts at runtime.
 export type { PlanConfig } from "./plans";
 
 // ─── User Profile ─────────────────────────────────────────────────────────────

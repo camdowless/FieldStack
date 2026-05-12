@@ -4,7 +4,7 @@ import cors from "cors";
 import { checkUserRole, checkAdminRole } from "./authHelpers";
 import { sendPasswordResetEmail as sendPasswordResetEmailViaResend, sendVerificationEmailToAddress } from "./emailService";
 import type { Subscription, SubscriptionPlan } from "./types";
-import { getPlanCredits, buildPriceIdToPlanMap, invalidatePlanCache, getAllPlans } from "./plans";
+import { buildPriceIdToPlanMap, invalidatePlanCache } from "./plans";
 import { buildPlanSeedData, PLAN_IDS } from "./seedPlans";
 import { createLogger, logger } from "./logger";
 import * as crypto from "crypto";
@@ -24,11 +24,21 @@ function getStripe(): StripeInstance {
   return _stripe;
 }
 
+// When running under the Functions emulator, tell the Admin SDK to trust
+// emulator-issued auth tokens. FIREBASE_AUTH_EMULATOR_HOST cannot be set via
+// .env (reserved prefix), so we set it here before initializeApp().
+if (process.env.FUNCTIONS_EMULATOR) {
+  process.env.FIREBASE_AUTH_EMULATOR_HOST = "127.0.0.1:9099";
+}
+
 admin.initializeApp();
 const db = admin.firestore();
 db.settings({
   ignoreUndefinedProperties: true,
-  preferRest: true,
+  // preferRest causes the Admin SDK to use real Google OAuth credentials even
+  // in the emulator, which breaks when those credentials expire (invalid_rapt).
+  // Only enable it in production where it improves cold-start performance.
+  ...(process.env.FUNCTIONS_EMULATOR ? {} : { preferRest: true }),
 });
 
 logger.info("[startup] env check", {
@@ -39,6 +49,8 @@ logger.info("[startup] env check", {
   RESEND_API_KEY: process.env.RESEND_API_KEY ? "set" : "MISSING",
   APP_NAME: process.env.APP_NAME ?? "MISSING",
   APP_URL: process.env.APP_URL ?? "MISSING",
+  FUNCTIONS_EMULATOR: process.env.FUNCTIONS_EMULATOR ?? "not set",
+  FIREBASE_AUTH_EMULATOR_HOST: process.env.FIREBASE_AUTH_EMULATOR_HOST ?? "not set",
 });
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────
@@ -99,12 +111,9 @@ type FirestoreUserProfile = {
 };
 
 async function buildDefaultSubscription(plan: SubscriptionPlan = "free"): Promise<Subscription> {
-  const creditsTotal = await getPlanCredits(plan);
   return {
     plan,
     status: "active",
-    creditsUsed: 0,
-    creditsTotal,
     currentPeriodStart: null,
     currentPeriodEnd: null,
     stripeCustomerId: null,
@@ -482,16 +491,18 @@ export const syncSubscription = functions.https.onRequest((req, res) => {
     const userSnap = await db.collection(USERS_COLLECTION).doc(uid).get();
     const subId = userSnap.data()?.subscription?.stripeSubscriptionId;
     if (!subId) { res.json({ synced: false, reason: "no_subscription" }); return; }
+    // In emulator/dev mode with a placeholder Stripe key, skip the Stripe call
+    const stripeKey = process.env.STRIPE_SECRET_KEY ?? "";
+    if (!stripeKey || stripeKey.startsWith("sk_test_placeholder")) {
+      res.json({ synced: false, reason: "stripe_not_configured" }); return;
+    }
     const stripeSub = await getStripe().subscriptions.retrieve(subId) as any;
     const priceIdToPlan = await buildPriceIdToPlanMap();
     const priceId = stripeSub.items.data[0]?.price?.id;
     const plan = (priceId ? priceIdToPlan.get(priceId) : undefined) ?? "free";
-    const planConfig = (await getAllPlans()).get(plan);
-    const creditsTotal = planConfig?.creditsPerMonth ?? 0;
     await db.collection(USERS_COLLECTION).doc(uid).update({
       "subscription.plan": plan,
       "subscription.status": stripeSub.status,
-      "subscription.creditsTotal": creditsTotal,
       "subscription.cancelAtPeriodEnd": stripeSub.cancel_at_period_end,
       "subscription.currentPeriodStart": stripeSub.current_period_start ? admin.firestore.Timestamp.fromMillis(stripeSub.current_period_start * 1000) : null,
       "subscription.currentPeriodEnd": stripeSub.current_period_end ? admin.firestore.Timestamp.fromMillis(stripeSub.current_period_end * 1000) : null,
@@ -567,12 +578,9 @@ export const stripeWebhook = functions.https.onRequest(async (req, res) => {
     const userRef = usersSnap.docs[0].ref;
     const priceId = subscription.items.data[0]?.price?.id;
     const plan = (priceId ? priceIdToPlan.get(priceId) : undefined) ?? "free";
-    const planConfig = (await getAllPlans()).get(plan);
-    const creditsTotal = planConfig?.creditsPerMonth ?? 0;
     await userRef.update({
       "subscription.plan": plan,
       "subscription.status": subscription.status,
-      "subscription.creditsTotal": creditsTotal,
       "subscription.stripeSubscriptionId": subscription.id,
       "subscription.cancelAtPeriodEnd": subscription.cancel_at_period_end,
       "subscription.currentPeriodStart": subscription.current_period_start ? admin.firestore.Timestamp.fromMillis(subscription.current_period_start * 1000) : null,
@@ -601,11 +609,9 @@ export const stripeWebhook = functions.https.onRequest(async (req, res) => {
           const customerId = typeof sub.customer === "string" ? sub.customer : sub.customer.id;
           const usersSnap = await db.collection(USERS_COLLECTION).where("subscription.stripeCustomerId", "==", customerId).limit(1).get();
           if (!usersSnap.empty) {
-            const freePlanCredits = await getPlanCredits("free");
             await usersSnap.docs[0].ref.update({
               "subscription.plan": "free",
               "subscription.status": "cancelled",
-              "subscription.creditsTotal": freePlanCredits,
               "subscription.stripeSubscriptionId": null,
               updatedAt: admin.firestore.FieldValue.serverTimestamp(),
             });

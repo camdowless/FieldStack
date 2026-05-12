@@ -61,57 +61,18 @@ describe("Property P7: Stripe Customer Idempotency — Existing stripeCustomerId
 // ── Pure helpers for webhook property tests ───────────────────────────────────
 
 /**
- * Pure function representing the credit reset logic (mirrors resetCredits in index.ts).
- */
-function applyRenewal(state: { plan: string; creditsUsed: number }): { creditsUsed: number; creditsTotal: number } {
-  const planCredits: Record<string, number> = { free: 3, soloPro: 30, agency: 100, pro: 250 };
-  const creditsTotal = planCredits[state.plan] ?? 3;
-  return { creditsUsed: 0, creditsTotal };
-}
-
-/**
  * Pure function representing the subscription update logic (mirrors updateSubscription in index.ts).
  */
 function applySubscriptionUpdate(
-  state: { plan: string; creditsUsed: number; stripeSubscriptionId: string | null },
+  state: { plan: string; stripeSubscriptionId: string | null },
   event: { plan: string; stripeSubscriptionId: string; status: string }
-): { plan: string; creditsUsed: number; stripeSubscriptionId: string; status: string; creditsTotal: number } {
-  const planCredits: Record<string, number> = { free: 3, soloPro: 30, agency: 100, pro: 250 };
+): { plan: string; stripeSubscriptionId: string; status: string } {
   return {
     plan: event.plan,
-    creditsUsed: state.creditsUsed,
     stripeSubscriptionId: event.stripeSubscriptionId,
     status: event.status,
-    creditsTotal: planCredits[event.plan] ?? 3,
   };
 }
-
-// ── Property P4: Credit Reset on Renewal ─────────────────────────────────────
-
-/**
- * Property P4: Credit Reset on Renewal
- * After invoice.payment_succeeded (subscription_cycle), creditsUsed resets to 0
- * and creditsTotal matches PLAN_CREDITS[plan].
- *
- * Validates: Requirements 5.6, 1.4, 1.5
- */
-describe("Property P4: Credit Reset on Renewal — creditsUsed resets to 0, creditsTotal matches plan", () => {
-  it("always resets creditsUsed to 0 and sets creditsTotal to the plan limit", () => {
-    const planCredits: Record<string, number> = { free: 3, soloPro: 30, agency: 100, pro: 250 };
-    fc.assert(
-      fc.property(
-        fc.record({
-          plan: fc.constantFrom("free", "soloPro", "agency", "pro"),
-          creditsUsed: fc.nat({ max: 250 }),
-        }),
-        ({ plan, creditsUsed }) => {
-          const after = applyRenewal({ plan, creditsUsed });
-          return after.creditsUsed === 0 && after.creditsTotal === planCredits[plan];
-        }
-      )
-    );
-  });
-});
 
 // ── Property P3: Webhook Idempotency ─────────────────────────────────────────
 
@@ -127,12 +88,11 @@ describe("Property P3: Webhook Idempotency — duplicate events produce identica
       fc.property(
         fc.record({
           plan: fc.constantFrom("soloPro", "agency", "pro"),
-          creditsUsed: fc.nat({ max: 250 }),
           stripeSubscriptionId: fc.string({ minLength: 1 }),
           status: fc.constantFrom("active", "past_due"),
         }),
-        ({ plan, creditsUsed, stripeSubscriptionId, status }) => {
-          const initialState = { plan: "free", creditsUsed, stripeSubscriptionId: null };
+        ({ plan, stripeSubscriptionId, status }) => {
+          const initialState = { plan: "free", stripeSubscriptionId: null };
           const event = { plan, stripeSubscriptionId, status };
           const state1 = applySubscriptionUpdate(initialState, event);
           const state2 = applySubscriptionUpdate(state1, event); // apply again
@@ -148,37 +108,28 @@ describe("Property P3: Webhook Idempotency — duplicate events produce identica
 /**
  * Pure function representing the migration logic (mirrors migrateSubscriptionPlans in index.ts).
  */
-function applyMigration(state: { plan: string; creditsUsed: number }): {
+function applyMigration(state: { plan: string }): {
   plan: string;
-  creditsTotal: number;
-  creditsUsed: number;
 } {
-  const planCredits: Record<string, number> = { free: 3, soloPro: 30, agency: 100, pro: 250 };
   const planMap: Record<string, string> = {
     starter: "soloPro",
     enterprise: "pro",
   };
   const validPlans = new Set(["free", "soloPro", "agency", "pro"]);
-
   const newPlan = validPlans.has(state.plan) ? state.plan : (planMap[state.plan] ?? "free");
-  const newCreditsTotal = planCredits[newPlan] ?? 3;
-  const cappedCreditsUsed = Math.min(state.creditsUsed, newCreditsTotal);
-
-  return { plan: newPlan, creditsTotal: newCreditsTotal, creditsUsed: cappedCreditsUsed };
+  return { plan: newPlan };
 }
 
 // ── Property P6: Migration Correctness ───────────────────────────────────────
 
 /**
  * Property P6: Migration Correctness
- * For any user with a legacy or current plan name and any creditsUsed value,
- * migration produces the correct new plan, correct creditsTotal, and capped creditsUsed.
+ * For any user with a legacy or current plan name, migration produces the correct new plan.
  *
- * Validates: Requirements 10.1, 10.2, 10.3, 10.5
+ * Validates: Requirements 10.1, 10.2, 10.3
  */
-describe("Property P6: Migration Correctness — legacy plan names are remapped and credits are capped", () => {
-  it("correctly remaps legacy plans and caps creditsUsed", () => {
-    const planCredits: Record<string, number> = { free: 3, soloPro: 30, agency: 100, pro: 250 };
+describe("Property P6: Migration Correctness — legacy plan names are remapped", () => {
+  it("correctly remaps legacy plans", () => {
     const planMap: Record<string, string> = {
       starter: "soloPro", enterprise: "pro",
       free: "free", soloPro: "soloPro", agency: "agency", pro: "pro",
@@ -188,68 +139,11 @@ describe("Property P6: Migration Correctness — legacy plan names are remapped 
       fc.property(
         fc.record({
           plan: fc.constantFrom("starter", "enterprise", "free", "soloPro", "agency", "pro"),
-          creditsUsed: fc.nat({ max: 10000 }),
         }),
-        ({ plan, creditsUsed }) => {
-          const after = applyMigration({ plan, creditsUsed });
+        ({ plan }) => {
+          const after = applyMigration({ plan });
           const expectedPlan = planMap[plan];
-          const expectedTotal = planCredits[expectedPlan];
-          return (
-            after.plan === expectedPlan &&
-            after.creditsTotal === expectedTotal &&
-            after.creditsUsed === Math.min(creditsUsed, expectedTotal)
-          );
-        }
-      )
-    );
-  });
-});
-
-// ── Pure helper for credit enforcement property test ──────────────────────────
-
-/**
- * Pure function representing the credit check logic (mirrors the check in dataforseoBusinessSearch).
- */
-function checkCredits(state: { creditsUsed: number; creditsTotal: number }): "OK" | "INSUFFICIENT_CREDITS" {
-  if (state.creditsUsed >= state.creditsTotal) return "INSUFFICIENT_CREDITS";
-  return "OK";
-}
-
-// ── Property P1: Credit Enforcement ──────────────────────────────────────────
-
-/**
- * Property P1: Credit Enforcement
- * For any subscription state where creditsUsed >= creditsTotal, the credit check
- * must return "INSUFFICIENT_CREDITS".
- *
- * Validates: Requirements 6.1, 6.2
- */
-describe("Property P1: Credit Enforcement — cannot search with exhausted credits", () => {
-  it("returns INSUFFICIENT_CREDITS when creditsUsed >= creditsTotal", () => {
-    fc.assert(
-      fc.property(
-        fc.record({
-          creditsUsed: fc.nat(),
-          creditsTotal: fc.nat(),
-        }).filter(({ creditsUsed, creditsTotal }) => creditsUsed >= creditsTotal),
-        ({ creditsUsed, creditsTotal }) => {
-          const result = checkCredits({ creditsUsed, creditsTotal });
-          return result === "INSUFFICIENT_CREDITS";
-        }
-      )
-    );
-  });
-
-  it("returns OK when creditsUsed < creditsTotal", () => {
-    fc.assert(
-      fc.property(
-        fc.record({
-          creditsUsed: fc.nat({ max: 999 }),
-          creditsTotal: fc.nat({ max: 1000 }),
-        }).filter(({ creditsUsed, creditsTotal }) => creditsUsed < creditsTotal),
-        ({ creditsUsed, creditsTotal }) => {
-          const result = checkCredits({ creditsUsed, creditsTotal });
-          return result === "OK";
+          return after.plan === expectedPlan;
         }
       )
     );
@@ -436,28 +330,6 @@ function changeSubscriptionGuard(state: {
     return { httpStatus: 400, body: { error: "Use the upgrade flow to switch to a higher or equal plan." } };
   }
   return null; // allowed — would proceed to update subscription
-}
-
-/**
- * Pure copy of the resetCredits logic (mirrors the async function in index.ts).
- */
-function applyResetCredits(
-  state: { plan: string; creditsUsed: number },
-  invoice: { period_start: number; period_end: number },
-  planCreditsMap: Record<string, number>
-): {
-  creditsUsed: number;
-  creditsTotal: number;
-  currentPeriodStart: number;
-  currentPeriodEnd: number;
-} {
-  const creditsTotal = planCreditsMap[state.plan] ?? 0;
-  return {
-    creditsUsed: 0,
-    creditsTotal,
-    currentPeriodStart: invoice.period_start * 1000,
-    currentPeriodEnd: invoice.period_end * 1000,
-  };
 }
 
 /**
@@ -834,70 +706,6 @@ describe("Property: changeSubscription — same/higher plan always blocked", () 
         ({ currentSortOrder, targetSortOrder }) => {
           const result = changeSubscriptionGuard({ currentSortOrder, targetSortOrder });
           return result?.httpStatus === 400;
-        }
-      )
-    );
-  });
-});
-
-// ── resetCredits — plan resolved from invoice, not Firestore ─────────────────
-
-/**
- * Validates: credits reset to the correct plan on renewal, with correct period timestamps.
- */
-describe("resetCredits — plan resolved from invoice", () => {
-  const planCreditsMap: Record<string, number> = { free: 3, soloPro: 30, agency: 100, pro: 250 };
-
-  it("resets creditsUsed to 0 and sets creditsTotal from plan", () => {
-    const result = applyResetCredits(
-      { plan: "agency", creditsUsed: 87 },
-      { period_start: 1_700_000_000, period_end: 1_702_592_000 },
-      planCreditsMap
-    );
-    expect(result.creditsUsed).toBe(0);
-    expect(result.creditsTotal).toBe(100);
-  });
-
-  it("updates currentPeriodStart and currentPeriodEnd from invoice timestamps", () => {
-    const periodStart = 1_700_000_000;
-    const periodEnd = 1_702_592_000;
-    const result = applyResetCredits(
-      { plan: "soloPro", creditsUsed: 15 },
-      { period_start: periodStart, period_end: periodEnd },
-      planCreditsMap
-    );
-    expect(result.currentPeriodStart).toBe(periodStart * 1000);
-    expect(result.currentPeriodEnd).toBe(periodEnd * 1000);
-  });
-});
-
-/**
- * Property: for any plan and any creditsUsed value, resetCredits always
- * produces creditsUsed=0 and creditsTotal matching the plan's limit.
- */
-describe("Property: resetCredits — always resets correctly from invoice plan", () => {
-  it("always zeroes creditsUsed and sets correct creditsTotal", () => {
-    const planCreditsMap: Record<string, number> = { free: 3, soloPro: 30, agency: 100, pro: 250 };
-    fc.assert(
-      fc.property(
-        fc.record({
-          plan: fc.constantFrom("free", "soloPro", "agency", "pro"),
-          creditsUsed: fc.nat({ max: 250 }),
-          period_start: fc.nat({ max: 2_000_000_000 }),
-          period_end: fc.nat({ max: 2_000_000_000 }),
-        }),
-        ({ plan, creditsUsed, period_start, period_end }) => {
-          const result = applyResetCredits(
-            { plan, creditsUsed },
-            { period_start, period_end },
-            planCreditsMap
-          );
-          return (
-            result.creditsUsed === 0 &&
-            result.creditsTotal === planCreditsMap[plan] &&
-            result.currentPeriodStart === period_start * 1000 &&
-            result.currentPeriodEnd === period_end * 1000
-          );
         }
       )
     );

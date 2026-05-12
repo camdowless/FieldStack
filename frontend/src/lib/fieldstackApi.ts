@@ -1,20 +1,93 @@
 /**
- * FieldStack API client — all calls to Cloud Functions.
- * Mirrors the old Next.js API routes, now as Firebase Cloud Function calls.
+ * FieldStack API client — direct HTTP calls to Cloud Functions.
+ *
+ * Two modes, both handled transparently via functionsBaseUrl + apiPath():
+ *
+ * EMULATOR (VITE_USE_EMULATORS=true):
+ *   Calls functions directly: http://127.0.0.1:5001/{project}/us-central1/{functionName}/{subPath}
+ *   e.g. http://127.0.0.1:5001/fieldstack-testing/us-central1/myTasksApi
+ *
+ * PRODUCTION (deployed to Firebase Hosting):
+ *   Uses relative /api/* paths routed through firebase.json Hosting rewrites.
+ *   Same-origin — no CORS headers needed.
+ *   e.g. /api/my-tasks
+ *
+ * The apiPath() helper returns the right URL for each environment.
  */
 
 import { getAuthToken, ApiError } from "@/lib/api";
+import { functionsBaseUrl } from "@/lib/firebase";
+
+// ─── Route map ────────────────────────────────────────────────────────────────
+// Maps function name → hosting rewrite path (used in production).
+// Must stay in sync with firebase.json rewrites.
+
+const FUNCTION_PATHS: Record<string, string> = {
+  projectsApi:            "/api/projects",
+  schedulesUploadApi:     "/api/schedules/upload",
+  ordersApi:              "/api/orders",
+  alertsSendApi:          "/api/alerts/send",
+  alertsSendToMemberApi:  "/api/alerts/send-to-member",
+  chatApi:                "/api/chat",
+  briefingApi:            "/api/briefing",
+  feedApi:                "/api/feed",
+  gmailApi:               "/api/gmail",
+  gmailScanApi:           "/api/gmail/scan",
+  gmailCallbackApi:       "/api/gmail/callback",
+  teamApi:                "/api/team",
+  leadTimesApi:           "/api/settings/lead-times",
+  smsBriefingApi:         "/api/sms-briefing",
+  myTasksApi:             "/api/my-tasks",
+  procoreAuthUrlApi:      "/api/procore/auth-url",
+  procoreSyncApi:         "/api/procore/sync",
+  procoreCallbackApi:     "/api/procore/callback",
+  stepsApi:               "/api/steps",
+  magicLinkApi:           "/api/magic-link",
+  escalationApi:          "/api/alerts/escalate",
+  gcDraftApi:             "/api/gc-draft",
+  fromScheduleApi:        "/api/projects/from-schedule",
+  itemsApi:               "/api/items",
+  submitSupportTicket:    "/api/support",
+  getAdminStats:          "/api/admin-stats",
+  createCheckoutSession:  "/api/createCheckoutSession",
+  createPortalSession:    "/api/createPortalSession",
+  changeSubscription:     "/api/changeSubscription",
+  cancelSubscription:     "/api/cancelSubscription",
+  reactivateSubscription: "/api/reactivateSubscription",
+  syncSubscription:       "/api/syncSubscription",
+  getInvoices:            "/api/getInvoices",
+  reportFrontendError:    "/api/report-error",
+};
+
+/**
+ * Returns the full URL for a function call.
+ * Emulator: http://127.0.0.1:5001/{project}/us-central1/{functionName}{subPath}
+ * Production: /api/{route}{subPath}  (same-origin via Hosting rewrite)
+ */
+function apiPath(functionName: string, subPath = ""): string {
+  if (functionsBaseUrl) {
+    // Emulator — call function directly by name
+    return `${functionsBaseUrl}/${functionName}${subPath}`;
+  }
+  // Production — use the Hosting rewrite path
+  const base = FUNCTION_PATHS[functionName];
+  if (!base) throw new Error(`[fieldstackApi] No path mapping for function: ${functionName}`);
+  return `${base}${subPath}`;
+}
 
 // ─── Base helper ──────────────────────────────────────────────────────────────
 
-async function apiFetch<T>(
-  path: string,
+async function callFunction<T>(
+  functionName: string,
+  subPath = "",
   options: RequestInit = {}
 ): Promise<T> {
   const token = await getAuthToken();
   if (!token) throw new ApiError("You must be signed in.", 401, false);
 
-  const res = await fetch(path, {
+  const url = apiPath(functionName, subPath);
+
+  const res = await fetch(url, {
     ...options,
     headers: {
       "Content-Type": "application/json",
@@ -42,18 +115,18 @@ export async function apiCreateProject(data: {
   gcEmail?: string;
   gcPlatform?: string;
 }): Promise<{ id: string }> {
-  return apiFetch("/api/projects", { method: "POST", body: JSON.stringify(data) });
+  return callFunction("projectsApi", "", { method: "POST", body: JSON.stringify(data) });
 }
 
 export async function apiUpdateProject(
   id: string,
   data: Partial<{ name: string; address: string; gcName: string; gcContact: string; gcEmail: string; status: string; gcPlatform: string; autoSyncEnabled: boolean }>
 ): Promise<void> {
-  return apiFetch(`/api/projects/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+  return callFunction("projectsApi", `/${id}`, { method: "PATCH", body: JSON.stringify(data) });
 }
 
 export async function apiDeleteProject(id: string): Promise<void> {
-  return apiFetch(`/api/projects/${id}`, { method: "DELETE" });
+  return callFunction("projectsApi", `/${id}`, { method: "DELETE" });
 }
 
 // ─── Schedule Upload ──────────────────────────────────────────────────────────
@@ -69,7 +142,7 @@ export async function apiUploadSchedule(
   fd.append("file", file);
   fd.append("projectId", projectId);
 
-  const res = await fetch("/api/schedules/upload", {
+  const res = await fetch(apiPath("schedulesUploadApi"), {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
     body: fd,
@@ -95,7 +168,7 @@ export async function apiUpdateOrder(
     orderedAt: string;
   }>
 ): Promise<void> {
-  return apiFetch(`/api/orders/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+  return callFunction("ordersApi", `/${id}`, { method: "PATCH", body: JSON.stringify(data) });
 }
 
 // ─── Alerts ───────────────────────────────────────────────────────────────────
@@ -105,10 +178,7 @@ export async function apiSendAlerts(projectId: string): Promise<{
   changes: number;
   resendConfigured: boolean;
 }> {
-  return apiFetch(`/api/alerts/send`, {
-    method: "POST",
-    body: JSON.stringify({ projectId }),
-  });
+  return callFunction("alertsSendApi", "", { method: "POST", body: JSON.stringify({ projectId }) });
 }
 
 export async function apiSendAlertToMember(params: {
@@ -116,10 +186,7 @@ export async function apiSendAlertToMember(params: {
   alert: object;
   projectId: string;
 }): Promise<void> {
-  return apiFetch("/api/alerts/send-to-member", {
-    method: "POST",
-    body: JSON.stringify(params),
-  });
+  return callFunction("alertsSendToMemberApi", "", { method: "POST", body: JSON.stringify(params) });
 }
 
 // ─── Chat ─────────────────────────────────────────────────────────────────────
@@ -128,13 +195,13 @@ export async function apiChat(params: {
   message: string;
   history: Array<{ role: "user" | "assistant"; content: string }>;
 }): Promise<{ reply: string; requiresConfirmation?: boolean; pendingAction?: object }> {
-  return apiFetch("/api/chat", { method: "POST", body: JSON.stringify(params) });
+  return callFunction("chatApi", "", { method: "POST", body: JSON.stringify(params) });
 }
 
 export async function apiGetChatHistory(): Promise<
   Array<{ role: "user" | "assistant"; content: string; id: string }>
 > {
-  return apiFetch("/api/chat");
+  return callFunction("chatApi");
 }
 
 // ─── Briefing ─────────────────────────────────────────────────────────────────
@@ -147,14 +214,14 @@ export async function apiGetBriefing(): Promise<{
   recentChanges: object[];
   ordersNeeded: object[];
 }> {
-  return apiFetch("/api/briefing");
+  return callFunction("briefingApi");
 }
 
 // ─── Feed ─────────────────────────────────────────────────────────────────────
 
 export async function apiGetFeed(projectId?: string): Promise<object[]> {
   const qs = projectId ? `?projectId=${projectId}` : "";
-  return apiFetch(`/api/feed${qs}`);
+  return callFunction("feedApi", qs);
 }
 
 // ─── Gmail ────────────────────────────────────────────────────────────────────
@@ -164,7 +231,7 @@ export async function apiGetGmailStatus(): Promise<{
   email?: string;
   lastSyncAt?: string;
 }> {
-  return apiFetch("/api/gmail");
+  return callFunction("gmailApi");
 }
 
 export async function apiScanGmail(hoursBack = 24): Promise<{
@@ -172,14 +239,11 @@ export async function apiScanGmail(hoursBack = 24): Promise<{
   saved: number;
   skipped: number;
 }> {
-  return apiFetch("/api/gmail/scan", {
-    method: "POST",
-    body: JSON.stringify({ hoursBack }),
-  });
+  return callFunction("gmailScanApi", "", { method: "POST", body: JSON.stringify({ hoursBack }) });
 }
 
 export async function apiDisconnectGmail(): Promise<void> {
-  return apiFetch("/api/gmail", { method: "DELETE" });
+  return callFunction("gmailApi", "", { method: "DELETE" });
 }
 
 // ─── Team ─────────────────────────────────────────────────────────────────────
@@ -192,7 +256,7 @@ export async function apiCreateTeamMember(data: {
   notifyOnOrderReminder?: boolean;
   notifyOnScheduleChange?: boolean;
 }): Promise<{ id: string }> {
-  return apiFetch("/api/team", { method: "POST", body: JSON.stringify(data) });
+  return callFunction("teamApi", "", { method: "POST", body: JSON.stringify(data) });
 }
 
 export async function apiUpdateTeamMember(
@@ -206,11 +270,11 @@ export async function apiUpdateTeamMember(
     notifyOnScheduleChange: boolean;
   }>
 ): Promise<void> {
-  return apiFetch(`/api/team/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+  return callFunction("teamApi", `/${id}`, { method: "PATCH", body: JSON.stringify(data) });
 }
 
 export async function apiDeleteTeamMember(id: string): Promise<void> {
-  return apiFetch(`/api/team/${id}`, { method: "DELETE" });
+  return callFunction("teamApi", `/${id}`, { method: "DELETE" });
 }
 
 // ─── Lead Times ───────────────────────────────────────────────────────────────
@@ -218,39 +282,30 @@ export async function apiDeleteTeamMember(id: string): Promise<void> {
 export async function apiUpdateLeadTimes(
   settings: Array<{ itemType: string; leadTimeWeeks: number; projectId?: string }>
 ): Promise<void> {
-  return apiFetch("/api/settings/lead-times", {
-    method: "PATCH",
-    body: JSON.stringify({ settings }),
-  });
+  return callFunction("leadTimesApi", "", { method: "PATCH", body: JSON.stringify({ settings }) });
 }
 
 // ─── Procore ──────────────────────────────────────────────────────────────────
 
 export async function apiGetProcoreAuthUrl(projectId: string): Promise<{ url: string }> {
-  return apiFetch(`/api/procore/auth-url?projectId=${projectId}`);
+  return callFunction("procoreAuthUrlApi", `?projectId=${projectId}`);
 }
 
 export async function apiSyncProcore(projectId: string): Promise<{
   tasksCreated: number;
   tasksUpdated: number;
 }> {
-  return apiFetch("/api/procore/sync", {
-    method: "POST",
-    body: JSON.stringify({ projectId }),
-  });
+  return callFunction("procoreSyncApi", "", { method: "POST", body: JSON.stringify({ projectId }) });
 }
 
 // ─── SMS Briefing ─────────────────────────────────────────────────────────────
 
 export async function apiSendSmsBriefing(phoneNumber: string): Promise<{ sent: boolean }> {
-  return apiFetch("/api/sms-briefing", {
-    method: "POST",
-    body: JSON.stringify({ phoneNumber }),
-  });
+  return callFunction("smsBriefingApi", "", { method: "POST", body: JSON.stringify({ phoneNumber }) });
 }
 
 // ─── My Tasks ─────────────────────────────────────────────────────────────────
 
 export async function apiGetMyTasks(): Promise<object[]> {
-  return apiFetch("/api/my-tasks");
+  return callFunction("myTasksApi");
 }

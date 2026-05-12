@@ -93,7 +93,7 @@ function AuthGate() {
   }
 
   if (!user) return <Login />;
-  if (needsVerification) return <VerifyEmailScreen />;
+  // if (needsVerification) return <VerifyEmailScreen />;
 
   return (
     <CompanyProvider>

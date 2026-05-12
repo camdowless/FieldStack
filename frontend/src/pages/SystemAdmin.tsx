@@ -9,6 +9,7 @@ import { ShieldAlert, RefreshCw, Users } from "lucide-react";
 import { DevRateLimitTester } from "@/components/DevRateLimitTester";
 import { DevLogTester } from "@/components/DevLogTester";
 import { getAuthToken } from "@/lib/api";
+import { functionsBaseUrl } from "@/lib/firebase";
 import { useAuth } from "@/contexts/AuthContext";
 import { useEffect } from "react";
 
@@ -29,7 +30,7 @@ function useAdminStats() {
     try {
       const token = await getAuthToken();
       if (!token) throw new Error("Not authenticated");
-      const res = await fetch("/api/admin-stats", { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${functionsBaseUrl}/getAdminStats`, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       setData(await res.json());
       setError(null);

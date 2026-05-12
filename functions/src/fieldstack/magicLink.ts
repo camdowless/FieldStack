@@ -8,6 +8,7 @@
 
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import { FieldValue } from "firebase-admin/firestore";
 import cors from "cors";
 import * as crypto from "crypto";
 import { COLLECTIONS } from "./types";
@@ -158,12 +159,12 @@ export const magicLinkApi = functions.https.onRequest((req, res) => {
       }
 
       const updates: Record<string, unknown> = {
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       };
 
       if (action === "complete") {
         updates.status = "COMPLETE";
-        updates.completedAt = admin.firestore.FieldValue.serverTimestamp();
+        updates.completedAt = FieldValue.serverTimestamp();
       } else if (action === "block") {
         updates.status = "BLOCKED";
       }

@@ -4,6 +4,7 @@
 
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import { FieldValue } from "firebase-admin/firestore";
 import cors from "cors";
 import { verifyCompanyMember, replyUnauthorized, replyBadRequest, replyNotFound } from "./middleware";
 import { COLLECTIONS } from "./types";
@@ -59,7 +60,7 @@ export const ordersApi = functions.https.onRequest((req, res) => {
     const { status, poNumber, vendorName, notes, orderedAt } = req.body ?? {};
 
     const updates: Record<string, unknown> = {
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
     };
 
     if (status !== undefined) {
@@ -68,7 +69,7 @@ export const ordersApi = functions.https.onRequest((req, res) => {
       }
       updates.status = status;
       if (status === "ORDERED" && !orderedAt) {
-        updates.orderedAt = admin.firestore.FieldValue.serverTimestamp();
+        updates.orderedAt = FieldValue.serverTimestamp();
       }
     }
     if (poNumber !== undefined) updates.poNumber = sanitizeString(poNumber) || null;

@@ -1,10 +1,14 @@
 {
   "scripts": {
-    "dev": "npm run build:frontend && npm run build:functions && firebase emulators:start",
+    "dev": "npm run build:functions && npm run build:frontend && concurrently --names \"functions,emulators\" --prefix-colors \"magenta,yellow\" \"npm run dev:functions\" \"FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 firebase emulators:start --import=./emulator-data --export-on-exit=./emulator-data\"",
+    "dev:hot": "npm run build:functions && concurrently --names \"vite,functions,emulators\" --prefix-colors \"cyan,magenta,yellow\" \"npm run dev:frontend\" \"npm run dev:functions\" \"FIRESTORE_EMULATOR_HOST=127.0.0.1:8080 FIREBASE_AUTH_EMULATOR_HOST=127.0.0.1:9099 firebase emulators:start --only auth,firestore,functions --import=./emulator-data --export-on-exit=./emulator-data\"",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "dev:functions": "tsc --watch --project functions/tsconfig.json",
     "build:frontend": "npm run build --prefix frontend",
-    "build:functions": "npm run build --prefix functions"
+    "build:functions": "npm run build --prefix functions",
+    "kill-ports": "lsof -ti :9099,8080,5001,5002,4000,4400,4500,9150,5173 | xargs kill -9 2>/dev/null; echo 'ports cleared'"
   },
-  "dependencies": {
-    "firebase-functions": "^7.2.5"
+  "devDependencies": {
+    "concurrently": "^9.1.2"
   }
 }

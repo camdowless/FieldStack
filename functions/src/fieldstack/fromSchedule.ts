@@ -5,6 +5,7 @@
 
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import { FieldValue } from "firebase-admin/firestore";
 import cors from "cors";
 import { verifyCompanyMember, replyUnauthorized, replyBadRequest } from "./middleware";
 import { COLLECTIONS, DEFAULT_LEAD_TIMES } from "./types";
@@ -143,7 +144,7 @@ export async function createProjectFromSchedule(params: {
 
   // Create project
   const projectRef = db.collection(COLLECTIONS.projects(companyId)).doc();
-  const now = admin.firestore.FieldValue.serverTimestamp();
+  const now = FieldValue.serverTimestamp();
 
   await projectRef.set({
     id: projectRef.id,

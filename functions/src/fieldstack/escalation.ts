@@ -7,6 +7,7 @@
 
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import { FieldValue } from "firebase-admin/firestore";
 import cors from "cors";
 import { Resend } from "resend";
 import { verifyCompanyMember, replyUnauthorized } from "./middleware";
@@ -238,7 +239,7 @@ async function logEscalation(
     taskStepId,
     level,
     sentTo,
-    sentAt: admin.firestore.FieldValue.serverTimestamp(),
+    sentAt: FieldValue.serverTimestamp(),
   });
 }
 

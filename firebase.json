@@ -7,6 +7,18 @@
     "source": "functions",
     "predeploy": ["cd functions && ./node_modules/.bin/tsc"]
   },
+  "emulators": {
+    "auth": { "port": 9099 },
+    "firestore": { "port": 8080 },
+    "functions": { "port": 5001 },
+    "hosting": { "port": 5002 },
+    "ui": { "enabled": true, "port": 4000 },
+    "singleProjectMode": true,
+    "export": {
+      "exporter": "all",
+      "path": "./emulator-data"
+    }
+  },
   "hosting": {
     "public": "frontend/dist",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],

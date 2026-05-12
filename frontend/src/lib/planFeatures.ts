@@ -20,7 +20,6 @@ export interface PlanConfig {
   annualPriceUsdCents: number | null;
   stripePriceId: string | null;
   stripePriceIdAnnual: string | null;
-  creditsPerMonth: number;
   canSaveLeads: boolean;
   canGenerateScripts: boolean;
   features: string[];
@@ -29,7 +28,6 @@ export interface PlanConfig {
 }
 
 export interface PlanFeatures {
-  searches: number;
   canSaveLeads: boolean;
   canGenerateScripts: boolean;
 }
@@ -37,7 +35,6 @@ export interface PlanFeatures {
 /** Derive PlanFeatures from a PlanConfig object. */
 export function getPlanFeatures(config: PlanConfig): PlanFeatures {
   return {
-    searches: config.creditsPerMonth,
     canSaveLeads: config.canSaveLeads,
     canGenerateScripts: config.canGenerateScripts,
   };

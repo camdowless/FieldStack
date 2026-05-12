@@ -10,15 +10,13 @@ import {
   updateProfile as firebaseUpdateProfile,
   type User,
 } from "firebase/auth";
-import { doc, onSnapshot, updateDoc, serverTimestamp } from "firebase/firestore";
-import { auth, googleProvider, firestore } from "@/lib/firebase";
-import { getFunctions, httpsCallable } from "firebase/functions";
+import { doc, onSnapshot, updateDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { auth, googleProvider, firestore, functions, useEmulators, functionsBaseUrl } from "@/lib/firebase";
+import { httpsCallable } from "firebase/functions";
 
 export interface Subscription {
   plan: "free" | "pro" | "agency" | "enterprise";
   status: "active" | "past_due" | "cancelled" | "trialing";
-  creditsUsed: number;
-  creditsTotal: number;
   currentPeriodStart: unknown;
   currentPeriodEnd: unknown;
   stripeCustomerId: string | null;
@@ -137,9 +135,50 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(true);
 
       // ── Step 1: Wait for Firestore profile doc ──────────────────────────────
-      profileTimeoutId = setTimeout(() => {
-        settle("user", "profile-doc-timeout");
+      profileTimeoutId = setTimeout(async () => {
+        // onUserCreate trigger didn't write the profile in time (common in emulator
+        // dev where the Functions emulator may not have env vars set correctly).
+        // Write a minimal profile client-side so the app is unblocked.
+        console.warn(`[AuthContext] Profile doc timeout for uid=${u.uid} — writing fallback profile`);
+        try {
+          const profileRef = doc(firestore, "users", u.uid);
+          await setDoc(profileRef, {
+            uid: u.uid,
+            email: u.email ?? null,
+            displayName: u.displayName ?? null,
+            photoURL: u.photoURL ?? null,
+            role: "user",
+            subscription: {
+              plan: "free",
+              status: "active",
+              currentPeriodStart: null,
+              currentPeriodEnd: null,
+              stripeCustomerId: null,
+              stripeSubscriptionId: null,
+              stripePriceId: null,
+              cancelAtPeriodEnd: false,
+            },
+            preferences: { itemsPerPage: 20 },
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          }, { merge: true });
+          console.log(`[AuthContext] Fallback profile written for uid=${u.uid}`);
+          // onSnapshot will fire and pick it up — no need to settle here
+        } catch (writeErr) {
+          console.error(`[AuthContext] Fallback profile write FAILED uid=${u.uid}`, writeErr);
+          settle("user", "profile-doc-timeout");
+        }
       }, PROFILE_TIMEOUT_MS);
+
+      // Force a token refresh so Firestore's credential is current before
+      // attaching the snapshot listener. Without this, the first snapshot
+      // attempt can race against Firestore's internal credential update and
+      // produce a spurious permission-denied error.
+      try {
+        await u.getIdToken(true);
+      } catch {
+        // Non-fatal — proceed anyway; the snapshot error handler will catch it.
+      }
 
       const profileRef = doc(firestore, "users", u.uid);
 
@@ -164,7 +203,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           const fiveMinutes = 5 * 60 * 1000;
           if (Date.now() - lastSync < fiveMinutes) return;
           sessionStorage.setItem("lastSubSync", String(Date.now()));
-          fetch("/api/syncSubscription", {
+          fetch(`${functionsBaseUrl}/syncSubscription`, {
             method: "POST",
             headers: { Authorization: `Bearer ${token}` },
           }).catch(() => {});
@@ -204,9 +243,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           settle("user", "claim-timeout");
         }, CLAIM_TIMEOUT_MS);
 
-      }, (err) => {
+      }, async (err) => {
         console.error(`[AuthContext] ❌ Firestore profile snapshot error uid=${u.uid}`, err);
-        settle("user", "firestore-snapshot-error");
+        // On permission-denied, the token may not have propagated to Firestore yet.
+        // Force a refresh and re-attach the listener once before giving up.
+        if ((err as { code?: string }).code === "permission-denied" && !settled) {
+          console.warn(`[AuthContext] Retrying snapshot after token refresh uid=${u.uid}`);
+          teardownProfile();
+          try {
+            await u.getIdToken(true);
+            const retryRef = doc(firestore, "users", u.uid);
+            profileUnsub = onSnapshot(retryRef, async (snap) => {
+              if (!snap.exists()) { setIsNewUser(true); return; }
+              const data = snap.data() as UserProfile;
+              setProfile(data);
+              setIsNewUser(false);
+              if (profileTimeoutId) { clearTimeout(profileTimeoutId); profileTimeoutId = null; }
+            }, (retryErr) => {
+              console.error(`[AuthContext] ❌ Retry snapshot also failed uid=${u.uid}`, retryErr);
+              settle("user", "firestore-snapshot-retry-error");
+            });
+          } catch {
+            settle("user", "firestore-snapshot-error");
+          }
+        } else {
+          settle("user", "firestore-snapshot-error");
+        }
       });
     });
 
@@ -230,8 +292,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const resendVerificationEmail = async () => {
     console.log(`[AuthContext] resendVerificationEmail called uid=${auth.currentUser?.uid ?? "none"}`);
-    const fns = getFunctions();
-    const callable = httpsCallable(fns, "resendVerificationEmail");
+    const callable = httpsCallable(functions, "resendVerificationEmail");
     try {
       const result = await callable({});
       console.log(`[AuthContext] resendVerificationEmail SUCCESS`, result.data);
@@ -263,6 +324,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signInWithGoogle = async () => {
     console.log(`[AuthContext] signInWithGoogle attempt`);
     try {
+      if (useEmulators) {
+        // The Auth emulator doesn't support signInWithPopup/Redirect for Google.
+        // Use signInWithCredential with a fake Google ID token instead.
+        // Customize the persona via VITE_DEV_GOOGLE_PERSONA in frontend/.env:
+        //   VITE_DEV_GOOGLE_PERSONA=admin  → uses the admin persona below
+        //   (omit or set to "user")        → uses the default user persona
+        const { signInWithCredential, GoogleAuthProvider } = await import("firebase/auth");
+        const devPersonas: Record<string, { sub: string; email: string; name: string; picture?: string }> = {
+          user: {
+            sub: "dev-google-user-001",
+            email: "dev@example.com",
+            name: "Dev User",
+            picture: "https://api.dicebear.com/9.x/initials/svg?seed=DU",
+          },
+          admin: {
+            sub: "dev-google-admin-001",
+            email: "admin@example.com",
+            name: "Dev Admin",
+            picture: "https://api.dicebear.com/9.x/initials/svg?seed=DA",
+          },
+          // Add more personas here as needed, e.g.:
+          // newuser: { sub: "dev-google-new-001", email: "new@example.com", name: "New User" },
+        };
+        const personaKey = import.meta.env.VITE_DEV_GOOGLE_PERSONA ?? "user";
+        const persona = devPersonas[personaKey] ?? devPersonas.user;
+        const fakeIdToken = JSON.stringify({
+          ...persona,
+          email_verified: true,
+        });
+        const credential = GoogleAuthProvider.credential(fakeIdToken);
+        const result = await signInWithCredential(auth, credential);
+        console.log(`[AuthContext] signInWithGoogle (emulator) SUCCESS uid=${result.user.uid}`);
+        return;
+      }
       const result = await signInWithPopup(auth, googleProvider);
       console.log(`[AuthContext] signInWithGoogle SUCCESS uid=${result.user.uid} email=${result.user.email} isNewUser=${result.user.metadata.creationTime === result.user.metadata.lastSignInTime}`);
     } catch (err: unknown) {
@@ -273,7 +368,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const sendPasswordReset = async (email: string) => {
     console.log(`[AuthContext] sendPasswordReset email=${email}`);
-    const functions = getFunctions();
     const callable = httpsCallable(functions, "sendPasswordReset");
     await callable({ email });
     console.log(`[AuthContext] sendPasswordReset dispatched`);
@@ -313,8 +407,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const deleteAccount = async () => {
     console.log(`[AuthContext] deleteAccount uid=${auth.currentUser?.uid ?? "none"}`);
-    const fns = getFunctions();
-    const callable = httpsCallable(fns, "deleteUserAccount");
+    const callable = httpsCallable(functions, "deleteUserAccount");
     await callable({ confirm: true });
     console.log(`[AuthContext] deleteAccount server-side COMPLETE — signing out locally`);
     // Auth account is now deleted server-side; sign out locally to clear state.

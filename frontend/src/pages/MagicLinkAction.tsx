@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Loader2, CheckCircle2, AlertCircle, XCircle } from "lucide-react";
 import { format } from "date-fns";
 import { STEP_TYPE_LABELS } from "@/types/fieldstack";
+import { functionsBaseUrl } from "@/lib/firebase";
 
 interface StepInfo {
   stepType: string;
@@ -44,7 +45,7 @@ export default function MagicLinkAction() {
       return;
     }
 
-    fetch(`/api/magic-link?token=${encodeURIComponent(token)}`)
+    fetch(`${functionsBaseUrl}/magicLinkApi?token=${encodeURIComponent(token)}`)
       .then((r) => r.json())
       .then((data) => {
         if (data.error) {
@@ -61,7 +62,7 @@ export default function MagicLinkAction() {
     if (!token) return;
     setSubmitting(true);
     try {
-      const res = await fetch("/api/magic-link", {
+      const res = await fetch(`${functionsBaseUrl}/magicLinkApi`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token, action, note: note.trim() || undefined }),

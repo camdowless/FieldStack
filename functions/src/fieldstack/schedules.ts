@@ -16,6 +16,7 @@
 
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import cors from "cors";
 import { Resend } from "resend";
 import { verifyCompanyMember, replyUnauthorized, replyBadRequest } from "./middleware";
@@ -214,7 +215,7 @@ async function saveParsedTasks(
     .get();
 
   const prevUpload = prevUploadsSnap.docs.find((d) => d.id !== uploadId);
-  let prevTasks: Array<{ taskName: string; building: string | null; floor: string | null; gcInstallDate: admin.firestore.Timestamp }> = [];
+  let prevTasks: Array<{ taskName: string; building: string | null; floor: string | null; gcInstallDate: Timestamp }> = [];
 
   if (prevUpload) {
     const prevTasksSnap = await db
@@ -244,7 +245,7 @@ async function saveParsedTasks(
     const category = categorizeTask(t.taskName, t.assignedResource ?? null);
     const normalizedBuilding = normalizeLabel(t.building);
     const normalizedFloor = normalizeLabel(t.floor);
-    const gcInstallDate = admin.firestore.Timestamp.fromDate(new Date(t.startDate));
+    const gcInstallDate = Timestamp.fromDate(new Date(t.startDate));
 
     const taskRef = db.collection(`companies/${companyId}/projects/${projectId}/tasks`).doc();
     const taskData = {
@@ -257,11 +258,11 @@ async function saveParsedTasks(
       building: normalizedBuilding,
       floor: normalizedFloor,
       gcInstallDate,
-      gcInstallDateEnd: t.endDate ? admin.firestore.Timestamp.fromDate(new Date(t.endDate)) : null,
+      gcInstallDateEnd: t.endDate ? Timestamp.fromDate(new Date(t.endDate)) : null,
       assignedResource: t.assignedResource ?? null,
       category,
       isOurTask: t.isOurTask,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(),
     };
 
     await taskRef.set(taskData);
@@ -289,8 +290,8 @@ async function saveParsedTasks(
             taskName: t.taskName,
             building: normalizedBuilding,
             floor: normalizedFloor,
-            detectedAt: admin.firestore.FieldValue.serverTimestamp(),
-            previousDate: admin.firestore.Timestamp.fromDate(prevDate),
+            detectedAt: FieldValue.serverTimestamp(),
+            previousDate: Timestamp.fromDate(prevDate),
             newDate: gcInstallDate,
             shiftDays,
             notificationsSent: false,
@@ -314,7 +315,7 @@ async function saveParsedTasks(
         companyId,
         itemType: "CABINETS_STANDARD",
         leadTimeWeeks,
-        orderByDate: admin.firestore.Timestamp.fromDate(orderByDate),
+        orderByDate: Timestamp.fromDate(orderByDate),
         orderedAt: null,
         poNumber: null,
         vendorName: null,
@@ -324,8 +325,8 @@ async function saveParsedTasks(
         building: normalizedBuilding,
         floor: normalizedFloor,
         gcInstallDate,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
       orderItemsCreated++;
     }
@@ -341,7 +342,7 @@ async function saveParsedTasks(
         companyId,
         itemType: "COUNTERTOPS",
         leadTimeWeeks,
-        orderByDate: admin.firestore.Timestamp.fromDate(orderByDate),
+        orderByDate: Timestamp.fromDate(orderByDate),
         orderedAt: null,
         poNumber: null,
         vendorName: null,
@@ -351,8 +352,8 @@ async function saveParsedTasks(
         building: normalizedBuilding,
         floor: normalizedFloor,
         gcInstallDate,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
       orderItemsCreated++;
     }
@@ -387,7 +388,7 @@ async function saveParsedTasks(
 
   // Mark upload as parsed
   await db.doc(`companies/${companyId}/projects/${projectId}/scheduleUploads/${uploadId}`).update({
-    parsedAt: admin.firestore.FieldValue.serverTimestamp(),
+    parsedAt: FieldValue.serverTimestamp(),
   });
 
   // Update project alert counts (denormalized)
@@ -440,7 +441,7 @@ async function generateTaskChain(input: {
   ];
 
   const stepIds: string[] = [];
-  const now = admin.firestore.FieldValue.serverTimestamp();
+  const now = FieldValue.serverTimestamp();
 
   for (let i = 0; i < steps.length; i++) {
     const s = steps[i];
@@ -456,7 +457,7 @@ async function generateTaskChain(input: {
       floor,
       stepType: s.stepType,
       assignedToId: roleMap.get(STEP_ROLE_MAP[s.stepType]) ?? null,
-      dueDate: s.dueDate ? admin.firestore.Timestamp.fromDate(s.dueDate) : null,
+      dueDate: s.dueDate ? Timestamp.fromDate(s.dueDate) : null,
       completedAt: null,
       status: "PENDING",
       notes: null,
@@ -493,7 +494,7 @@ async function updateProjectAlertCounts(projectId: string, companyId: string): P
 
   await db.doc(`companies/${companyId}/projects/${projectId}`).update({
     alertCounts: { critical, warning },
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
   });
 }
 

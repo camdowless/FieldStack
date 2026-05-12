@@ -4,6 +4,7 @@
  */
 
 import * as admin from "firebase-admin";
+import { FieldValue } from "firebase-admin/firestore";
 import { logger } from "../logger";
 
 const db = admin.firestore();
@@ -124,7 +125,7 @@ export async function createMessage(params: CreateMessageParams): Promise<Anthro
       cacheReadTokens,
       outputTokens,
       costUsd,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(),
     })
     .catch((err) => logger.error("usage log persist failed", { error: String(err) }));
 

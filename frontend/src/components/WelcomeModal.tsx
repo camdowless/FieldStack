@@ -1,17 +1,15 @@
 import { useState, useEffect } from "react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Zap, ArrowRight } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
-import { useCredits } from "@/hooks/useCredits";
 import { config } from "@/lib/config";
 
 const WELCOME_KEY = (uid: string) => `app-welcomed-${uid}`;
 
 export function WelcomeModal() {
   const { user, profile, loading } = useAuth();
-  const { max } = useCredits();
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -38,8 +36,6 @@ export function WelcomeModal() {
     setOpen(false);
   }
 
-  const credits = max || 0;
-
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose(); }}>
       <DialogContent className="sm:max-w-md p-0 overflow-hidden gap-0">
@@ -56,18 +52,6 @@ export function WelcomeModal() {
 
         {/* Body */}
         <div className="px-6 py-5 space-y-4">
-          {credits > 0 && (
-            <div className="flex items-start gap-3 rounded-lg bg-muted/60 p-4">
-              <Zap className="h-5 w-5 text-primary mt-0.5 shrink-0" />
-              <div>
-                <p className="text-sm font-semibold">You have {credits} credits to start</p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Credits are used when you perform actions in the app. Upgrade your plan for more.
-                </p>
-              </div>
-            </div>
-          )}
-
           <div className="space-y-2.5">
             {[
               "Explore the app and get familiar with the features",

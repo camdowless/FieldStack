@@ -9,10 +9,10 @@ import {
 
 // Test fixtures — mirrors the seed data in functions/src/seedPlans.ts
 const PLAN_CONFIGS: Record<string, PlanConfig> = {
-  free:     { id: "free",     name: "Free",     priceUsdCents: 0,    annualPriceUsdCents: null,  stripePriceId: null,  stripePriceIdAnnual: null,  creditsPerMonth: 3,   canSaveLeads: false, canGenerateScripts: false, features: [], sortOrder: 0, active: true },
-  soloPro:  { id: "soloPro",  name: "SoloPro",  priceUsdCents: 1900, annualPriceUsdCents: 15200, stripePriceId: "p_1", stripePriceIdAnnual: "p_1a", creditsPerMonth: 30,  canSaveLeads: true,  canGenerateScripts: false, features: [], sortOrder: 1, active: true },
-  agency:   { id: "agency",   name: "Agency",   priceUsdCents: 4900, annualPriceUsdCents: 39200, stripePriceId: "p_2", stripePriceIdAnnual: "p_2a", creditsPerMonth: 100, canSaveLeads: true,  canGenerateScripts: true,  features: [], sortOrder: 2, active: true },
-  pro:      { id: "pro",      name: "Pro",      priceUsdCents: 9900, annualPriceUsdCents: 79200, stripePriceId: "p_3", stripePriceIdAnnual: "p_3a", creditsPerMonth: 250, canSaveLeads: true,  canGenerateScripts: true,  features: [], sortOrder: 3, active: true },
+  free:     { id: "free",     name: "Free",     priceUsdCents: 0,    annualPriceUsdCents: null,  stripePriceId: null,  stripePriceIdAnnual: null,  canSaveLeads: false, canGenerateScripts: false, features: [], sortOrder: 0, active: true },
+  soloPro:  { id: "soloPro",  name: "SoloPro",  priceUsdCents: 1900, annualPriceUsdCents: 15200, stripePriceId: "p_1", stripePriceIdAnnual: "p_1a", canSaveLeads: true,  canGenerateScripts: false, features: [], sortOrder: 1, active: true },
+  agency:   { id: "agency",   name: "Agency",   priceUsdCents: 4900, annualPriceUsdCents: 39200, stripePriceId: "p_2", stripePriceIdAnnual: "p_2a", canSaveLeads: true,  canGenerateScripts: true,  features: [], sortOrder: 2, active: true },
+  pro:      { id: "pro",      name: "Pro",      priceUsdCents: 9900, annualPriceUsdCents: 79200, stripePriceId: "p_3", stripePriceIdAnnual: "p_3a", canSaveLeads: true,  canGenerateScripts: true,  features: [], sortOrder: 3, active: true },
 };
 
 const allConfigs = Object.values(PLAN_CONFIGS);
@@ -21,19 +21,19 @@ const allConfigs = Object.values(PLAN_CONFIGS);
 
 describe("getPlanFeatures", () => {
   it("returns correct features for free plan", () => {
-    expect(getPlanFeatures(PLAN_CONFIGS.free)).toEqual({ searches: 3, canSaveLeads: false, canGenerateScripts: false });
+    expect(getPlanFeatures(PLAN_CONFIGS.free)).toEqual({ canSaveLeads: false, canGenerateScripts: false });
   });
 
   it("returns correct features for soloPro plan", () => {
-    expect(getPlanFeatures(PLAN_CONFIGS.soloPro)).toEqual({ searches: 30, canSaveLeads: true, canGenerateScripts: false });
+    expect(getPlanFeatures(PLAN_CONFIGS.soloPro)).toEqual({ canSaveLeads: true, canGenerateScripts: false });
   });
 
   it("returns correct features for agency plan", () => {
-    expect(getPlanFeatures(PLAN_CONFIGS.agency)).toEqual({ searches: 100, canSaveLeads: true, canGenerateScripts: true });
+    expect(getPlanFeatures(PLAN_CONFIGS.agency)).toEqual({ canSaveLeads: true, canGenerateScripts: true });
   });
 
   it("returns correct features for pro plan", () => {
-    expect(getPlanFeatures(PLAN_CONFIGS.pro)).toEqual({ searches: 250, canSaveLeads: true, canGenerateScripts: true });
+    expect(getPlanFeatures(PLAN_CONFIGS.pro)).toEqual({ canSaveLeads: true, canGenerateScripts: true });
   });
 });
 
@@ -104,24 +104,6 @@ describe("P2: getPlanFeatures — feature flags are deterministic and consistent
       fc.property(
         fc.constantFrom(...allConfigs),
         (config) => getPlanFeatures(config).canGenerateScripts === canGenerateScripts(config)
-      )
-    );
-  });
-});
-
-/**
- * P5: Plan Credits Monotonicity — credit ordering is strictly monotonic across plan tiers
- * Validates: Requirements 1.2, 2.2, 2.3, 2.4, 2.5
- */
-describe("P5: Plan Credits Monotonicity", () => {
-  it("free < soloPro < agency < pro credit ordering holds for all adjacent pairs", () => {
-    const planOrder = ["free", "soloPro", "agency", "pro"];
-    fc.assert(
-      fc.property(
-        fc.integer({ min: 0, max: 2 }),
-        (i) =>
-          getPlanFeatures(PLAN_CONFIGS[planOrder[i]]).searches <
-          getPlanFeatures(PLAN_CONFIGS[planOrder[i + 1]]).searches
       )
     );
   });

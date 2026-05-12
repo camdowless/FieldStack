@@ -32,8 +32,6 @@ export interface PlanConfig {
   stripePriceId: string | null;
   /** Stripe Price ID for annual billing — null if not offered */
   stripePriceIdAnnual: string | null;
-  /** Monthly search credit limit */
-  creditsPerMonth: number;
   /** Whether users on this plan can save leads */
   canSaveLeads: boolean;
   /** Whether users on this plan can generate scripts */
@@ -104,19 +102,6 @@ export async function getAllPlans(): Promise<Map<string, PlanConfig>> {
 export async function getPlanConfig(planId: string): Promise<PlanConfig | null> {
   const plans = await getAllPlans();
   return plans.get(planId) ?? null;
-}
-
-/**
- * Returns the credit limit for a given plan ID.
- * Falls back to 0 if the plan is not found (safe default — blocks searches).
- */
-export async function getPlanCredits(planId: string): Promise<number> {
-  const plan = await getPlanConfig(planId);
-  if (!plan) {
-    logger.error("getPlanCredits: unknown planId — returning 0", { planId });
-    return 0;
-  }
-  return plan.creditsPerMonth;
 }
 
 /**

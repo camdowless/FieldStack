@@ -5,9 +5,9 @@
 
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import cors from "cors";
 import { verifyCompanyMember, replyUnauthorized, replyBadRequest, replyNotFound } from "./middleware";
-import { COLLECTIONS } from "./types";
 import { sanitizeString } from "../validation";
 import { logger } from "../logger";
 
@@ -62,7 +62,7 @@ export const stepsApi = functions.https.onRequest((req, res) => {
     const { status, notes, assignedToId, dueDate } = req.body ?? {};
 
     const updates: Record<string, unknown> = {
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
     };
 
     if (status !== undefined) {
@@ -71,12 +71,12 @@ export const stepsApi = functions.https.onRequest((req, res) => {
       }
       updates.status = status;
       if (status === "COMPLETE") {
-        updates.completedAt = admin.firestore.FieldValue.serverTimestamp();
+        updates.completedAt = FieldValue.serverTimestamp();
       }
     }
     if (notes !== undefined) updates.notes = sanitizeString(notes) || null;
     if (assignedToId !== undefined) updates.assignedToId = assignedToId || null;
-    if (dueDate !== undefined) updates.dueDate = dueDate ? admin.firestore.Timestamp.fromDate(new Date(dueDate)) : null;
+    if (dueDate !== undefined) updates.dueDate = dueDate ? Timestamp.fromDate(new Date(dueDate)) : null;
 
     await stepRef.update(updates);
 
@@ -121,15 +121,15 @@ async function onStepComplete(
     if (stepData.stepType === "SHOP_DRAWINGS" && dep.stepType === "SUBMISSIONS") {
       const dueDate = addBusinessDays(now, 5);
       batch.update(depDoc.ref, {
-        dueDate: admin.firestore.Timestamp.fromDate(dueDate),
+        dueDate: Timestamp.fromDate(dueDate),
         status: "IN_PROGRESS",
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
     } else if (dep.status === "PENDING") {
       // For other dependencies, unblock by moving to IN_PROGRESS
       batch.update(depDoc.ref, {
         status: "IN_PROGRESS",
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
     }
   }

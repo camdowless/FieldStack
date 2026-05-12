@@ -5,7 +5,6 @@ import {
   CreditCard,
   HelpCircle,
   ShieldAlert,
-  Zap,
   Users,
   CheckSquare,
   Bot,
@@ -13,7 +12,6 @@ import {
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/contexts/AuthContext";
-import { useCredits } from "@/hooks/useCredits";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useProjects } from "@/hooks/useProjects";
 import { Button } from "@/components/ui/button";
@@ -54,13 +52,10 @@ export function AppSidebar({ onOpenChat }: { onOpenChat?: () => void }) {
   const { state } = useSidebar();
   const collapsed = state === "collapsed";
   const { logout, user, role, profile } = useAuth();
-  const { remaining, max, refreshDate } = useCredits();
   const { company } = useCompany();
   const { projects } = useProjects();
   const location = useLocation();
   const displayName = profile?.displayName ?? user?.displayName ?? user?.email?.split("@")[0] ?? "User";
-  const pct = max > 0 ? (remaining / max) * 100 : 0;
-  const barColor = pct > 50 ? "bg-green-500" : pct >= 20 ? "bg-amber-500" : "bg-red-500";
 
   const activeProjects = projects.filter((p) => p.status === "ACTIVE");
 
@@ -233,39 +228,6 @@ export function AppSidebar({ onOpenChat }: { onOpenChat?: () => void }) {
             </div>
           )}
         </div>
-
-        {/* Credits bar - expanded only */}
-        {!collapsed && (
-          <div className="px-2 mb-3">
-            <Link to="/billing" className="block group rounded-md hover:bg-muted/50 transition-colors -mx-1 px-1 py-1">
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs font-medium text-muted-foreground group-hover:text-foreground transition-colors">Credits</span>
-                <span className="text-xs font-medium tabular-nums">{remaining} / {max}</span>
-              </div>
-              <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                <div className={`h-full transition-all ${barColor}`} style={{ width: `${Math.min(100, pct)}%` }} />
-              </div>
-              {refreshDate && (
-                <p className="text-xs text-muted-foreground mt-1">Refreshes {refreshDate}</p>
-              )}
-            </Link>
-            {remaining === 0 && (
-              <Button size="sm" className="w-full mt-2 gap-1.5 text-xs h-7" asChild>
-                <Link to="/billing">
-                  <Zap className="h-3 w-3" /> Upgrade for more credits
-                </Link>
-              </Button>
-            )}
-            {remaining > 0 && pct <= 20 && (
-              <p className="text-xs text-amber-500 mt-1.5 text-center">
-                Running low -{" "}
-                <Link to="/billing" className="underline underline-offset-2 hover:text-amber-600">
-                  upgrade
-                </Link>
-              </p>
-            )}
-          </div>
-        )}
 
         <Tooltip>
           <TooltipTrigger asChild>

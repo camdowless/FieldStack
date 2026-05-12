@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -19,12 +18,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Input } from "@/components/ui/input";
-import { CheckCircle2, Zap, Loader2, AlertTriangle, TrendingDown, ArrowDownCircle, Receipt, ExternalLink, Clock } from "lucide-react";
+import { CheckCircle2, Loader2, AlertTriangle, TrendingDown, ArrowDownCircle, Receipt, ExternalLink, Clock } from "lucide-react";
 import { RedirectingOverlay } from "@/components/RedirectingOverlay";
 import { motion } from "framer-motion";
-import { useCredits } from "@/hooks/useCredits";
 import { useAuth } from "@/contexts/AuthContext";
+import { functionsBaseUrl } from "@/lib/firebase";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePlans } from "@/hooks/usePlans";
 import type { PlanConfig } from "@/lib/planFeatures";
@@ -63,9 +61,9 @@ interface Invoice {
 }
 
 const Billing = () => {
-  const { remaining, max, used, plan, refreshDate } = useCredits();
   const { user, profile } = useAuth();
   const { plans, loading: plansLoading } = usePlans();
+  const plan = profile?.subscription?.plan ?? "free";
   const [upgradingPriceId, setUpgradingPriceId] = useState<string | null>(null);
   const [managingPortal, setManagingPortal] = useState(false);
   const [billingInterval, setBillingInterval] = useState<BillingInterval>("monthly");
@@ -129,7 +127,7 @@ const Billing = () => {
     try {
       const token = await getToken();
       if (!token) return;
-      const res = await fetch("/api/getInvoices", { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(`${functionsBaseUrl}/getInvoices`, { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       if (res.ok) {
         setInvoices(data.invoices ?? []);
@@ -153,7 +151,7 @@ const Billing = () => {
       const token = await getToken();
       if (!token) return;
       const lastId = invoices[invoices.length - 1].id;
-      const res = await fetch(`/api/getInvoices?startingAfter=${encodeURIComponent(lastId)}`, {
+      const res = await fetch(`${functionsBaseUrl}/getInvoices?startingAfter=${encodeURIComponent(lastId)}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
@@ -170,8 +168,6 @@ const Billing = () => {
       setInvoicesLoadingMore(false);
     }
   }
-
-  const usagePct = max > 0 ? (used / max) * 100 : 0;
 
   function formatDate(ts: { seconds: number } | null | undefined) {
     if (!ts) return "—";
@@ -197,7 +193,7 @@ const Billing = () => {
       if (hasActiveSub) {
         // Paid → higher paid: open the Stripe portal's upgrade-confirm screen.
         // The portal shows the prorated amount and requires explicit confirmation.
-        const res = await fetch("/api/createPortalSession", {
+        const res = await fetch(`${functionsBaseUrl}/createPortalSession`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify({ priceId }),
@@ -212,7 +208,7 @@ const Billing = () => {
         }
       } else {
         // Free → paid: standard Stripe Checkout
-        const res = await fetch("/api/createCheckoutSession", {
+        const res = await fetch(`${functionsBaseUrl}/createCheckoutSession`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify({ priceId }),
@@ -241,7 +237,7 @@ const Billing = () => {
     try {
       const token = await getToken();
       if (!token) { setRedirecting({ show: false, destination: "secure checkout" }); toast.error("Please sign in."); return; }
-      const res = await fetch("/api/changeSubscription", {
+      const res = await fetch(`${functionsBaseUrl}/changeSubscription`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       });
@@ -268,7 +264,7 @@ const Billing = () => {
     try {
       const token = await getToken();
       if (!token) { setRedirecting({ show: false, destination: "secure checkout" }); toast.error("Please sign in to manage your subscription."); return; }
-      const res = await fetch("/api/createPortalSession", {
+      const res = await fetch(`${functionsBaseUrl}/createPortalSession`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -294,7 +290,7 @@ const Billing = () => {
       const token = await getToken();
       if (!token) { toast.error("Please sign in."); return; }
       const reason = cancelReason === "other" ? cancelReasonOther.trim() || "other" : cancelReason;
-      const res = await fetch("/api/cancelSubscription", {
+      const res = await fetch(`${functionsBaseUrl}/cancelSubscription`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ reason }),
@@ -316,7 +312,7 @@ const Billing = () => {
     try {
       const token = await getToken();
       if (!token) { toast.error("Please sign in."); return; }
-      const res = await fetch("/api/reactivateSubscription", {
+      const res = await fetch(`${functionsBaseUrl}/reactivateSubscription`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -396,29 +392,6 @@ const Billing = () => {
               </Card>
             )}
 
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Zap className="h-5 w-5 text-primary" /> Credit Usage
-                </CardTitle>
-                <CardDescription>
-                  {plan === "free"
-                    ? `${remaining} of ${max} free searches remaining`
-                    : <>
-                        {remaining} of {max} credits remaining this billing cycle
-                        {refreshDate && <span className="ml-1">· refreshes {refreshDate}</span>}
-                      </>
-                  }
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Progress value={usagePct} className="h-2 mb-2" />
-                <p className="text-xs text-muted-foreground">
-                  {used} credits used · {plan.charAt(0).toUpperCase() + plan.slice(1)} plan
-                </p>
-              </CardContent>
-            </Card>
-
             <div>
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold">Plans</h2>
@@ -458,7 +431,7 @@ const Billing = () => {
                   <div className="flex items-start gap-3 rounded-lg border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/30 px-4 py-3 mb-4">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 text-green-600 dark:text-green-400 shrink-0 mt-0.5"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
                     <p className="text-sm text-green-800 dark:text-green-300">
-                      <span className="font-semibold">Upgrade to unlock more credits and features.</span>{" "}
+                      <span className="font-semibold">Upgrade to unlock more features.</span>{" "}
                       Cancel anytime, no commitment required.
                     </p>
                   </div>
@@ -662,7 +635,7 @@ const Billing = () => {
           <AlertDialogHeader>
             <AlertDialogTitle>Downgrade to {downgradeTarget?.plan.name}?</AlertDialogTitle>
             <AlertDialogDescription>
-              Your plan will change at the end of your current billing cycle — no refund will be issued. Until then, you'll keep your current credits and features. After the cycle ends, your plan will switch to {downgradeTarget?.plan.name} with {downgradeTarget?.plan.creditsPerMonth} searches/month.
+              Your plan will change at the end of your current billing cycle — no refund will be issued. Until then, you'll keep your current features. After the cycle ends, your plan will switch to {downgradeTarget?.plan.name}.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -683,11 +656,7 @@ const Billing = () => {
               <DialogHeader>
                 <DialogTitle>Before you go…</DialogTitle>
                 <DialogDescription>
-                  {plan === "free"
-                    ? `You still have ${remaining} free search credit${remaining !== 1 ? "s" : ""} remaining.`
-                    : <>You still have {remaining} search credit{remaining !== 1 ? "s" : ""} this cycle
-                        {refreshDate ? ` — refreshing ${refreshDate}` : ""}.</>
-                  }
+                  Your subscription will end on {formatDate(periodEnd)} and you'll be moved to the free plan.
                 </DialogDescription>
               </DialogHeader>
 
@@ -708,7 +677,7 @@ const Billing = () => {
                           Switch to {nextLowerPlan.name} — ${(nextLowerPlan.priceUsdCents / 100).toFixed(0)}/mo
                         </p>
                         <p className="text-xs text-muted-foreground mt-0.5">
-                          Keep {nextLowerPlan.creditsPerMonth} searches/month at a lower cost
+                          Save money with a lower plan
                         </p>
                       </div>
                     </div>

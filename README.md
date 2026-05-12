@@ -101,6 +101,22 @@ npm run dev
 | Firestore | http://localhost:8080 |
 | Auth | http://localhost:9099 |
 
+### Hot-reload dev (recommended for active development)
+
+```bash
+npm run dev:hot
+```
+
+Runs the Vite dev server (port 5173) alongside the Firebase emulators. You get instant HMR on every save. Access the app at **http://localhost:5173**.
+
+| Service | URL |
+|---|---|
+| App (Vite HMR) | http://localhost:5173 |
+| Emulator UI | http://localhost:4000 |
+| Functions | http://localhost:5001 |
+| Firestore | http://localhost:8080 |
+| Auth | http://localhost:9099 |
+
 ---
 
 ## Project structure

@@ -33,7 +33,7 @@ export function NewProjectDialog({ open, onOpenChange }: Props) {
   const [gcName, setGcName] = useState("");
   const [gcContact, setGcContact] = useState("");
   const [gcEmail, setGcEmail] = useState("");
-  const [gcPlatform, setGcPlatform] = useState<string>("");
+  const [gcPlatform, setGcPlatform] = useState<string>("NONE");
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -47,13 +47,13 @@ export function NewProjectDialog({ open, onOpenChange }: Props) {
         gcName: gcName.trim(),
         gcContact: gcContact.trim() || undefined,
         gcEmail: gcEmail.trim() || undefined,
-        gcPlatform: gcPlatform || undefined,
+        gcPlatform: gcPlatform === "NONE" ? undefined : gcPlatform || undefined,
       });
       toast.success("Project created!");
       onOpenChange(false);
       navigate(`/projects/${result.id}`);
       // Reset
-      setName(""); setAddress(""); setGcName(""); setGcContact(""); setGcEmail(""); setGcPlatform("");
+      setName(""); setAddress(""); setGcName(""); setGcContact(""); setGcEmail(""); setGcPlatform("NONE");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to create project.");
     } finally {
@@ -88,7 +88,7 @@ export function NewProjectDialog({ open, onOpenChange }: Props) {
                   <SelectValue placeholder="None" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">None</SelectItem>
+                  <SelectItem value="NONE">None</SelectItem>
                   <SelectItem value="PROCORE">Procore</SelectItem>
                   <SelectItem value="BUILDERTREND">Buildertrend</SelectItem>
                   <SelectItem value="OTHER">Other</SelectItem>

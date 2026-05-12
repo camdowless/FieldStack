@@ -4,6 +4,7 @@
 
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import { FieldValue } from "firebase-admin/firestore";
 import cors from "cors";
 import { verifyCompanyMember, replyUnauthorized, replyBadRequest, replyNotFound } from "./middleware";
 import { COLLECTIONS } from "./types";
@@ -52,7 +53,7 @@ export const projectsApi = functions.https.onRequest((req, res) => {
         replyBadRequest(res, "name, address, and gcName are required."); return;
       }
 
-      const now = admin.firestore.FieldValue.serverTimestamp();
+      const now = FieldValue.serverTimestamp();
       const ref = db.collection(projectsCol).doc();
       await ref.set({
         id: ref.id,
@@ -94,7 +95,7 @@ export const projectsApi = functions.https.onRequest((req, res) => {
     // PATCH /api/projects/{id} — update project
     if (req.method === "PATCH") {
       const allowed = ["name", "address", "gcName", "gcContact", "gcEmail", "gcPlatform", "status", "autoSyncEnabled"];
-      const updates: Record<string, unknown> = { updatedAt: admin.firestore.FieldValue.serverTimestamp() };
+      const updates: Record<string, unknown> = { updatedAt: FieldValue.serverTimestamp() };
       for (const key of allowed) {
         if (req.body?.[key] !== undefined) {
           updates[key] = typeof req.body[key] === "string" ? sanitizeString(req.body[key]) : req.body[key];

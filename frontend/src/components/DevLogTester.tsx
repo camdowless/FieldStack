@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { reportError } from "@/lib/errorReporter";
+import { functionsBaseUrl } from "@/lib/firebase";
 import { Terminal, Zap, AlertTriangle, Bug, Send } from "lucide-react";
 
 // ─── Result log ──────────────────────────────────────────────────────────────
@@ -63,7 +64,7 @@ async function triggerDirectPost(): Promise<{ status: number; body: string }> {
     userAgent: navigator.userAgent,
     timestamp: new Date().toISOString(),
   };
-  const res = await fetch("/api/report-error", {
+  const res = await fetch(`${functionsBaseUrl}/reportFrontendError`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -73,7 +74,7 @@ async function triggerDirectPost(): Promise<{ status: number; body: string }> {
 
 /** POSTs a malformed payload (no message) — should get 204 + WARNING log. */
 async function triggerMalformedPost(): Promise<{ status: number; body: string }> {
-  const res = await fetch("/api/report-error", {
+  const res = await fetch(`${functionsBaseUrl}/reportFrontendError`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ stack: "no message field here", url: window.location.href }),

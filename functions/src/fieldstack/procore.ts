@@ -8,6 +8,7 @@
 
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import cors from "cors";
 import { verifyCompanyMember, replyUnauthorized, replyBadRequest } from "./middleware";
 import { COLLECTIONS } from "./types";
@@ -71,7 +72,7 @@ async function getValidProcoreToken(project: admin.firestore.DocumentData, proje
         await projectRef.update({
           procoreAccessToken: tokens.access_token,
           procoreRefreshToken: tokens.refresh_token,
-          procoreTokenExpiry: admin.firestore.Timestamp.fromMillis(tokens.expires_at),
+          procoreTokenExpiry: Timestamp.fromMillis(tokens.expires_at),
         });
         return tokens.access_token;
       } catch {
@@ -156,7 +157,7 @@ async function syncProcoreSchedule(projectId: string, companyId: string): Promis
     fileName: scheduleData.fileName,
     rawText: scheduleData.rawText,
     version,
-    uploadedAt: admin.firestore.FieldValue.serverTimestamp(),
+    uploadedAt: FieldValue.serverTimestamp(),
     parsedAt: null,
   });
 
@@ -170,7 +171,7 @@ async function syncProcoreSchedule(projectId: string, companyId: string): Promis
   const result = await saveParsedTasks(tasks, projectId, companyId, uploadRef.id);
 
   // Update last sync time
-  await projectRef.update({ procoreLastSync: admin.firestore.FieldValue.serverTimestamp() });
+  await projectRef.update({ procoreLastSync: FieldValue.serverTimestamp() });
 
   return { success: true, ...result };
 }
@@ -213,9 +214,9 @@ export const procoreCallbackApi = functions.https.onRequest(async (req, res) => 
     await db.doc(`${COLLECTIONS.projects(companyId)}/${projectId}`).update({
       procoreAccessToken: tokens.access_token,
       procoreRefreshToken: tokens.refresh_token,
-      procoreTokenExpiry: admin.firestore.Timestamp.fromMillis(Date.now() + tokens.expires_in * 1000),
+      procoreTokenExpiry: Timestamp.fromMillis(Date.now() + tokens.expires_in * 1000),
       autoSyncEnabled: true,
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
     });
 
     res.redirect(`${FRONTEND_URL}/projects/${projectId}?tab=Settings&procore=connected`);

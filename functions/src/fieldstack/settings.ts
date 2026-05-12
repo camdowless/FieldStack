@@ -4,6 +4,7 @@
 
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import { FieldValue } from "firebase-admin/firestore";
 import cors from "cors";
 import { verifyCompanyMember, replyUnauthorized, replyBadRequest } from "./middleware";
 import { COLLECTIONS } from "./types";
@@ -70,7 +71,7 @@ export const leadTimesApi = functions.https.onRequest((req, res) => {
             isDefault: true,
             projectId: null,
             label: s.label ?? null,
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            createdAt: FieldValue.serverTimestamp(),
           });
         }
       }

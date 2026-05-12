@@ -54,7 +54,11 @@ service cloud.firestore {
           )
         );
 
-      allow create: if false;
+      // Allow a user to create their own profile doc (client-side fallback when
+      // the onUserCreate Cloud Function hasn't written it yet, e.g. in emulators).
+      allow create: if isOwner()
+        && request.resource.data.uid == uid
+        && request.resource.data.keys().hasAll(["uid", "email", "subscription", "createdAt"]);
 
       match /preferences/{doc} {
         allow read, write: if isOwner();
@@ -79,8 +83,13 @@ service cloud.firestore {
     match /companyMembers/{memberDocId} {
       // Users can read their own memberships
       allow read: if isAuthenticated() && resource.data.uid == request.auth.uid;
-      // Server-side only writes
-      allow write: if false;
+      // Allow a user to create their own membership doc (onboarding)
+      // Doc ID must be {companyId}_{uid} and the uid must match the requester
+      allow create: if isAuthenticated()
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.role == "ADMIN";
+      // No client-side updates or deletes
+      allow update, delete: if false;
     }
 
     // Company documents
@@ -96,8 +105,10 @@ service cloud.firestore {
       }
 
       allow read: if isMember();
-      // Company doc writes are server-side only (via Admin SDK)
-      allow write: if false;
+      // Allow authenticated users to create a new company (onboarding)
+      allow create: if isAuthenticated() && request.resource.data.id == companyId;
+      // Updates/deletes are server-side only
+      allow update, delete: if false;
 
       // Projects
       match /projects/{projectId} {
@@ -140,7 +151,9 @@ service cloud.firestore {
       // Lead time settings
       match /leadTimeSettings/{settingId} {
         allow read: if isMember();
-        allow write: if false;
+        // Allow company admins to create/update lead time settings
+        allow create, update: if isCompanyAdmin();
+        allow delete: if false;
       }
 
       // Chat messages — members can read their company's chat

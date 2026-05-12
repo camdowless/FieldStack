@@ -4,6 +4,7 @@
 
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import { FieldValue } from "firebase-admin/firestore";
 import cors from "cors";
 import { verifyCompanyMember, replyUnauthorized, replyBadRequest, replyNotFound } from "./middleware";
 import { COLLECTIONS } from "./types";
@@ -55,7 +56,7 @@ export const teamApi = functions.https.onRequest((req, res) => {
         replyBadRequest(res, `Invalid role. Must be one of: ${VALID_ROLES.join(", ")}`); return;
       }
 
-      const now = admin.firestore.FieldValue.serverTimestamp();
+      const now = FieldValue.serverTimestamp();
       const ref = db.collection(teamCol).doc();
       await ref.set({
         id: ref.id,

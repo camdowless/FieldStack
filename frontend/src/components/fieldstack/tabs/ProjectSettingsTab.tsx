@@ -32,7 +32,7 @@ export function ProjectSettingsTab({ project }: Props) {
   const [gcName, setGcName] = useState(project.gcName);
   const [gcContact, setGcContact] = useState(project.gcContact ?? "");
   const [gcEmail, setGcEmail] = useState(project.gcEmail ?? "");
-  const [gcPlatform, setGcPlatform] = useState(project.gcPlatform ?? "");
+  const [gcPlatform, setGcPlatform] = useState(project.gcPlatform ?? "NONE");
   const [autoSync, setAutoSync] = useState(project.autoSyncEnabled);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -46,7 +46,7 @@ export function ProjectSettingsTab({ project }: Props) {
         gcName: gcName.trim(),
         gcContact: gcContact.trim() || undefined,
         gcEmail: gcEmail.trim() || undefined,
-        gcPlatform: gcPlatform || undefined,
+        gcPlatform: gcPlatform === "NONE" ? undefined : gcPlatform || undefined,
         autoSyncEnabled: autoSync,
       });
       toast.success("Project settings saved.");
@@ -107,7 +107,7 @@ export function ProjectSettingsTab({ project }: Props) {
                   <SelectValue placeholder="None" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">None</SelectItem>
+                  <SelectItem value="NONE">None</SelectItem>
                   <SelectItem value="PROCORE">Procore</SelectItem>
                   <SelectItem value="BUILDERTREND">Buildertrend</SelectItem>
                   <SelectItem value="OTHER">Other</SelectItem>

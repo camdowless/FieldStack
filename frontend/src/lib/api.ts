@@ -1,5 +1,18 @@
-import { auth } from "@/lib/firebase";
+import { auth, functionsBaseUrl } from "@/lib/firebase";
 import { onAuthStateChanged } from "firebase/auth";
+
+// ─── Internal path helper (mirrors fieldstackApi.ts) ─────────────────────────
+// Emulator: full URL to function. Production: /api/* path via Hosting rewrite.
+const API_PATHS: Record<string, string> = {
+  itemsApi:            "/api/items",
+  submitSupportTicket: "/api/support",
+};
+function apiUrl(fn: string, sub = ""): string {
+  if (functionsBaseUrl) return `${functionsBaseUrl}/${fn}${sub}`;
+  const base = API_PATHS[fn];
+  if (!base) throw new Error(`[api] No path mapping for: ${fn}`);
+  return `${base}${sub}`;
+}
 
 /**
  * Get a Firebase ID token for API calls.
@@ -55,7 +68,7 @@ export async function submitSupportTicket(params: {
   const token = await getAuthToken();
   if (!token) throw new ApiError("You must be signed in.", 401, false);
 
-  const res = await fetch("/api/support", {
+  const res = await fetch(apiUrl("submitSupportTicket"), {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify(params),
@@ -86,7 +99,7 @@ export async function fetchItems(): Promise<Item[]> {
   const token = await getAuthToken();
   if (!token) throw new ApiError("You must be signed in.", 401, false);
 
-  const res = await fetch("/api/items", {
+  const res = await fetch(apiUrl("itemsApi"), {
     headers: { Authorization: `Bearer ${token}` },
   });
 
@@ -103,7 +116,7 @@ export async function createItem(params: { title: string; description?: string }
   const token = await getAuthToken();
   if (!token) throw new ApiError("You must be signed in.", 401, false);
 
-  const res = await fetch("/api/items", {
+  const res = await fetch(apiUrl("itemsApi"), {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify(params),
@@ -121,7 +134,7 @@ export async function updateItem(id: string, params: { title?: string; descripti
   const token = await getAuthToken();
   if (!token) throw new ApiError("You must be signed in.", 401, false);
 
-  const res = await fetch(`/api/items/${id}`, {
+  const res = await fetch(apiUrl("itemsApi", `/${id}`), {
     method: "PATCH",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     body: JSON.stringify(params),
@@ -139,7 +152,7 @@ export async function deleteItem(id: string): Promise<void> {
   const token = await getAuthToken();
   if (!token) throw new ApiError("You must be signed in.", 401, false);
 
-  const res = await fetch(`/api/items/${id}`, {
+  const res = await fetch(apiUrl("itemsApi", `/${id}`), {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },
   });
