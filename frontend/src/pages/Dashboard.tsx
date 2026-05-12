@@ -87,7 +87,7 @@ export default function Dashboard() {
           <div className="border-2 border-dashed border-primary rounded-2xl px-20 py-16 text-center bg-primary/5">
             <div className="text-5xl mb-4 opacity-60">📄</div>
             <div className="text-lg font-semibold text-primary mb-2">Drop schedule to create a project</div>
-            <div className="text-sm text-muted-foreground">AI will extract project name, GC, and tasks</div>
+            <div className="text-sm text-muted-foreground">FieldStack will extract project name, GC, and tasks</div>
           </div>
         </div>
       )}

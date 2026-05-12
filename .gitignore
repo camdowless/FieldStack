@@ -6,3 +6,9 @@ functions/lib/
 .env.local
 *.log
 .firebase/
+
+# Firebase emulator exports — only keep the fixed emulator-data directory
+firebase-export-*/
+
+# Ignore emulator data from version control (contains local dev data only)
+emulator-data/

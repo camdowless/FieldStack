@@ -18,10 +18,33 @@ export async function verifyCompanyMember(
   req: functions.https.Request
 ): Promise<{ decoded: admin.auth.DecodedIdToken; companyId: string; role: string }> {
   const header = req.headers.authorization;
-  if (!header?.startsWith("Bearer ")) throw new Error("UNAUTHENTICATED");
+  if (!header?.startsWith("Bearer ")) {
+    logger.warn("verifyCompanyMember: missing or malformed Authorization header", {
+      hasHeader: !!header,
+      prefix: header ? header.slice(0, 10) : "none",
+    });
+    throw new Error("UNAUTHENTICATED");
+  }
 
-  const decoded = await admin.auth().verifyIdToken(header.split("Bearer ")[1]);
+  const token = header.split("Bearer ")[1];
+  logger.info("verifyCompanyMember: verifying token", {
+    tokenPrefix: token.slice(0, 20),
+    authEmulatorHost: process.env.FIREBASE_AUTH_EMULATOR_HOST ?? "not set",
+  });
+
+  let decoded: admin.auth.DecodedIdToken;
+  try {
+    decoded = await admin.auth().verifyIdToken(token);
+  } catch (err) {
+    logger.warn("verifyCompanyMember: verifyIdToken failed", {
+      error: err instanceof Error ? err.message : String(err),
+      authEmulatorHost: process.env.FIREBASE_AUTH_EMULATOR_HOST ?? "not set",
+    });
+    throw err;
+  }
+
   const uid = decoded.uid;
+  logger.info("verifyCompanyMember: token verified, looking up membership", { uid });
 
   // Find the user's company membership
   const membershipsSnap = await db
@@ -31,10 +54,12 @@ export async function verifyCompanyMember(
     .get();
 
   if (membershipsSnap.empty) {
+    logger.warn("verifyCompanyMember: no company membership found", { uid });
     throw new Error("NO_COMPANY: User has no company membership");
   }
 
   const membership = membershipsSnap.docs[0].data();
+  logger.info("verifyCompanyMember: success", { uid, companyId: membership.companyId, role: membership.role });
   return {
     decoded,
     companyId: membership.companyId as string,

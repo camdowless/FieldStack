@@ -63,7 +63,7 @@ export function ChatPanel({ isOpen, onClose }: Props) {
       const errMsg: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: "Sorry, I couldn't process that request. The AI Foreman requires Claude API configuration.",
+        content: "Sorry, I couldn't process that request. Please try again.",
       };
       setMessages((prev) => [...prev, errMsg]);
     } finally {
@@ -100,7 +100,7 @@ export function ChatPanel({ isOpen, onClose }: Props) {
                 </div>
                 <div>
                   <div className="text-sm font-semibold">AI Foreman</div>
-                  <div className="text-xs text-muted-foreground">Powered by Claude</div>
+                  <div className="text-xs text-muted-foreground">Ask me anything</div>
                 </div>
               </div>
               <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={onClose}>
@@ -179,7 +179,7 @@ export function ChatPanel({ isOpen, onClose }: Props) {
                 </Button>
               </form>
               <p className="text-[10px] text-muted-foreground mt-1.5 text-center">
-                Requires Claude API key in backend configuration
+                AI Foreman requires backend configuration
               </p>
             </div>
           </motion.div>

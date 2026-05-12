@@ -57,6 +57,26 @@ export function OverviewTab({ alerts, criticalAlerts, warningAlerts, ourTasks, c
     }
   }
 
+  if (!hasTasks && uploading) {
+    return (
+      <Card className="border-dashed">
+        <CardContent className="py-14 text-center">
+          <div className="flex items-center justify-center gap-2 mb-4">
+            {[0, 1, 2].map((i) => (
+              <span
+                key={i}
+                className="w-2.5 h-2.5 rounded-full bg-primary animate-bounce"
+                style={{ animationDelay: `${i * 0.15}s` }}
+              />
+            ))}
+          </div>
+          <p className="text-sm font-medium">Reading your schedule…</p>
+          <p className="text-xs text-muted-foreground mt-1">Extracting tasks and dates</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
   if (!hasTasks && !uploading) {
     return (
       <>

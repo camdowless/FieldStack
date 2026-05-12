@@ -1,11 +1,11 @@
 /**
- * UploadTab — drag-and-drop schedule upload with AI parsing.
+ * UploadTab — drag-and-drop schedule upload with smart parsing.
  */
 
 import { useState, useRef } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Loader2, Upload, FileText, CheckCircle2, AlertCircle } from "lucide-react";
+import { Upload, FileText, CheckCircle2, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { apiUploadSchedule } from "@/lib/fieldstackApi";
 
@@ -69,7 +69,7 @@ export function UploadTab({ projectId, onUploaded }: Props) {
       <div>
         <h3 className="text-sm font-semibold mb-1">Upload Schedule</h3>
         <p className="text-xs text-muted-foreground">
-          Upload a GC lookahead schedule. Claude AI will extract all tasks, compute order-by dates, and detect changes from the previous version.
+          Upload a GC lookahead schedule. FieldStack will extract all tasks, compute order-by dates, and detect changes from the previous version.
         </p>
       </div>
 
@@ -91,11 +91,19 @@ export function UploadTab({ projectId, onUploaded }: Props) {
       >
         <CardContent className="py-14 text-center">
           {uploading ? (
-            <div className="flex flex-col items-center gap-3">
-              <Loader2 className="h-10 w-10 animate-spin text-primary" />
+            <div className="flex flex-col items-center gap-4">
+              <div className="flex items-center gap-2">
+                {[0, 1, 2].map((i) => (
+                  <span
+                    key={i}
+                    className="w-2.5 h-2.5 rounded-full bg-primary animate-bounce"
+                    style={{ animationDelay: `${i * 0.15}s` }}
+                  />
+                ))}
+              </div>
               <div>
-                <div className="text-sm font-medium">Parsing schedule with AI...</div>
-                <div className="text-xs text-muted-foreground mt-1 font-mono">Using vision to read document layout</div>
+                <div className="text-sm font-medium">Reading your schedule…</div>
+                <div className="text-xs text-muted-foreground mt-1">Extracting tasks and dates</div>
               </div>
             </div>
           ) : result ? (
@@ -141,7 +149,7 @@ export function UploadTab({ projectId, onUploaded }: Props) {
           <div className="text-xs font-semibold mb-2">How it works</div>
           <ol className="text-xs text-muted-foreground space-y-1.5 list-decimal list-inside">
             <li>Upload any GC lookahead schedule (PDF, XLSX, or text)</li>
-            <li>Claude AI reads the document page-by-page using vision</li>
+            <li>FieldStack reads the document and identifies all tasks</li>
             <li>Cabinet and countertop tasks are identified and extracted</li>
             <li>Order-by dates are computed from install dates + lead times</li>
             <li>Changes from the previous version are detected and flagged</li>

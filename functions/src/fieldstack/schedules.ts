@@ -18,6 +18,7 @@ import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import { FieldValue, Timestamp } from "firebase-admin/firestore";
 import cors from "cors";
+import Busboy from "busboy";
 import { Resend } from "resend";
 import { verifyCompanyMember, replyUnauthorized, replyBadRequest } from "./middleware";
 import { COLLECTIONS, DEFAULT_LEAD_TIMES, type ItemType, type TaskCategory } from "./types";
@@ -122,6 +123,58 @@ interface ParsedTask {
 
 // ─── Claude extraction ────────────────────────────────────────────────────────
 
+/**
+ * Send the entire PDF in one Claude call.
+ * Claude supports up to 100 pages per request on Sonnet (200k context window).
+ * This replaces the old page-count + per-page loop — 1 call instead of N+1.
+ */
+async function extractTasksFromPdf(
+  base64Pdf: string,
+  companyId: string
+): Promise<ParsedTask[]> {
+  const message = await createMessage({
+    companyId,
+    action: "parse_schedule_pdf",
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 8192,
+    system: SYSTEM_PROMPT,
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "document",
+            source: { type: "base64", media_type: "application/pdf", data: base64Pdf },
+            cache_control: { type: "ephemeral" },
+          },
+          {
+            type: "text",
+            text: "Extract ALL tasks from every page of this construction schedule. Return the complete JSON array.",
+          },
+        ] as object[],
+      },
+    ],
+  });
+
+  const text = message.content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("");
+  const cleaned = text.replace(/```json|```/g, "").trim();
+  try {
+    const tasks = JSON.parse(cleaned) as ParsedTask[];
+    logger.info("[parser] PDF: parsed output sample", {
+      outputTokens: message.usage?.output_tokens,
+      taskCount: tasks.length,
+      firstTask: tasks[0] ?? null,
+      lastTask: tasks[tasks.length - 1] ?? null,
+      rawLength: cleaned.length,
+    });
+    return tasks;
+  } catch {
+    logger.warn("[parser] PDF: invalid JSON from full-document parse", { preview: cleaned.slice(0, 200) });
+    return [];
+  }
+}
+
+// Keep the old per-page function exported for Procore sync (text-based, not PDF)
 async function extractTasksFromPdfPage(
   base64Pdf: string,
   pageNum: number,
@@ -131,8 +184,8 @@ async function extractTasksFromPdfPage(
   const message = await createMessage({
     companyId,
     action: "parse_schedule_page",
-    model: "claude-sonnet-4-5-20250929",
-    max_tokens: 16384,
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 8192,
     system: SYSTEM_PROMPT,
     messages: [
       {
@@ -181,8 +234,8 @@ async function extractTasksFromText(rawText: string, companyId: string): Promise
     const message = await createMessage({
       companyId,
       action: "parse_schedule_text",
-      model: "claude-sonnet-4-5-20250929",
-      max_tokens: 16384,
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 8192,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: `Parse this construction schedule and return the JSON array:\n\n${chunk}` }],
     });
@@ -500,53 +553,184 @@ async function updateProjectAlertCounts(projectId: string, companyId: string): P
 
 // ─── Cloud Function ───────────────────────────────────────────────────────────
 
-export const schedulesUploadApi = functions.https.onRequest((req, res) => {
+export const schedulesUploadApi = functions.runWith({ timeoutSeconds: 300, memory: "512MB" }).https.onRequest((req, res) => {
   corsHandler(req, res, async () => {
     if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
+
+    const authHeader = req.headers.authorization;
+    logger.info("schedulesUploadApi: incoming request", {
+      method: req.method,
+      hasAuthHeader: !!authHeader,
+      authHeaderPrefix: authHeader ? authHeader.slice(0, 15) : "none",
+      origin: req.headers.origin,
+    });
 
     let companyId: string;
     try {
       const auth = await verifyCompanyMember(req);
       companyId = auth.companyId;
-    } catch {
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn("schedulesUploadApi: auth failed", { msg });
       replyUnauthorized(res); return;
     }
 
-    const projectId = req.body?.projectId ?? req.query?.projectId;
-    if (!projectId) { replyBadRequest(res, "projectId is required."); return; }
+    const anthropicKey = process.env.ANTHROPIC_API_KEY;
+    if (!anthropicKey) {
+      res.status(503).json({ error: "ANTHROPIC_API_KEY not configured. Cannot parse schedule." });
+      return;
+    }
 
-    const projectRef = db.doc(`${COLLECTIONS.projects(companyId)}/${projectId}`);
+    // ── Parse multipart/form-data with busboy ──────────────────────────────
+    const contentType = req.headers["content-type"] ?? "";
+    if (!contentType.includes("multipart/form-data")) {
+      replyBadRequest(res, "Request must be multipart/form-data.");
+      return;
+    }
+
+    let fileBuffer: Buffer | null = null;
+    let fileName = "schedule";
+    // projectId may come from the form fields (multipart) or query string
+    let fileProjectId: string | undefined = (req.query?.projectId as string | undefined);
+
+    await new Promise<void>((resolve, reject) => {
+      const bb = Busboy({ headers: req.headers, limits: { fileSize: 20 * 1024 * 1024 } }); // 20 MB cap
+
+      bb.on("file", (_field: string, stream: NodeJS.ReadableStream, info: { filename: string }) => {
+        fileName = info.filename || "schedule";
+        const chunks: Buffer[] = [];
+        stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+        stream.on("end", () => { fileBuffer = Buffer.concat(chunks); });
+        stream.on("error", reject);
+      });
+
+      bb.on("field", (name: string, value: string) => {
+        if (name === "projectId") fileProjectId = value;
+      });
+
+      bb.on("finish", resolve);
+      bb.on("error", reject);
+
+      // Firebase Functions buffers the entire request body before invoking the
+      // handler, so req is already ended by the time we get here. Piping req
+      // directly causes busboy to see "Unexpected end of form". Instead, write
+      // the pre-buffered rawBody and close the stream manually.
+      const rawBody: Buffer | undefined = (req as unknown as { rawBody?: Buffer }).rawBody;
+      if (rawBody) {
+        bb.write(rawBody);
+        bb.end();
+      } else {
+        req.pipe(bb);
+      }
+    });
+
+    if (!fileBuffer || (fileBuffer as Buffer).length === 0) {
+      replyBadRequest(res, "No file received."); return;
+    }
+
+    const buffer = fileBuffer as Buffer;
+    const resolvedProjectId = fileProjectId;
+    if (!resolvedProjectId) { replyBadRequest(res, "projectId is required."); return; }
+
+    // ── Verify project exists and belongs to this company ──────────────────
+    const projectRef = db.doc(`${COLLECTIONS.projects(companyId)}/${resolvedProjectId}`);
     const projectSnap = await projectRef.get();
     if (!projectSnap.exists || projectSnap.data()?.companyId !== companyId) {
       res.status(404).json({ error: "Project not found." }); return;
     }
 
-    const anthropicKey = process.env.ANTHROPIC_API_KEY;
-    if (!anthropicKey) {
-      res.json({
-        tasksCreated: 0,
-        orderItemsCreated: 0,
-        changesDetected: 0,
-        version: 1,
-        message: "Schedule upload stub — set ANTHROPIC_API_KEY to enable AI parsing.",
-      });
-      return;
+    const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
+    const isPdf = ext === "pdf";
+    const isXlsx = ext === "xlsx" || ext === "xls";
+    const isText = ext === "csv" || ext === "txt" || ext === "text";
+
+    if (!isPdf && !isXlsx && !isText) {
+      replyBadRequest(res, "Unsupported file type. Use PDF, XLSX, CSV, or TXT."); return;
     }
 
-    // TODO: Parse multipart form data to extract file buffer
-    // Firebase Cloud Functions receive the raw body — use busboy or similar
-    // For now, return a stub until multipart parsing is implemented
-    logger.info("schedules/upload called — multipart parsing pending", { companyId, projectId });
+    logger.info("schedules/upload: file received", { companyId, projectId: resolvedProjectId, fileName, bytes: buffer.length });
 
-    res.json({
-      tasksCreated: 0,
-      orderItemsCreated: 0,
-      changesDetected: 0,
-      version: 1,
-      message: "Multipart file parsing requires busboy integration. See functions/src/fieldstack/schedules.ts.",
+    // ── Determine upload version ───────────────────────────────────────────
+    const uploadsSnap = await db
+      .collection(`companies/${companyId}/projects/${resolvedProjectId}/scheduleUploads`)
+      .orderBy("uploadedAt", "desc")
+      .limit(1)
+      .get();
+    const version = uploadsSnap.empty ? 1 : (uploadsSnap.docs[0].data().version as number ?? 0) + 1;
+
+    // ── Create upload record ───────────────────────────────────────────────
+    const uploadRef = db.collection(`companies/${companyId}/projects/${resolvedProjectId}/scheduleUploads`).doc();
+    const now = FieldValue.serverTimestamp();
+    const rawText = isPdf ? "[PDF — parsed via vision]" : buffer.toString("utf-8");
+
+    await uploadRef.set({
+      id: uploadRef.id,
+      projectId: resolvedProjectId,
+      companyId,
+      fileName,
+      rawText,
+      version,
+      uploadedAt: now,
+      parsedAt: null,
     });
+
+    // ── Extract tasks ──────────────────────────────────────────────────────
+    let tasks: ParsedTask[] = [];
+
+    if (isPdf) {
+      const base64 = buffer.toString("base64");
+
+      // Single Claude call for the entire PDF — no page-count pre-flight needed.
+      // Sonnet supports up to 100 pages per request within its 200k context window.
+      logger.info("schedules/upload: sending full PDF to Claude", { companyId });
+      tasks = await extractTasksFromPdf(base64, companyId);
+    } else {
+      tasks = await extractTasksFromText(rawText, companyId);
+    }
+
+    // ── Save to Firestore ──────────────────────────────────────────────────
+    const result = await saveParsedTasks(tasks, resolvedProjectId, companyId, uploadRef.id);
+
+    // ── Send change notifications if this is a re-upload ──────────────────
+    if (version > 1 && result.changesDetected > 0) {
+      const resend = getResend();
+      if (resend) {
+        try {
+          const teamSnap = await db.collection(COLLECTIONS.teamMembers(companyId)).get();
+          const recipients = teamSnap.docs
+            .map((d) => d.data())
+            .filter((m) => m.notifyOnScheduleChange && m.email);
+
+          const projectSnap = await db.doc(`${COLLECTIONS.projects(companyId)}/${resolvedProjectId}`).get();
+          const projectName = projectSnap.data()?.name ?? "Project";
+
+          const changesSnap = await db
+            .collection(`companies/${companyId}/projects/${resolvedProjectId}/scheduleChanges`)
+            .orderBy("detectedAt", "desc")
+            .limit(50)
+            .get();
+          const recentChanges = changesSnap.docs.map((d) => d.data());
+
+          for (const member of recipients) {
+            await resend.emails.send({
+              from: FROM,
+              to: member.email,
+              subject: `Schedule updated: ${projectName} — ${result.changesDetected} change${result.changesDetected !== 1 ? "s" : ""}`,
+              html: buildScheduleChangeEmailHtml(recentChanges as any, projectName),
+            });
+          }
+          logger.info("schedules/upload: change notifications sent", { companyId, recipients: recipients.length });
+        } catch (emailErr) {
+          logger.warn("schedules/upload: failed to send change notifications", { error: String(emailErr) });
+        }
+      }
+    }
+
+    logger.info("schedules/upload: complete", { companyId, projectId: resolvedProjectId, ...result, version });
+
+    res.json({ ...result, version });
   });
 });
 
 // Export helpers for use by other modules (Procore sync, from-schedule)
-export { saveParsedTasks, extractTasksFromText, extractTasksFromPdfPage, updateProjectAlertCounts, generateTaskChain };
+export { saveParsedTasks, extractTasksFromText, extractTasksFromPdf, extractTasksFromPdfPage, updateProjectAlertCounts, generateTaskChain };
