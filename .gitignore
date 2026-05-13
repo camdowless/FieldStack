@@ -1,14 +1,39 @@
+# ─── Dependencies ────────────────────────────────────────────────────────────
 node_modules/
+
+# ─── Build output ─────────────────────────────────────────────────────────────
 dist/
-# Ignore compiled TypeScript output in functions, not source lib directories
 functions/lib/
+
+# ─── Environment / secrets ────────────────────────────────────────────────────
 .env
 .env.local
+.env.*.local
+# Project-specific env files (keep .env.example and .env.fieldstack-testing which are placeholders)
+functions/.env
+frontend/.env
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ─── Firebase ─────────────────────────────────────────────────────────────────
 .firebase/
-
-# Firebase emulator exports — only keep the fixed emulator-data directory
-firebase-export-*/
-
-# Ignore emulator data from version control (contains local dev data only)
+# Emulator exports — contain real user accounts and Firestore data
 emulator-data/
+firebase-export-*/
+.firebaserc.local
+
+# ─── OS / editor ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/settings.json
+.idea/
+
+# ─── Misc ─────────────────────────────────────────────────────────────────────
+*.pem
+*.key
+*.p12
+*.pfx
