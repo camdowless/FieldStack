@@ -30,6 +30,7 @@ export const COLLECTIONS = {
   leadTimeSettings: (companyId: string) => `companies/${companyId}/leadTimeSettings`,
   chatMessages: (companyId: string) => `companies/${companyId}/chatMessages`,
   gmailConnection: (companyId: string) => `companies/${companyId}/gmailConnection`,
+  documents: (companyId: string) => `companies/${companyId}/documents`,
 } as const;
 
 export type ProjectStatus = "ACTIVE" | "ON_HOLD" | "COMPLETE";

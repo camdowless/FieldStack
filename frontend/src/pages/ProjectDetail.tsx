@@ -7,6 +7,7 @@ import { useState, useRef } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useProjectData } from "@/hooks/useProjectData";
 import { useTeam } from "@/hooks/useTeam";
+import { useScheduleJobs } from "@/contexts/ScheduleJobContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -25,7 +26,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { apiUpdateProject, apiDeleteProject, apiUploadSchedule, apiSendAlerts } from "@/lib/fieldstackApi";
+import { apiUpdateProject, apiDeleteProject, apiSendAlerts } from "@/lib/fieldstackApi";
 import { alertColor, alertVariant } from "@/lib/alerts";
 import type { Alert, Task, OrderItem, ScheduleChange, TaskStep, FeedEntry } from "@/types/fieldstack";
 import { ITEM_TYPE_LABELS, ORDER_STATUS_LABELS, STEP_TYPE_LABELS, FEED_TYPE_LABELS } from "@/types/fieldstack";
@@ -37,8 +38,9 @@ import { OrdersTab } from "@/components/fieldstack/tabs/OrdersTab";
 import { UploadTab } from "@/components/fieldstack/tabs/UploadTab";
 import { ChangesTab } from "@/components/fieldstack/tabs/ChangesTab";
 import { ProjectSettingsTab } from "@/components/fieldstack/tabs/ProjectSettingsTab";
+import { DocumentsTab } from "@/components/fieldstack/tabs/DocumentsTab";
 
-const TABS = ["Overview", "Feed", "Workflow", "Timeline", "Orders", "Upload", "Changes", "Settings"] as const;
+const TABS = ["Overview", "Feed", "Workflow", "Timeline", "Orders", "Upload", "Documents", "Changes", "Settings"] as const;
 type Tab = typeof TABS[number];
 
 function fmt(ts: Timestamp | undefined | null) {
@@ -51,37 +53,23 @@ export default function ProjectDetail() {
   const navigate = useNavigate();
   const { project, tasks, orderItems, changes, steps, feed, alerts, loading, ourTasks, criticalAlerts, warningAlerts } = useProjectData(id);
   const { team } = useTeam();
+  const { startJob, isAnalyzing, jobs, dismissJob } = useScheduleJobs();
   const [tab, setTab] = useState<Tab>("Overview");
   const [showDelete, setShowDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [pageDragOver, setPageDragOver] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [uploadResult, setUploadResult] = useState<{ tasksCreated: number; orderItemsCreated: number; version: number } | null>(null);
-  const [uploadError, setUploadError] = useState("");
   const dragCounter = useRef(0);
 
+  // Derive upload state from the global job context
+  const job = id ? jobs[id] : undefined;
+  const uploading = !!job && job.status === "running";
+  const uploadResult = job?.status === "done" ? (job.result ?? null) : null;
+  const uploadError = job?.status === "error" ? (job.error ?? "") : "";
+
   async function handleFileDrop(f: File) {
-    if (!id) return;
-    const validExts = [".pdf", ".xlsx", ".xls", ".txt", ".csv"];
-    if (!validExts.some((ext) => f.name.toLowerCase().endsWith(ext))) {
-      toast.error("Unsupported file type. Use PDF, XLSX, or plain text.");
-      return;
-    }
-    setUploading(true);
-    setUploadError("");
-    setUploadResult(null);
-    try {
-      const data = await apiUploadSchedule(id, f);
-      setUploadResult(data);
-      toast.success(`Schedule parsed: ${data.tasksCreated} tasks, ${data.orderItemsCreated} orders`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Upload failed";
-      setUploadError(msg);
-      toast.error(msg);
-    } finally {
-      setUploading(false);
-    }
+    if (!id || !project) return;
+    await startJob(id, project.name, f);
   }
 
   function onPageDragEnter(e: React.DragEvent) {
@@ -176,42 +164,7 @@ export default function ProjectDetail() {
         </div>
       )}
 
-      {/* Upload toast */}
-      {(uploading || uploadResult || uploadError) && (
-        <div className="fixed bottom-6 right-6 z-40 min-w-72 max-w-sm bg-card border rounded-xl p-4 shadow-xl">
-          {uploading && (
-            <div className="flex items-center gap-3">
-              <Loader2 className="h-4 w-4 animate-spin text-primary" />
-              <div>
-                <div className="text-sm font-medium">Parsing schedule with AI...</div>
-                <div className="text-xs text-muted-foreground mt-0.5 font-mono">Using vision to read document layout</div>
-              </div>
-            </div>
-          )}
-          {uploadResult && !uploading && (
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-medium text-emerald-600">✓ Schedule parsed</span>
-                <button onClick={() => setUploadResult(null)} className="text-muted-foreground hover:text-foreground text-lg leading-none">&times;</button>
-              </div>
-              <div className="text-xs font-mono text-muted-foreground flex gap-4">
-                <span>{uploadResult.tasksCreated} tasks</span>
-                <span>{uploadResult.orderItemsCreated} orders</span>
-                <span>v{uploadResult.version}</span>
-              </div>
-            </div>
-          )}
-          {uploadError && !uploading && (
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-medium text-destructive">Upload failed</span>
-                <button onClick={() => setUploadError("")} className="text-muted-foreground hover:text-foreground text-lg leading-none">&times;</button>
-              </div>
-              <div className="text-xs text-muted-foreground">{uploadError}</div>
-            </div>
-          )}
-        </div>
-      )}
+      {/* Upload toast is rendered globally by ScheduleJobToast in App.tsx */}
 
       {/* Header */}
       <motion.div initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} className="mb-5">
@@ -223,7 +176,9 @@ export default function ProjectDetail() {
         </button>
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-xl font-bold tracking-tight">{project.name}</h1>
+            <h1 className="text-xl font-bold tracking-tight">
+              {project.name}
+            </h1>
             <p className="text-xs text-muted-foreground font-mono mt-1">
               {project.address} · GC: {project.gcName}
               {project.gcContact ? ` · ${project.gcContact}` : ""}
@@ -293,11 +248,22 @@ export default function ProjectDetail() {
         </TabsContent>
 
         <TabsContent value="Upload">
-          <UploadTab projectId={id!} onUploaded={() => setTab("Overview")} />
+          <UploadTab
+            onFile={handleFileDrop}
+            uploading={uploading}
+            result={uploadResult}
+            error={uploadError}
+            onClearResult={() => id && dismissJob(id)}
+            onClearError={() => id && dismissJob(id)}
+          />
         </TabsContent>
 
         <TabsContent value="Changes">
           <ChangesTab changes={changes} />
+        </TabsContent>
+
+        <TabsContent value="Documents">
+          <DocumentsTab projectId={id!} />
         </TabsContent>
 
         <TabsContent value="Settings">

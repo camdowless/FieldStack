@@ -8,7 +8,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import cors from "cors";
 import { verifyCompanyMember, replyUnauthorized, replyBadRequest, replyNotFound } from "./middleware";
 import { COLLECTIONS } from "./types";
-import { sanitizeString } from "../validation";
+import { sanitizeString, sanitizeUrl } from "../validation";
 import { logger } from "../logger";
 
 const db = admin.firestore();
@@ -100,6 +100,10 @@ export const projectsApi = functions.https.onRequest((req, res) => {
         if (req.body?.[key] !== undefined) {
           updates[key] = typeof req.body[key] === "string" ? sanitizeString(req.body[key]) : req.body[key];
         }
+      }
+      // gcProjectUrl gets URL-specific validation — invalid/empty values are cleared to null
+      if (req.body?.gcProjectUrl !== undefined) {
+        updates["gcProjectUrl"] = sanitizeUrl(req.body.gcProjectUrl);
       }
       await projectRef.update(updates);
       res.json({ success: true }); return;

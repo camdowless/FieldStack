@@ -55,13 +55,14 @@ export interface CreateMessageParams {
   system?: string;
   messages: AnthropicMessage[];
   tools?: object[];
+  tool_choice?: { type: "auto" | "any" | "tool"; name?: string };
 }
 
 export interface AnthropicResponse {
   id: string;
   type: string;
   role: string;
-  content: Array<{ type: string; text?: string; id?: string; name?: string; input?: object }>;
+  content: Array<{ type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }>;
   model: string;
   stop_reason: string;
   usage: {
@@ -93,6 +94,7 @@ export async function createMessage(params: CreateMessageParams): Promise<Anthro
   };
   if (messageParams.system) body.system = messageParams.system;
   if (messageParams.tools) body.tools = messageParams.tools;
+  if (messageParams.tool_choice) body.tool_choice = messageParams.tool_choice;
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), ANTHROPIC_TIMEOUT_MS);

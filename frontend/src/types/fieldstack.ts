@@ -78,6 +78,24 @@ export interface Project {
   alertCounts?: { critical: number; warning: number };
 }
 
+// ─── Document ─────────────────────────────────────────────────────────────────
+
+export interface ProjectDocument {
+  id: string;
+  companyId: string;
+  projectId: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  storagePath: string;
+  downloadUrl: string;
+  downloadUrlExpiresAt: Timestamp;
+  description?: string | null;
+  uploadedBy: string;
+  uploadedAt: Timestamp;
+  createdAt: Timestamp;
+}
+
 // ─── ScheduleUpload ───────────────────────────────────────────────────────────
 
 export interface ScheduleUpload {

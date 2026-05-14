@@ -14,6 +14,7 @@ import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/contexts/AuthContext";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useProjects } from "@/hooks/useProjects";
+import { useScheduleJobs } from "@/contexts/ScheduleJobContext";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
@@ -54,6 +55,7 @@ export function AppSidebar({ onOpenChat }: { onOpenChat?: () => void }) {
   const { logout, user, role, profile } = useAuth();
   const { company } = useCompany();
   const { projects } = useProjects();
+  const { isAnalyzing } = useScheduleJobs();
   const location = useLocation();
   const displayName = profile?.displayName ?? user?.displayName ?? user?.email?.split("@")[0] ?? "User";
 
@@ -158,10 +160,14 @@ export function AppSidebar({ onOpenChat }: { onOpenChat?: () => void }) {
                           className={`flex items-center justify-between gap-2 hover:bg-muted/50 rounded-md px-2 py-1.5 ${isActive ? "bg-muted text-primary font-medium" : ""}`}
                         >
                           <div className="flex items-center gap-2 min-w-0">
-                            <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${hasCritical ? "bg-red-500" : hasWarning ? "bg-yellow-500" : "bg-emerald-500"}`} />
+                            {isAnalyzing(p.id) ? (
+                              <div className="w-1.5 h-1.5 rounded-full shrink-0 bg-primary animate-pulse" />
+                            ) : (
+                              <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${hasCritical ? "bg-red-500" : hasWarning ? "bg-yellow-500" : "bg-emerald-500"}`} />
+                            )}
                             <span className="text-xs truncate">{p.name}</span>
                           </div>
-                          {hasCritical && (
+                          {!isAnalyzing(p.id) && hasCritical && (
                             <span className="text-[9px] bg-destructive text-destructive-foreground px-1 rounded-full shrink-0">
                               {p.alertCounts!.critical}
                             </span>

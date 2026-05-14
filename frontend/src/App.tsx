@@ -6,6 +6,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { CompanyProvider, useCompany } from "@/contexts/CompanyContext";
+import { ScheduleJobProvider } from "@/contexts/ScheduleJobContext";
+import { ScheduleJobToast } from "@/components/fieldstack/ScheduleJobToast";
 import { AppLayout } from "@/components/AppLayout";
 import { VerifyEmailScreen } from "@/components/VerifyEmailScreen";
 import { ProfileSetupScreen } from "@/components/ProfileSetupScreen";
@@ -97,7 +99,10 @@ function AuthGate() {
 
   return (
     <CompanyProvider>
-      <AppRoutes />
+      <ScheduleJobProvider>
+        <AppRoutes />
+        <ScheduleJobToast />
+      </ScheduleJobProvider>
     </CompanyProvider>
   );
 }

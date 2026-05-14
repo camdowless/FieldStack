@@ -7,6 +7,7 @@ import { useState, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useProjects } from "@/hooks/useProjects";
 import { useCompany } from "@/contexts/CompanyContext";
+import { useScheduleJobs } from "@/contexts/ScheduleJobContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -43,6 +44,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const { company } = useCompany();
   const { projects, loading } = useProjects();
+  const { isAnalyzing } = useScheduleJobs();
   const [showNewProject, setShowNewProject] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const dragCounter = useRef(0);
@@ -186,7 +188,7 @@ export default function Dashboard() {
                 <Card className="hover:border-border/80 transition-colors cursor-pointer">
                   <CardContent className="flex items-center justify-between gap-4 py-4 px-5">
                     <div className="flex items-start gap-3 min-w-0">
-                      <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${alertDot(p)}`} />
+                      <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${isAnalyzing(p.id) ? "bg-primary animate-pulse" : alertDot(p)}`} />
                       <div className="min-w-0">
                         <div className="font-medium text-sm truncate">{p.name}</div>
                         <div className="text-xs text-muted-foreground font-mono mt-0.5 truncate">
@@ -195,7 +197,14 @@ export default function Dashboard() {
                       </div>
                     </div>
                     <div className="flex items-center gap-3 shrink-0">
-                      {statusBadge(p)}
+                      {isAnalyzing(p.id) ? (
+                        <Badge variant="outline" className="text-primary border-primary/40 gap-1.5">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          Analyzing
+                        </Badge>
+                      ) : (
+                        statusBadge(p)
+                      )}
                       <span className="text-xs text-muted-foreground font-mono hidden sm:block">
                         {p.status}
                       </span>

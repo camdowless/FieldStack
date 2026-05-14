@@ -167,6 +167,12 @@ service cloud.firestore {
         allow read: if isCompanyAdmin();
         allow write: if false;
       }
+
+      // Documents — members can read, writes are server-side only
+      match /documents/{docId} {
+        allow read: if isMember();
+        allow write: if false; // server-side only via documentsApi Cloud Function
+      }
     }
   }
 }

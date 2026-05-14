@@ -6,7 +6,7 @@
  * from this template. It will:
  *
  *   1. Ask for your project name, URLs, and email
- *   2. Replace all TEMPLATE_APP placeholders across the codebase
+ *   2. Replace all FieldStack placeholders across the codebase
  *   3. Generate a fresh .env file for the frontend
  *   4. Optionally reset git history to a clean first commit
  *
@@ -92,7 +92,7 @@ function section(title: string) { console.log(`\n${"─".repeat(60)}\n  ${title}
 
 async function main() {
   console.log("\n  Firebase SaaS Template - Project Initializer\n");
-  console.log("  This will replace all TEMPLATE_APP placeholders with your");
+  console.log("  This will replace all FieldStack placeholders with your");
   console.log("  project details. It only touches text files - no destructive ops.\n");
 
   // ── Gather inputs ──────────────────────────────────────────────────────────
@@ -125,7 +125,7 @@ async function main() {
   const hostname = new URL(appUrl).hostname;
 
   const replacements: Array<[string | RegExp, string]> = [
-    ["TEMPLATE_APP", appName],
+    ["FieldStack", appName],
     ["YOUR_PROJECT_ID", firebaseProjectId],
     ["YOUR_DEV_PROJECT_ID", firebaseDevProjectId],
     ["your-project-id", firebaseProjectId],

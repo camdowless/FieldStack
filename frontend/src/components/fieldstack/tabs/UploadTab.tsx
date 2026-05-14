@@ -1,48 +1,44 @@
 /**
  * UploadTab — drag-and-drop schedule upload with smart parsing.
+ *
+ * Upload state is lifted to the parent (ProjectDetail) so it persists
+ * when the user switches away from this tab mid-upload.
  */
 
-import { useState, useRef } from "react";
+import { useRef } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Upload, FileText, CheckCircle2, AlertCircle } from "lucide-react";
-import { toast } from "sonner";
-import { apiUploadSchedule } from "@/lib/fieldstackApi";
+import { useState } from "react";
 
-interface Props {
-  projectId: string;
-  onUploaded: () => void;
+interface UploadResult {
+  tasksCreated: number;
+  orderItemsCreated: number;
+  version: number;
+  changesDetected: number;
 }
 
-export function UploadTab({ projectId, onUploaded }: Props) {
+interface Props {
+  /** Called when a file is picked — parent owns the upload lifecycle */
+  onFile: (f: File) => void;
+  uploading: boolean;
+  result: UploadResult | null;
+  error: string;
+  onClearResult: () => void;
+  onClearError: () => void;
+}
+
+export function UploadTab({ onFile, uploading, result, error, onClearResult, onClearError }: Props) {
   const [dragOver, setDragOver] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [result, setResult] = useState<{ tasksCreated: number; orderItemsCreated: number; version: number; changesDetected: number } | null>(null);
-  const [error, setError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dragCounter = useRef(0);
 
-  async function handleFile(f: File) {
+  function handleFile(f: File) {
     const validExts = [".pdf", ".xlsx", ".xls", ".txt", ".csv"];
     if (!validExts.some((ext) => f.name.toLowerCase().endsWith(ext))) {
-      setError("Unsupported file type. Use PDF, XLSX, or plain text.");
-      return;
+      return; // parent will handle validation too, but guard here for UX
     }
-    setUploading(true);
-    setError("");
-    setResult(null);
-    try {
-      const data = await apiUploadSchedule(projectId, f);
-      setResult(data);
-      toast.success("Schedule parsed successfully!");
-      setTimeout(() => onUploaded(), 1500);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Upload failed";
-      setError(msg);
-      toast.error(msg);
-    } finally {
-      setUploading(false);
-    }
+    onFile(f);
   }
 
   function onDragEnter(e: React.DragEvent) {
@@ -117,6 +113,12 @@ export function UploadTab({ projectId, onUploaded }: Props) {
                   <span>v{result.version}</span>
                   {result.changesDetected > 0 && <span className="text-yellow-500">{result.changesDetected} changes</span>}
                 </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onClearResult(); }}
+                  className="mt-3 text-xs text-muted-foreground hover:text-foreground underline"
+                >
+                  Upload another
+                </button>
               </div>
             </div>
           ) : (
@@ -137,9 +139,12 @@ export function UploadTab({ projectId, onUploaded }: Props) {
 
       {error && (
         <Card className="border-destructive/30 bg-destructive/5">
-          <CardContent className="flex items-center gap-2 py-3 px-4">
-            <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
-            <span className="text-sm text-destructive">{error}</span>
+          <CardContent className="flex items-center justify-between gap-2 py-3 px-4">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 text-destructive shrink-0" />
+              <span className="text-sm text-destructive">{error}</span>
+            </div>
+            <button onClick={onClearError} className="text-muted-foreground hover:text-foreground text-lg leading-none shrink-0">&times;</button>
           </CardContent>
         </Card>
       )}

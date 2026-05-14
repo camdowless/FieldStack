@@ -9,7 +9,7 @@
  */
 
 export const config = {
-  appName: import.meta.env.VITE_APP_NAME ?? "TEMPLATE_APP",
+  appName: import.meta.env.VITE_APP_NAME ?? "FieldStack",
   appUrl: import.meta.env.VITE_APP_URL ?? "http://localhost:5173",
   supportEmail: import.meta.env.VITE_SUPPORT_EMAIL ?? "support@example.com",
 

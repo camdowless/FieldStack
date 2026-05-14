@@ -1,6 +1,6 @@
-# TEMPLATE_APP – Firebase Auth Email Templates
+# FieldStack – Firebase Auth Email Templates
 
-Three templates matching the TEMPLATE_APP brand (blue gradient, Inter font, clean card layout).
+Three templates matching the FieldStack brand (blue gradient, Inter font, clean card layout).
 
 ## Files
 
@@ -25,9 +25,9 @@ Three templates matching the TEMPLATE_APP brand (blue gradient, Inter font, clea
 
 | Template | Subject |
 |----------|---------|
-| Email verification | `Verify your email – TEMPLATE_APP` |
-| Password reset | `Reset your TEMPLATE_APP password` |
-| MFA / sign-in code | `Your TEMPLATE_APP sign-in code` |
+| Email verification | `Verify your email – FieldStack` |
+| Password reset | `Reset your FieldStack password` |
+| MFA / sign-in code | `Your FieldStack sign-in code` |
 
 ## Template variables
 

@@ -1,6 +1,6 @@
 # Production Environment Setup
 
-Complete checklist for deploying TEMPLATE_APP to a production Firebase project with CI/CD, backups, and all third-party services configured.
+Complete checklist for deploying FieldStack to a production Firebase project with CI/CD, backups, and all third-party services configured.
 
 ---
 

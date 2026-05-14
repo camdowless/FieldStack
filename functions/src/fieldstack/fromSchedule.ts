@@ -88,6 +88,50 @@ Return ONLY valid JSON — no prose, no markdown fences, no explanation — matc
   ]
 }`;
 
+// ─── Tool definition (enforces schema via Anthropic tool use) ─────────────────
+
+const EXTRACT_SCHEDULE_TOOL = {
+  name: "extract_schedule",
+  description: "Extract project metadata and all tasks from a construction schedule document.",
+  input_schema: {
+    type: "object",
+    required: ["project", "tasks"],
+    additionalProperties: false,
+    properties: {
+      project: {
+        type: "object",
+        required: ["projectName", "address", "gcName"],
+        additionalProperties: false,
+        properties: {
+          projectName: { type: "string", description: "Full project name as it appears on the schedule." },
+          address: { type: "string", description: "Project site address. Empty string if not found." },
+          gcName: { type: "string", description: "General contractor company name." },
+          gcContact: { type: ["string", "null"], description: "Superintendent or primary contact name. Null if not found." },
+        },
+      },
+      tasks: {
+        type: "array",
+        description: "Every task on every page. No trade skipped.",
+        items: {
+          type: "object",
+          required: ["taskName", "startDate", "isOurTask"],
+          additionalProperties: false,
+          properties: {
+            taskIdOriginal: { type: ["string", "null"] },
+            taskName: { type: "string" },
+            building: { type: ["string", "null"] },
+            floor: { type: ["string", "null"] },
+            startDate: { type: "string", description: "YYYY-MM-DD. Required — use best estimate if not clearly shown." },
+            endDate: { type: ["string", "null"], description: "YYYY-MM-DD or null." },
+            assignedResource: { type: ["string", "null"] },
+            isOurTask: { type: "boolean", description: "True ONLY for cabinets, countertops, or backsplash tasks (CKF, BAM, or explicitly mentioned)." },
+          },
+        },
+      },
+    },
+  },
+};
+
 async function extractSchedule(
   input: string | { base64: string },
   companyId: string
@@ -103,13 +147,13 @@ async function extractSchedule(
         },
         {
           type: "text",
-          text: "Extract the project metadata and ALL tasks from every page of this construction schedule. Return the combined JSON object.",
+          text: "Extract the project metadata and ALL tasks from every page of this construction schedule.",
         },
       ]
     : [
         {
           type: "text",
-          text: `Extract the project metadata and ALL tasks from this construction schedule. Return the combined JSON object.\n\n${input as string}`,
+          text: `Extract the project metadata and ALL tasks from this construction schedule.\n\n${input as string}`,
         },
       ];
 
@@ -117,36 +161,43 @@ async function extractSchedule(
     companyId,
     action: "extract_schedule",
     model: "claude-haiku-4-5-20251001",
-    max_tokens: 8192,
+    max_tokens: 32000,
     system: COMBINED_SYSTEM_PROMPT,
     messages: [{ role: "user", content: userContent as object[] }],
+    tools: [EXTRACT_SCHEDULE_TOOL],
+    tool_choice: { type: "tool", name: "extract_schedule" },
   });
 
-  const text = message.content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("");
-  const cleaned = text.replace(/```json|```/g, "").trim();
+  // With tool_choice forced, Claude must return a tool_use block — no JSON parsing needed.
+  const toolBlock = message.content.find((b) => b.type === "tool_use" && b.name === "extract_schedule");
 
-  try {
-    const parsed = JSON.parse(cleaned) as ScheduleExtraction;
-    const result = {
-      project: parsed.project ?? { projectName: "New Project", address: "", gcName: "Unknown GC" },
-      tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
-    };
-    logger.info("from-schedule: parsed output sample", {
-      outputTokens: message.usage?.output_tokens,
-      taskCount: result.tasks.length,
-      firstTask: result.tasks[0] ?? null,
-      lastTask: result.tasks[result.tasks.length - 1] ?? null,
-      rawLength: cleaned.length,
-      project: result.project,
+  if (!toolBlock || !toolBlock.input) {
+    logger.warn("from-schedule: no tool_use block in response", {
+      stopReason: message.stop_reason,
+      contentTypes: message.content.map((b) => b.type),
     });
-    return result;
-  } catch {
-    logger.warn("from-schedule: failed to parse combined JSON", { preview: cleaned.slice(0, 300) });
     return {
       project: { projectName: "New Project", address: "", gcName: "Unknown GC" },
       tasks: [],
     };
   }
+
+  const result = toolBlock.input as unknown as ScheduleExtraction;
+
+  logger.info("from-schedule: extraction complete", {
+    outputTokens: message.usage?.output_tokens,
+    taskCount: result.tasks?.length ?? 0,
+    project: result.project,
+  });
+
+  // ── DEBUG: log raw tool input ──────────────────────────────────────────
+  console.log("from-schedule tool input:\n", JSON.stringify(toolBlock.input, null, 2));
+  // ── END DEBUG ──────────────────────────────────────────────────────────
+
+  return {
+    project: result.project ?? { projectName: "New Project", address: "", gcName: "Unknown GC" },
+    tasks: Array.isArray(result.tasks) ? result.tasks : [],
+  };
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

@@ -121,12 +121,44 @@ interface ParsedTask {
   isOurTask: boolean;
 }
 
+// ─── Tool definition (enforces schema via Anthropic tool use) ─────────────────
+
+const EXTRACT_TASKS_TOOL = {
+  name: "extract_tasks",
+  description: "Extract all tasks from a construction schedule page or document.",
+  input_schema: {
+    type: "object",
+    required: ["tasks"],
+    additionalProperties: false,
+    properties: {
+      tasks: {
+        type: "array",
+        description: "Every task found. No trade skipped.",
+        items: {
+          type: "object",
+          required: ["taskName", "startDate", "isOurTask"],
+          additionalProperties: false,
+          properties: {
+            taskIdOriginal: { type: ["string", "null"] },
+            taskName: { type: "string" },
+            building: { type: ["string", "null"] },
+            floor: { type: ["string", "null"] },
+            startDate: { type: "string", description: "YYYY-MM-DD. Required — use best estimate if not clearly shown." },
+            endDate: { type: ["string", "null"], description: "YYYY-MM-DD or null." },
+            assignedResource: { type: ["string", "null"] },
+            isOurTask: { type: "boolean", description: "True ONLY for cabinets, countertops, or backsplash tasks (CKF, BAM, or explicitly mentioned)." },
+          },
+        },
+      },
+    },
+  },
+};
+
 // ─── Claude extraction ────────────────────────────────────────────────────────
 
 /**
  * Send the entire PDF in one Claude call.
- * Claude supports up to 100 pages per request on Sonnet (200k context window).
- * This replaces the old page-count + per-page loop — 1 call instead of N+1.
+ * Uses tool use to enforce the output schema — no JSON parsing, no schema drift.
  */
 async function extractTasksFromPdf(
   base64Pdf: string,
@@ -136,7 +168,7 @@ async function extractTasksFromPdf(
     companyId,
     action: "parse_schedule_pdf",
     model: "claude-haiku-4-5-20251001",
-    max_tokens: 8192,
+    max_tokens: 32000,
     system: SYSTEM_PROMPT,
     messages: [
       {
@@ -149,29 +181,45 @@ async function extractTasksFromPdf(
           },
           {
             type: "text",
-            text: "Extract ALL tasks from every page of this construction schedule. Return the complete JSON array.",
+            text: "Extract ALL tasks from every page of this construction schedule.",
           },
         ] as object[],
       },
     ],
+    tools: [EXTRACT_TASKS_TOOL],
+    tool_choice: { type: "tool", name: "extract_tasks" },
   });
 
-  const text = message.content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("");
-  const cleaned = text.replace(/```json|```/g, "").trim();
-  try {
-    const tasks = JSON.parse(cleaned) as ParsedTask[];
-    logger.info("[parser] PDF: parsed output sample", {
+  const toolBlock = message.content.find((b) => b.type === "tool_use" && b.name === "extract_tasks");
+
+  if (message.stop_reason === "max_tokens") {
+    logger.error("[parser] PDF: hit max_tokens limit — output was truncated, tasks will be incomplete. Increase max_tokens.", {
       outputTokens: message.usage?.output_tokens,
-      taskCount: tasks.length,
-      firstTask: tasks[0] ?? null,
-      lastTask: tasks[tasks.length - 1] ?? null,
-      rawLength: cleaned.length,
     });
-    return tasks;
-  } catch {
-    logger.warn("[parser] PDF: invalid JSON from full-document parse", { preview: cleaned.slice(0, 200) });
+  }
+
+  if (!toolBlock?.input) {
+    logger.warn("[parser] PDF: no tool_use block in response", {
+      stopReason: message.stop_reason,
+      contentTypes: message.content.map((b) => b.type),
+    });
     return [];
   }
+
+  const tasks = (toolBlock.input as { tasks: ParsedTask[] }).tasks ?? [];
+
+  logger.info("[parser] PDF: extraction complete", {
+    outputTokens: message.usage?.output_tokens,
+    taskCount: tasks.length,
+    firstTask: tasks[0] ?? null,
+    lastTask: tasks[tasks.length - 1] ?? null,
+  });
+
+  // ── DEBUG: log raw tool input ──────────────────────────────────────────
+  console.log("schedules/upload tool input:\n", JSON.stringify(toolBlock.input, null, 2));
+  // ── END DEBUG ──────────────────────────────────────────────────────────
+
+  return tasks;
 }
 
 // Keep the old per-page function exported for Procore sync (text-based, not PDF)
@@ -235,17 +283,19 @@ async function extractTasksFromText(rawText: string, companyId: string): Promise
       companyId,
       action: "parse_schedule_text",
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 8192,
+      max_tokens: 32000,
       system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: `Parse this construction schedule and return the JSON array:\n\n${chunk}` }],
+      messages: [{ role: "user", content: `Parse this construction schedule:\n\n${chunk}` }],
+      tools: [EXTRACT_TASKS_TOOL],
+      tool_choice: { type: "tool", name: "extract_tasks" },
     });
 
-    const text = message.content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("");
-    const cleaned = text.replace(/```json|```/g, "").trim();
-    try {
-      allTasks.push(...JSON.parse(cleaned));
-    } catch {
-      logger.warn("[parser] Invalid JSON from text chunk");
+    const toolBlock = message.content.find((b) => b.type === "tool_use" && b.name === "extract_tasks");
+    if (toolBlock?.input) {
+      const tasks = (toolBlock.input as { tasks: ParsedTask[] }).tasks ?? [];
+      allTasks.push(...tasks);
+    } else {
+      logger.warn("[parser] text chunk: no tool_use block in response");
     }
   }
 

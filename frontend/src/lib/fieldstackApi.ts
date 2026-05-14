@@ -48,6 +48,7 @@ const FUNCTION_PATHS: Record<string, string> = {
   fromScheduleApi:        "/api/projects/from-schedule",
   itemsApi:               "/api/items",
   submitSupportTicket:    "/api/support",
+  documentsApi:           "/api/documents",
   getAdminStats:          "/api/admin-stats",
   createCheckoutSession:  "/api/createCheckoutSession",
   createPortalSession:    "/api/createPortalSession",
@@ -120,7 +121,7 @@ export async function apiCreateProject(data: {
 
 export async function apiUpdateProject(
   id: string,
-  data: Partial<{ name: string; address: string; gcName: string; gcContact: string; gcEmail: string; status: string; gcPlatform: string; autoSyncEnabled: boolean }>
+  data: Partial<{ name: string; address: string; gcName: string; gcContact: string; gcEmail: string; status: string; gcPlatform: string; autoSyncEnabled: boolean; gcProjectUrl: string | null }>
 ): Promise<void> {
   return callFunction("projectsApi", `/${id}`, { method: "PATCH", body: JSON.stringify(data) });
 }
@@ -308,4 +309,50 @@ export async function apiSendSmsBriefing(phoneNumber: string): Promise<{ sent: b
 
 export async function apiGetMyTasks(): Promise<object[]> {
   return callFunction("myTasksApi");
+}
+
+// ─── Documents ────────────────────────────────────────────────────────────────
+
+export async function apiUploadDocument(
+  projectId: string,
+  file: File,
+  description?: string
+): Promise<{
+  id: string;
+  fileName: string;
+  fileSize: number;
+  mimeType: string;
+  storagePath: string;
+  downloadUrl: string;
+  description: string | null;
+}> {
+  const token = await getAuthToken();
+  const form = new FormData();
+  form.append("file", file);
+  form.append("projectId", projectId);
+  if (description) form.append("description", description);
+
+  const url = functionsBaseUrl
+    ? `${functionsBaseUrl}/documentsApi`
+    : "/api/documents";
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Upload failed" }));
+    throw new ApiError(err.error ?? "Upload failed", res.status);
+  }
+  return res.json();
+}
+
+export async function apiDeleteDocument(docId: string): Promise<void> {
+  return callFunction("documentsApi", `/${docId}`, { method: "DELETE" });
+}
+
+export async function apiRefreshDocumentUrl(docId: string): Promise<{ downloadUrl: string }> {
+  return callFunction("documentsApi", `/refresh/${docId}`);
 }

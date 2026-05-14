@@ -95,7 +95,7 @@ export function VerifyEmailScreen() {
             A
           </div>
           <span className="text-xl font-bold gradient-text">
-            TEMPLATE_APP
+            FieldStack
           </span>
         </div>
 

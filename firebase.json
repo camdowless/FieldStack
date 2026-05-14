@@ -3,6 +3,9 @@
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
   },
+  "storage": {
+    "rules": "storage.rules"
+  },
   "functions": {
     "source": "functions",
     "predeploy": ["cd functions && ./node_modules/.bin/tsc"]
@@ -11,6 +14,7 @@
     "auth": { "port": 9099 },
     "firestore": { "port": 8080 },
     "functions": { "port": 5001 },
+    "storage": { "port": 9199 },
     "hosting": { "port": 5002 },
     "ui": { "enabled": true, "port": 4000 },
     "singleProjectMode": true,
@@ -209,6 +213,14 @@
         {
           "source": "/api/projects/from-schedule",
           "function": "fromScheduleApi"
+        },
+        {
+          "source": "/api/documents/**",
+          "function": "documentsApi"
+        },
+        {
+          "source": "/api/documents",
+          "function": "documentsApi"
         },
         {
           "source": "**",

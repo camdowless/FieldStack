@@ -186,7 +186,7 @@ All brand strings are centralized in `frontend/src/lib/config.ts`:
 ```typescript
 import { config } from "@/lib/config";
 
-config.appName        // "TEMPLATE_APP" or VITE_APP_NAME
+config.appName        // "FieldStack" or VITE_APP_NAME
 config.appUrl         // Production URL
 config.supportEmail   // Support email
 config.brand.primaryColor  // HSL color string

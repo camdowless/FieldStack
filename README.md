@@ -76,7 +76,7 @@ See [QUICKSTART.md](QUICKSTART.md) for the full setup guide.
 The short version:
 
 ```bash
-# 1. Initialize the project (replaces all TEMPLATE_APP placeholders)
+# 1. Initialize the project (replaces all FieldStack placeholders)
 npx ts-node scripts/init-project.ts
 
 # 2. Install dependencies

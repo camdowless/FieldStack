@@ -1,5 +1,5 @@
 {
-  "name": "template-app-functions",
+  "name": "fieldstack-functions",
   "main": "lib/index.js",
   "scripts": {
     "build": "tsc",

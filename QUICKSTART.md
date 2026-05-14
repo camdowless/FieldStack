@@ -15,7 +15,7 @@ Get from zero to a running app in about 10 minutes.
 
 ## Step 1: Initialize the project
 
-Run the interactive initializer. It replaces all `TEMPLATE_APP` placeholders with your project details.
+Run the interactive initializer. It replaces all `FieldStack` placeholders with your project details.
 
 ```bash
 npx ts-node scripts/init-project.ts

@@ -1,0 +1,29 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Check if the requesting user is a member of the given company.
+    // Membership docs live at companyMembers/{companyId}_{uid} in Firestore.
+    function isCompanyMember(companyId) {
+      return isAuthenticated() &&
+        firestore.exists(
+          /databases/(default)/documents/companyMembers/$(companyId + "_" + request.auth.uid)
+        );
+    }
+
+    // ── Company documents ─────────────────────────────────────────────────
+    // Path: companies/{companyId}/documents/{projectId}/{docId}/{fileName}
+    //
+    // Reads are allowed for any company member.
+    // Writes (upload/delete) go through the Cloud Function (Admin SDK),
+    // so direct client writes are denied here.
+    match /companies/{companyId}/documents/{allPaths=**} {
+      allow read: if isCompanyMember(companyId);
+      allow write: if false; // server-side only via documentsApi Cloud Function
+    }
+  }
+}

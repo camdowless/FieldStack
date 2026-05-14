@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, ExternalLink, RefreshCw } from "lucide-react";
+import { Loader2, ExternalLink, RefreshCw, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { apiUpdateProject, apiSyncProcore, apiGetProcoreAuthUrl } from "@/lib/fieldstackApi";
 import type { Project } from "@/types/fieldstack";
@@ -33,11 +33,34 @@ export function ProjectSettingsTab({ project }: Props) {
   const [gcContact, setGcContact] = useState(project.gcContact ?? "");
   const [gcEmail, setGcEmail] = useState(project.gcEmail ?? "");
   const [gcPlatform, setGcPlatform] = useState(project.gcPlatform ?? "NONE");
+  const [gcProjectUrl, setGcProjectUrl] = useState(project.gcProjectUrl ?? "");
+  const [gcProjectUrlError, setGcProjectUrlError] = useState(false);
   const [autoSync, setAutoSync] = useState(project.autoSyncEnabled);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
   async function handleSave() {
+    // Validate URL — clear it if it's not a valid http/https URL
+    let resolvedUrl: string | null = null;
+    if (gcProjectUrl.trim()) {
+      try {
+        const parsed = new URL(gcProjectUrl.trim());
+        if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+          resolvedUrl = parsed.toString();
+          setGcProjectUrl(resolvedUrl);
+          setGcProjectUrlError(false);
+        } else {
+          setGcProjectUrl("");
+          setGcProjectUrlError(true);
+        }
+      } catch {
+        setGcProjectUrl("");
+        setGcProjectUrlError(true);
+      }
+    } else {
+      setGcProjectUrlError(false);
+    }
+
     setSaving(true);
     try {
       await apiUpdateProject(project.id, {
@@ -47,6 +70,7 @@ export function ProjectSettingsTab({ project }: Props) {
         gcContact: gcContact.trim() || undefined,
         gcEmail: gcEmail.trim() || undefined,
         gcPlatform: gcPlatform === "NONE" ? undefined : gcPlatform || undefined,
+        gcProjectUrl: resolvedUrl,
         autoSyncEnabled: autoSync,
       });
       toast.success("Project settings saved.");
@@ -122,6 +146,36 @@ export function ProjectSettingsTab({ project }: Props) {
               <Label htmlFor="ps-email">GC email</Label>
               <Input id="ps-email" type="email" value={gcEmail} onChange={(e) => setGcEmail(e.target.value)} placeholder="jsmith@gc.com" />
             </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="ps-url">GC project URL</Label>
+            <div className="flex gap-2">
+              <Input
+                id="ps-url"
+                type="url"
+                value={gcProjectUrl}
+                onChange={(e) => { setGcProjectUrl(e.target.value); setGcProjectUrlError(false); }}
+                placeholder="https://app.procore.com/projects/12345/schedule"
+                className={gcProjectUrlError ? "border-destructive focus-visible:ring-destructive" : ""}
+              />
+              {gcProjectUrl && !gcProjectUrlError && (
+                <a
+                  href={gcProjectUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center h-9 w-9 shrink-0 rounded-md border border-input bg-background hover:bg-accent hover:text-accent-foreground transition-colors"
+                  title="Open in browser"
+                >
+                  <ExternalLink className="h-4 w-4" />
+                </a>
+              )}
+            </div>
+            {gcProjectUrlError && (
+              <p className="flex items-center gap-1 text-xs text-destructive">
+                <AlertCircle className="h-3 w-3" />
+                Invalid URL — must start with http:// or https://. Field was cleared.
+              </p>
+            )}
           </div>
           <div className="flex justify-end">
             <Button onClick={handleSave} disabled={saving} size="sm">
